@@ -107,6 +107,12 @@ export async function runExtraction(
   ].join("");
 
   return new Promise<string>((resolve, reject) => {
+    // Guard against concurrent extractions
+    if (activeExtractionProc) {
+      reject(new Error("Extraction already in progress"));
+      return;
+    }
+
     const args = [
       "--model",
       config.extractionModel,
@@ -119,7 +125,6 @@ export async function runExtraction(
       "off",
       "--system-prompt",
       prompt,
-      "--",
       "-p",
       userMessage,
     ];

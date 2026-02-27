@@ -36,7 +36,6 @@ import {
   createTriggerState,
   shouldExtract,
   runExtraction,
-  killActiveExtraction,
 } from "./extraction.js";
 import { MindManager, type MindMeta } from "./minds.js";
 import { serializeConversation, convertToLlm } from "@mariozechner/pi-coding-agent";
@@ -82,10 +81,12 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_shutdown", async (_event, ctx) => {
     // If extraction is already in flight, wait for it
     if (activeExtractionPromise) {
-      const timeout = new Promise<void>((resolve) =>
-        setTimeout(resolve, config.shutdownExtractionTimeout),
-      );
+      let timeoutId: NodeJS.Timeout | null = null;
+      const timeout = new Promise<void>((resolve) => {
+        timeoutId = setTimeout(resolve, config.shutdownExtractionTimeout);
+      });
       await Promise.race([activeExtractionPromise, timeout]);
+      if (timeoutId) clearTimeout(timeoutId);
       return;
     }
 
@@ -104,6 +105,7 @@ export default function (pi: ExtensionAPI) {
     const targetStorage = storage;
 
     try {
+      triggerState.isRunning = true;
       const currentMemory = targetStorage.readMemory();
       const branch = ctx.sessionManager.getBranch();
       const messages = branch
@@ -118,6 +120,8 @@ export default function (pi: ExtensionAPI) {
       targetStorage.writeExtractionResult(result);
     } catch {
       // Best-effort — don't block exit on failure
+    } finally {
+      triggerState.isRunning = false;
     }
   });
 
@@ -497,6 +501,8 @@ export default function (pi: ExtensionAPI) {
   }
 
   function updateStatus(ctx: ExtensionContext): void {
+    if (!ctx.hasUI) return;
+
     const activeMind = mindManager?.getActiveMindName();
     if (activeMind) {
       ctx.ui.setStatus("memory", ctx.ui.theme.fg("dim", `mind:${activeMind}`));
