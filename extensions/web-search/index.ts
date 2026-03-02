@@ -1,3 +1,7 @@
+// @secret BRAVE_API_KEY "Brave Search API key"
+// @secret TAVILY_API_KEY "Tavily Search API key"
+// @secret SERPER_API_KEY "Serper/Google Search API key"
+
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";

@@ -1,3 +1,5 @@
+// @secret HF_TOKEN "HuggingFace token (gated model access for FLUX.1)"
+
 /**
  * diffuse — Local image generation via mflux (MLX-native diffusion on Apple Silicon)
  *

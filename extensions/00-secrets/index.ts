@@ -14,7 +14,7 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { execSync } from "child_process";
@@ -26,14 +26,70 @@ import { execSync } from "child_process";
 const SECRETS_DIR = join(homedir(), ".pi", "agent");
 const SECRETS_FILE = join(SECRETS_DIR, "secrets.json");
 
-/** Known secret names and their descriptions */
-const KNOWN_SECRETS: Record<string, string> = {
-  BRAVE_API_KEY: "Brave Search API key (web-search extension)",
-  TAVILY_API_KEY: "Tavily Search API key (web-search extension)",
-  SERPER_API_KEY: "Serper/Google Search API key (web-search extension)",
-  HF_TOKEN: "HuggingFace token (diffuse extension, gated model access)",
+/** Fallback secrets not tied to a specific extension */
+const BUILTIN_SECRETS: Record<string, string> = {
   ANTHROPIC_API_KEY: "Anthropic API key (offline-driver health check)",
 };
+
+/**
+ * Scan extension directories for // @secret annotations.
+ * Format: // @secret NAME "description"
+ */
+function scanSecretAnnotations(): Record<string, string> {
+  const secrets: Record<string, string> = { ...BUILTIN_SECRETS };
+  const pattern = /^\/\/\s*@secret\s+([A-Z_][A-Z0-9_]*)\s+"([^"]+)"/;
+
+  // Extension directories to scan
+  const extensionDirs = [
+    join(homedir(), ".pi", "agent", "extensions"),
+    join(homedir(), ".pi", "agent", "git"),  // pi-kit and other git packages
+  ];
+
+  // Also scan project-local extensions
+  try {
+    const cwd = process.cwd();
+    const projectDir = join(cwd, ".pi", "extensions");
+    if (existsSync(projectDir)) extensionDirs.push(projectDir);
+  } catch {}
+
+  function scanFile(filePath: string) {
+    try {
+      const content = readFileSync(filePath, "utf-8");
+      // Only scan the first 30 lines for annotations (they should be at the top)
+      const lines = content.split("\n").slice(0, 30);
+      for (const line of lines) {
+        const match = line.match(pattern);
+        if (match) {
+          secrets[match[1]] = match[2];
+        }
+      }
+    } catch {}
+  }
+
+  function walkDir(dir: string) {
+    if (!existsSync(dir)) return;
+    try {
+      const entries = readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = join(dir, entry.name);
+        if (entry.isFile() && (entry.name.endsWith(".ts") || entry.name.endsWith(".js"))) {
+          scanFile(fullPath);
+        } else if (entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules") {
+          walkDir(fullPath);
+        }
+      }
+    } catch {}
+  }
+
+  for (const dir of extensionDirs) {
+    walkDir(dir);
+  }
+
+  return secrets;
+}
+
+/** Discovered secrets — scanned once at load time */
+const KNOWN_SECRETS = scanSecretAnnotations();
 
 // ============================================================================
 // Recipe types
@@ -339,6 +395,29 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("secrets", {
     description: "Manage secret resolution recipes: list, configure <name>, rm <name>, test <name>",
+    getArgumentCompletions: (prefix: string) => {
+      const parts = prefix.split(/\s+/);
+      if (parts.length <= 1) {
+        // Complete subcommand
+        const subs = ["list", "configure", "rm", "test"];
+        const filtered = subs.filter(s => s.startsWith(parts[0] || ""));
+        return filtered.length > 0 ? filtered.map(s => ({ value: s, label: s })) : null;
+      }
+      const sub = parts[0];
+      if (sub === "configure" || sub === "rm" || sub === "test") {
+        // Complete secret name
+        const namePrefix = parts.slice(1).join(" ");
+        const allNames = [
+          ...Object.keys(KNOWN_SECRETS),
+          ...Object.keys(recipes).filter(k => !(k in KNOWN_SECRETS)),
+        ];
+        const filtered = allNames.filter(n => n.startsWith(namePrefix));
+        return filtered.length > 0
+          ? filtered.map(n => ({ value: `${sub} ${n}`, label: `${n}  ${KNOWN_SECRETS[n] || "custom"}` }))
+          : null;
+      }
+      return null;
+    },
     handler: async (args, ctx) => {
       const parts = (args || "").trim().split(/\s+/);
       const subcommand = parts[0] || "list";
