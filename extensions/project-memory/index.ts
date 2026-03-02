@@ -161,17 +161,14 @@ export default function (pi: ExtensionAPI) {
     // pipe listeners corrupt terminal state (ANSI escape sequences leak to stdout).
     killActiveExtraction();
 
-    // Wait briefly for the extraction promise to settle after kill
+    // Wait for the extraction promise to fully settle after kill.
+    // Must not close DB until the promise resolves/rejects — otherwise the
+    // close event handler or processExtraction() hits a closed DB.
     if (activeExtractionPromise) {
       if (ctx.hasUI) {
         ctx.ui.setStatus("memory", ctx.ui.theme.fg("dim", "saving memory…"));
       }
-      let timeoutId: NodeJS.Timeout | null = null;
-      const timeout = new Promise<void>((resolve) => {
-        timeoutId = setTimeout(resolve, 2_000);
-      });
-      await Promise.race([activeExtractionPromise, timeout]);
-      if (timeoutId) clearTimeout(timeoutId);
+      try { await activeExtractionPromise; } catch { /* expected after kill */ }
     }
 
     // Auto-export: write facts.jsonl for cross-machine sync via git
@@ -1131,11 +1128,10 @@ export default function (pi: ExtensionAPI) {
           triggerState.isRunning = false;
         }
       } else {
-        // Wait for in-flight extraction
+        // Wait for in-flight extraction to fully settle
         if (activeExtractionPromise) {
           ctx.ui.notify("Waiting for in-flight extraction…", "info");
-          const timeout = new Promise<void>(r => setTimeout(r, 5_000));
-          await Promise.race([activeExtractionPromise, timeout]);
+          try { await activeExtractionPromise; } catch { /* killed or failed */ }
         }
       }
 
