@@ -6,6 +6,7 @@
   "author": "",
   "license": "ISC",
   "pi": {
+    "extensions": ["./extensions"],
     "skills": ["./skills"],
     "prompts": ["./prompts"]
   },
