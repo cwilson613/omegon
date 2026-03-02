@@ -46,9 +46,13 @@ const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
 // Extension
 // ---------------------------------------------------------------------------
 
-export default function (pi: ExtensionAPI) {
+export default async function (pi: ExtensionAPI) {
   const servers: Record<string, ConnectedServer> = {};
   const configPath = path.join(import.meta.dirname, "mcp.json");
+
+  // Track connection outcomes for session_start notification
+  const connectionErrors: Array<{ name: string; message: string }> = [];
+  let totalTools = 0;
 
   // In-flight reconnect promises, keyed by server name. Prevents concurrent
   // reconnect attempts from racing and leaking duplicate connections.
@@ -289,37 +293,30 @@ export default function (pi: ExtensionAPI) {
     return count;
   }
 
-  // ── Lifecycle ──────────────────────────────────────────────────────────
+  // ── Connect and register tools during factory (before tool snapshot) ───
 
-  pi.on("session_start", async (_event, ctx) => {
-    if (!fs.existsSync(configPath)) {
-      ctx.ui.notify("[mcp-bridge] No mcp.json found", "warning");
-      return;
-    }
-
+  if (fs.existsSync(configPath)) {
     const config: McpConfig = JSON.parse(
       fs.readFileSync(configPath, "utf-8")
     );
 
-    // Connect all servers in parallel with independent timeouts
     const entries = Object.entries(config.servers);
     const results = await Promise.allSettled(
       entries.map(([name, serverConfig]) => connectServer(name, serverConfig))
     );
 
-    let totalTools = 0;
     for (let i = 0; i < entries.length; i++) {
       const [name] = entries[i];
       const result = results[i];
 
       if (result.status === "rejected") {
         const reason = result.reason;
-        ctx.ui.notify(
-          isAuthError(reason)
-            ? `[mcp-bridge] ${name}: authentication failed.\n${AUTH_REMEDIATION}`
-            : `[mcp-bridge] Failed: ${name} — ${reason?.message ?? reason}`,
-          "error"
-        );
+        connectionErrors.push({
+          name,
+          message: isAuthError(reason)
+            ? `authentication failed.\n${AUTH_REMEDIATION}`
+            : reason?.message ?? String(reason),
+        });
         continue;
       }
 
@@ -327,12 +324,23 @@ export default function (pi: ExtensionAPI) {
       servers[name] = connected;
       totalTools += registerToolsForServer(connected);
     }
+  }
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────
+
+  pi.on("session_start", async (_event, ctx) => {
+    // Report connection outcomes (connections already established in factory)
+    for (const err of connectionErrors) {
+      ctx.ui.notify(`[mcp-bridge] ${err.name}: ${err.message}`, "error");
+    }
 
     if (totalTools > 0) {
       ctx.ui.notify(
         `[mcp-bridge] ${totalTools} tools from ${Object.keys(servers).length} server(s)`,
         "info"
       );
+    } else if (connectionErrors.length === 0 && !fs.existsSync(configPath)) {
+      ctx.ui.notify("[mcp-bridge] No mcp.json found", "warning");
     }
   });
 
