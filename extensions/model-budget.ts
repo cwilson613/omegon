@@ -1,45 +1,84 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
+import { StringEnum } from "@mariozechner/pi-ai";
+
+const TIERS = {
+  opus: { id: "claude-opus-4-6", label: "opus", icon: "🧠" },
+  sonnet: { id: "claude-sonnet-4-6", label: "sonnet", icon: "⚡" },
+  haiku: { id: "claude-haiku-4-5", label: "haiku", icon: "💨" },
+} as const;
+
+type TierName = keyof typeof TIERS;
+
+async function switchTo(tier: TierName, pi: ExtensionAPI, ctx: any): Promise<boolean> {
+  const spec = TIERS[tier];
+  const model = ctx.modelRegistry.find("anthropic", spec.id);
+  if (!model) return false;
+  const success = await pi.setModel(model);
+  if (success) {
+    ctx.ui.setStatus("model-budget", `${spec.icon} ${spec.label}`);
+  }
+  return success;
+}
 
 export default function (pi: ExtensionAPI) {
+  // Default to Opus on session start
   pi.on("session_start", async (_event, ctx) => {
-    const sonnet = ctx.modelRegistry.find("anthropic", "claude-sonnet-4-5");
-    if (sonnet) {
-      const success = await pi.setModel(sonnet);
+    await switchTo("opus", pi, ctx);
+  });
+
+  // Tool the agent can call to shift tiers
+  pi.registerTool("set_model_tier", {
+    description:
+      "Switch the active model tier based on task complexity. " +
+      "Use 'opus' for deep reasoning, architecture, and planning. " +
+      "Use 'sonnet' for routine code edits, file operations, and execution. " +
+      "Use 'haiku' for simple lookups, formatting, and boilerplate generation. " +
+      "Downgrade when the current task is straightforward to conserve budget. " +
+      "Upgrade when you encounter something that needs deeper reasoning.",
+    parameters: Type.Object({
+      tier: StringEnum(["opus", "sonnet", "haiku"], {
+        description: "Target model tier",
+      }),
+      reason: Type.String({
+        description: "Brief explanation for the tier change",
+      }),
+    }),
+    handler: async (params: { tier: TierName; reason: string }, ctx: any) => {
+      const success = await switchTo(params.tier, pi, ctx);
+      const spec = TIERS[params.tier];
       if (success) {
-        ctx.ui.setStatus("model-budget", "sonnet (budget)");
+        ctx.ui.notify(`${spec.icon} → ${spec.label}: ${params.reason}`, "info");
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Switched to ${spec.label} (${spec.id}): ${params.reason}`,
+            },
+          ],
+        };
       }
-    }
-  });
-
-  pi.registerCommand("opus", {
-    description: "Escalate to Opus for complex reasoning",
-    handler: async (_args, ctx) => {
-      const opus = ctx.modelRegistry.find("anthropic", "claude-opus-4-6");
-      if (opus) {
-        const success = await pi.setModel(opus);
-        if (success) {
-          ctx.ui.setStatus("model-budget", "opus (escalated)");
-          ctx.ui.notify("Escalated to Opus 4.6", "info");
-        } else {
-          ctx.ui.notify("Failed to set Opus — no API key?", "error");
-        }
-      } else {
-        ctx.ui.notify("Opus model not found in registry", "error");
-      }
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Failed to switch to ${spec.label} — model not found or no API key`,
+          },
+        ],
+      };
     },
   });
 
-  pi.registerCommand("sonnet", {
-    description: "Drop back to Sonnet to conserve usage",
-    handler: async (_args, ctx) => {
-      const sonnet = ctx.modelRegistry.find("anthropic", "claude-sonnet-4-5");
-      if (sonnet) {
-        const success = await pi.setModel(sonnet);
-        if (success) {
-          ctx.ui.setStatus("model-budget", "sonnet (budget)");
-          ctx.ui.notify("Dropped to Sonnet 4.5", "info");
+  // Manual commands for direct control
+  for (const [name, spec] of Object.entries(TIERS)) {
+    pi.registerCommand(name, {
+      description: `Switch to ${spec.label} (${spec.icon})`,
+      handler: async (_args, ctx) => {
+        const success = await switchTo(name as TierName, pi, ctx);
+        if (!success) {
+          ctx.ui.notify(`Failed to switch to ${spec.label}`, "error");
         }
-      }
-    },
-  });
+      },
+    });
+  }
 }
