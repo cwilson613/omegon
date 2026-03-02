@@ -28,7 +28,9 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Tool the agent can call to shift tiers
-  pi.registerTool("set_model_tier", {
+  pi.registerTool({
+    name: "set_model_tier",
+    label: "Set Model Tier",
     description:
       "Switch the active model tier based on task complexity. " +
       "Use 'opus' for deep reasoning, architecture, and planning. " +
@@ -44,7 +46,7 @@ export default function (pi: ExtensionAPI) {
         description: "Brief explanation for the tier change",
       }),
     }),
-    handler: async (params: { tier: TierName; reason: string }, ctx: any) => {
+    execute: async (_toolCallId, params: { tier: TierName; reason: string }, _signal, _onUpdate, ctx) => {
       const success = await switchTo(params.tier, pi, ctx);
       const spec = TIERS[params.tier];
       if (success) {
