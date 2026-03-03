@@ -6,37 +6,6 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { getAvailableProviders, getProvider, type SearchResult } from "./providers.ts";
-import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-
-// Load .env from extension directory
-function loadEnv() {
-  // __dirname equivalent for ESM-like contexts
-  let envDir: string;
-  try {
-    envDir = dirname(fileURLToPath(import.meta.url));
-  } catch {
-    envDir = join(process.env.HOME || "~", ".pi/agent/extensions/web-search");
-  }
-  const envPath = join(envDir, ".env");
-  try {
-    const lines = readFileSync(envPath, "utf-8").split("\n");
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eq = trimmed.indexOf("=");
-      if (eq === -1) continue;
-      const key = trimmed.slice(0, eq).trim();
-      const val = trimmed.slice(eq + 1).trim();
-      if (val && !process.env[key]) {
-        process.env[key] = val;
-      }
-    }
-  } catch {
-    // No .env file — rely on environment variables
-  }
-}
 
 function deduplicateResults(results: SearchResult[]): SearchResult[] {
   const seen = new Map<string, SearchResult>();
@@ -80,7 +49,8 @@ function formatResults(results: SearchResult[], mode: string): string {
 }
 
 export default function (pi: ExtensionAPI) {
-  loadEnv();
+  // Secrets are resolved into process.env by the 00-secrets extension
+  // before this extension loads. No .env files needed.
 
   pi.registerTool({
     name: "web_search",
@@ -127,7 +97,7 @@ Only providers with configured API keys are available.`,
         return {
           content: [{
             type: "text",
-            text: "No search providers configured. Create a .env file in the web-search extension directory.\nRequired: BRAVE_API_KEY, TAVILY_API_KEY, and/or SERPER_API_KEY\nSee .env.example for reference.",
+            text: "No search providers configured. Run `/secrets configure BRAVE_API_KEY` (or TAVILY_API_KEY, SERPER_API_KEY) to set up at least one provider.",
           }],
           details: { error: true },
         };

@@ -27,17 +27,27 @@ const SECRETS_DIR = join(homedir(), ".pi", "agent");
 const SECRETS_FILE = join(SECRETS_DIR, "secrets.json");
 
 /** Fallback secrets not tied to a specific extension */
-const BUILTIN_SECRETS: Record<string, string> = {
-  ANTHROPIC_API_KEY: "Anthropic API key (offline-driver health check)",
-};
+const BUILTIN_SECRETS: Record<string, string> = {};
+
+/** Fallback config vars not tied to a specific extension */
+const BUILTIN_CONFIGS: Record<string, { description: string; default?: string }> = {};
 
 /**
- * Scan extension directories for // @secret annotations.
- * Format: // @secret NAME "description"
+ * Scan extension directories for annotations:
+ *   // @secret NAME "description"
+ *   // @config NAME "description" [default: value]
+ *
+ * @secret — sensitive values (API keys, tokens) that need redaction and guarded access
+ * @config — non-sensitive env var overrides (paths, URLs, feature flags) surfaced in /secrets list
  */
-function scanSecretAnnotations(): Record<string, string> {
+function scanAnnotations(): {
+  secrets: Record<string, string>;
+  configs: Record<string, { description: string; default?: string }>;
+} {
   const secrets: Record<string, string> = { ...BUILTIN_SECRETS };
-  const pattern = /^\/\/\s*@secret\s+([A-Z_][A-Z0-9_]*)\s+"([^"]+)"/;
+  const configs: Record<string, { description: string; default?: string }> = { ...BUILTIN_CONFIGS };
+  const secretPattern = /^\/\/\s*@secret\s+([A-Z_][A-Z0-9_]*)\s+"([^"]+)"/;
+  const configPattern = /^\/\/\s*@config\s+([A-Z_][A-Z0-9_]*)\s+"([^"]+)"(?:\s+\[default:\s*([^\]]*)\])?/;
 
   // Extension directories to scan
   const extensionDirs = [
@@ -58,9 +68,17 @@ function scanSecretAnnotations(): Record<string, string> {
       // Only scan the first 30 lines for annotations (they should be at the top)
       const lines = content.split("\n").slice(0, 30);
       for (const line of lines) {
-        const match = line.match(pattern);
-        if (match) {
-          secrets[match[1]] = match[2];
+        const secretMatch = line.match(secretPattern);
+        if (secretMatch) {
+          secrets[secretMatch[1]] = secretMatch[2];
+          continue;
+        }
+        const configMatch = line.match(configPattern);
+        if (configMatch) {
+          configs[configMatch[1]] = {
+            description: configMatch[2],
+            default: configMatch[3]?.trim(),
+          };
         }
       }
     } catch {}
@@ -85,11 +103,11 @@ function scanSecretAnnotations(): Record<string, string> {
     walkDir(dir);
   }
 
-  return secrets;
+  return { secrets, configs };
 }
 
-/** Discovered secrets — scanned once at load time */
-const KNOWN_SECRETS = scanSecretAnnotations();
+/** Discovered annotations — scanned once at load time */
+const { secrets: KNOWN_SECRETS, configs: KNOWN_CONFIGS } = scanAnnotations();
 
 // ============================================================================
 // Recipe types
@@ -494,6 +512,29 @@ export default function (pi: ExtensionAPI) {
               `     Source: ${recipe.startsWith("!") ? `command: ${recipe.slice(1, 40)}` : recipe.startsWith("literal:") ? "⚠️  literal" : `env: ${recipe}`}`
             );
             lines.push("");
+          }
+
+          // Show @config entries
+          const configEntries = Object.entries(KNOWN_CONFIGS);
+          if (configEntries.length > 0) {
+            lines.push("", "Configuration overrides (@config):", "");
+            for (const [name, { description, default: defaultVal }] of configEntries) {
+              const envVal = process.env[name];
+              const effective = envVal || defaultVal || "(not set)";
+              const isOverridden = !!envVal && envVal !== defaultVal;
+              const status = isOverridden ? "⚙️" : "  ";
+              lines.push(`  ${status} ${name}`);
+              lines.push(`     ${description}`);
+              if (defaultVal) {
+                lines.push(`     Default: ${defaultVal}`);
+              }
+              if (isOverridden) {
+                lines.push(`     Override: ${envVal}`);
+              } else if (!envVal && !defaultVal) {
+                lines.push(`     Value: (not set)`);
+              }
+              lines.push("");
+            }
           }
 
           ctx.ui.notify(lines.join("\n"), "info");

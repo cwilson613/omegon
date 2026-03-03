@@ -1,3 +1,5 @@
+// @config LOCAL_INFERENCE_URL "Ollama / OpenAI-compatible inference server URL" [default: http://localhost:11434]
+
 /**
  * local-inference — Delegate sub-tasks to locally running LLM inference servers
  *
@@ -16,9 +18,6 @@
  *   This is Option C (tool-callable sub-agent): the driving agent stays Claude
  *   with reliable tool use and reasoning, but can offload cheap work to local models.
  *   The abstraction layer supports any OpenAI-compatible backend. Default: Ollama.
- *
- * Environment:
- *   LOCAL_INFERENCE_URL — API base URL (default: http://localhost:11434, Ollama)
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";

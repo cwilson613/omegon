@@ -1,26 +1,29 @@
 // @secret HF_TOKEN "HuggingFace token (gated model access for FLUX.1)"
+// @config DIFFUSION_CLI_DIR "Path to uv project with mflux installed" [default: ~/diffusion-cli]
+// @config PI_VISUALS_DIR "Output directory for generated images and diagrams" [default: ~/.pi/visuals]
+// @config EXCALIDRAW_RENDER_DIR "Path to Excalidraw render pipeline (uv + playwright)" [default: <pi-kit>/skills/visualize/references/excalidraw]
 
 /**
  * diffuse — Visual generation extension for pi
  *
- * Provides two tools:
+ * Provides three tools:
  *   - generate_image_local: AI image generation via FLUX.1 (mflux, Apple Silicon MLX)
  *   - render_diagram: Mermaid diagram rendering via mmdc (falls back to source)
+ *   - render_excalidraw: Excalidraw JSON → PNG via Playwright + headless Chromium
  *
- * Both tools save output to ~/.pi/visuals/ for persistence across sessions.
+ * All tools save output to ~/.pi/visuals/ for persistence across sessions.
  *
  * Requirements:
  *   generate_image_local:
  *     - Apple Silicon Mac with sufficient RAM (16GB+ quantized, 32GB+ full)
  *     - uv + mflux installed (set DIFFUSION_CLI_DIR or use ~/diffusion-cli default)
- *     - HuggingFace token for gated models (FLUX.1-schnell, FLUX.1-dev)
+ *     - HuggingFace token for gated models: /secrets configure HF_TOKEN
  *   render_diagram:
  *     - mmdc (optional, for PNG output): npm install -g @mermaid-js/mermaid-cli
  *     - Falls back to syntax-highlighted source if mmdc is not installed
- *
- * Environment:
- *   DIFFUSION_CLI_DIR — path to uv project with mflux installed
- *   PI_VISUALS_DIR    — output directory override (default: ~/.pi/visuals)
+ *   render_excalidraw:
+ *     - uv + playwright + chromium
+ *     - First-time setup: cd <EXCALIDRAW_RENDER_DIR> && uv sync && uv run playwright install chromium
  */
 
 import { execSync } from "node:child_process";
@@ -66,6 +69,11 @@ function hasCmd(cmd: string): boolean {
 // ---------------------------------------------------------------------------
 
 const DIFFUSION_CLI_DIR = process.env.DIFFUSION_CLI_DIR || join(homedir(), "diffusion-cli");
+
+// Excalidraw renderer lives alongside the visualize skill references.
+// Resolve relative to this extension file → ../../skills/visualize/references/excalidraw
+const EXCALIDRAW_RENDER_DIR = process.env.EXCALIDRAW_RENDER_DIR ||
+	join(import.meta.dirname ?? __dirname, "..", "..", "skills", "visualize", "references", "excalidraw");
 
 const PRESETS = ["schnell", "dev", "dev-fast", "diagram", "portrait", "wide"] as const;
 
@@ -174,7 +182,7 @@ export default function diffuseExtension(pi: ExtensionAPI) {
 					throw new Error(
 						"HuggingFace authentication required. The model is gated.\n" +
 						"1. Accept the license at https://huggingface.co/black-forest-labs/FLUX.1-schnell\n" +
-						`2. Run: cd ${DIFFUSION_CLI_DIR} && uv run python -c "from huggingface_hub import login; login()"\n` +
+						"2. Run: /secrets configure HF_TOKEN (paste your HuggingFace access token)\n" +
 						"3. Retry the generation."
 					);
 				}
@@ -238,7 +246,7 @@ export default function diffuseExtension(pi: ExtensionAPI) {
 				const outPng = mmdPath.replace(/\.mmd$/, ".png");
 				try {
 					execSync(
-						`mmdc -i "${mmdPath}" -o "${outPng}" -b transparent -w 1200 2>/dev/null`,
+						`mmdc -i ${JSON.stringify(mmdPath)} -o ${JSON.stringify(outPng)} -b transparent -w 1200 2>/dev/null`,
 						{ timeout: 15_000 }
 					);
 					if (existsSync(outPng) && statSync(outPng).size > 0) {
@@ -267,6 +275,97 @@ export default function diffuseExtension(pi: ExtensionAPI) {
 	});
 
 	// ------------------------------------------------------------------
+	// render_excalidraw — Excalidraw JSON → PNG via Playwright
+	// ------------------------------------------------------------------
+	pi.registerTool({
+		name: "render_excalidraw",
+		label: "Render Excalidraw",
+		description:
+			"Render an .excalidraw JSON file to PNG using Playwright + headless Chromium. " +
+			"Takes a path to an existing .excalidraw file, renders it, and returns the PNG inline. " +
+			"Output is saved to ~/.pi/visuals/. " +
+			"First-time setup: cd <render_dir> && uv sync && uv run playwright install chromium",
+		promptSnippet: "Render .excalidraw JSON files to inline PNG images",
+		parameters: Type.Object({
+			path:   Type.String({ description: "Path to .excalidraw JSON file to render" }),
+			scale:  Type.Optional(Type.Number({ description: "Device scale factor (default: 2)" })),
+			title:  Type.Optional(Type.String({ description: "Optional title for the output" })),
+		}),
+		async execute(_toolCallId, params, signal, onUpdate, _ctx) {
+			const excalidrawPath = params.path;
+
+			if (!existsSync(excalidrawPath)) {
+				throw new Error(`File not found: ${excalidrawPath}`);
+			}
+
+			const renderScript = join(EXCALIDRAW_RENDER_DIR, "render_excalidraw.py");
+			if (!existsSync(renderScript)) {
+				throw new Error(
+					`Excalidraw render script not found at ${renderScript}.\n` +
+					`Expected at: ${EXCALIDRAW_RENDER_DIR}/render_excalidraw.py`
+				);
+			}
+
+			// Check if uv project is set up
+			const uvLock = join(EXCALIDRAW_RENDER_DIR, "uv.lock");
+			if (!existsSync(uvLock)) {
+				throw new Error(
+					`Excalidraw renderer not set up. Run:\n` +
+					`  cd ${EXCALIDRAW_RENDER_DIR} && uv sync && uv run playwright install chromium`
+				);
+			}
+
+			const scale = params.scale ?? 2;
+			const slug = (params.title || basename(excalidrawPath, ".excalidraw")).replace(/[^a-zA-Z0-9]/g, "_").slice(0, 40);
+			const outPng = visualsPath(`${timestamp()}_${slug}.png`);
+
+			onUpdate?.({
+				content: [{ type: "text", text: `Rendering ${basename(excalidrawPath)}…` }],
+				details: { excalidrawPath },
+			});
+
+			try {
+				const result = await pi.exec(
+					"uv",
+					["run", "python", renderScript, excalidrawPath, "--output", outPng, "--scale", String(scale)],
+					{ signal, timeout: 60_000, cwd: EXCALIDRAW_RENDER_DIR },
+				);
+
+				if (result.code !== 0) {
+					const stderr = result.stderr || "";
+					if (stderr.includes("playwright not installed") || stderr.includes("Chromium not installed")) {
+						throw new Error(
+							`Excalidraw renderer needs setup:\n` +
+							`  cd ${EXCALIDRAW_RENDER_DIR} && uv sync && uv run playwright install chromium`
+						);
+					}
+					throw new Error(`Render failed (exit ${result.code}):\n${stderr.slice(-1500)}`);
+				}
+
+				if (!existsSync(outPng) || statSync(outPng).size === 0) {
+					throw new Error(`Render produced no output at ${outPng}`);
+				}
+
+				const data = readFileSync(outPng).toString("base64");
+				const titlePrefix = params.title ? `# ${params.title}\n\n` : "";
+
+				return {
+					content: [
+						{ type: "text",  text: `${titlePrefix}📐 Excalidraw  ·  Saved: ${outPng}` },
+						{ type: "image", data, mimeType: "image/png" },
+					],
+					details: { rendered: true, excalidrawPath, pngPath: outPng, scale },
+				};
+			} catch (err: any) {
+				if (err.message?.includes("renderer needs setup") || err.message?.includes("not set up")) {
+					throw err;
+				}
+				throw new Error(`Excalidraw render failed: ${err.message}`);
+			}
+		},
+	});
+
+	// ------------------------------------------------------------------
 	// /diffuse command — quick image generation shortcut
 	// ------------------------------------------------------------------
 	pi.registerCommand("diffuse", {
@@ -276,11 +375,13 @@ export default function diffuseExtension(pi: ExtensionAPI) {
 				// Show status instead of error
 				const mfluxOk = existsSync(join(DIFFUSION_CLI_DIR, ".venv", "bin", "mflux-generate"));
 				const mmdcOk  = hasCmd("mmdc");
+				const excaliOk = existsSync(join(EXCALIDRAW_RENDER_DIR, "uv.lock"));
 				const status = [
 					`**Visual generation status**`,
 					``,
 					`FLUX.1 (generate_image_local): ${mfluxOk ? "✅ ready" : `❌ not found — set up ${DIFFUSION_CLI_DIR}`}`,
-					`mmdc (render_diagram): ${mmdcOk ? "✅ ready" : "⚠️  not installed — \`npm install -g @mermaid-js/mermaid-cli\`"}`,
+					`Mermaid (render_diagram): ${mmdcOk ? "✅ ready" : "⚠️  not installed — \`npm install -g @mermaid-js/mermaid-cli\`"}`,
+					`Excalidraw (render_excalidraw): ${excaliOk ? "✅ ready" : `⚠️  not set up — \`cd ${EXCALIDRAW_RENDER_DIR} && uv sync && uv run playwright install chromium\``}`,
 					`Output directory: \`${VISUALS_DIR}\``,
 					``,
 					`Usage: \`/diffuse <prompt>\``,
