@@ -12,6 +12,7 @@
     "extensions": [
       "./extensions/00-secrets",
       "./extensions/chronos",
+      "./extensions/cleave",
       "./extensions/defaults.ts",
       "./extensions/distill.ts",
       "./extensions/render",
