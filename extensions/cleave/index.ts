@@ -16,7 +16,7 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
-import { assessDirective, detectFlags, PATTERNS } from "./assessment.js";
+import { assessDirective, PATTERNS } from "./assessment.js";
 import { detectConflicts, parseTaskResult } from "./conflicts.js";
 import { dispatchChildren } from "./dispatcher.js";
 import { buildPlannerPrompt, getRepoTree, parsePlanResponse } from "./planner.js";
@@ -142,13 +142,15 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			const assessment = assessDirective(directive);
 			const assessmentText = formatAssessment(assessment);
 
-			if (assessment.decision === "execute") {
+			if (assessment.decision === "execute" || assessment.decision === "needs_assessment") {
 				pi.sendMessage({
 					customType: "view",
 					content: [
 						assessmentText,
 						"",
-						"**→ Execute directly** — complexity is below threshold.",
+						assessment.decision === "needs_assessment"
+							? "**→ Execute directly** — no pattern matched; heuristic suggests in-session execution."
+							: "**→ Execute directly** — complexity is below threshold.",
 						"Proceeding with the task in-session.",
 					].join("\n"),
 					display: true,

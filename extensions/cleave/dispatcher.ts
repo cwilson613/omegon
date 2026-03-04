@@ -17,7 +17,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { ChildState, CleaveState } from "./types.js";
@@ -154,6 +154,43 @@ async function spawnChild(
 	});
 }
 
+// ─── Concurrency control ────────────────────────────────────────────────────
+
+/**
+ * Simple async semaphore. Guarantees that at most `limit` tasks run
+ * concurrently. Uses a queue of resolve callbacks — no polling, no races.
+ */
+class AsyncSemaphore {
+	private count: number;
+	private readonly limit: number;
+	private readonly waiters: Array<() => void> = [];
+
+	constructor(limit: number) {
+		this.limit = limit;
+		this.count = 0;
+	}
+
+	async acquire(): Promise<void> {
+		if (this.count < this.limit) {
+			this.count++;
+			return;
+		}
+		return new Promise<void>((resolve) => {
+			this.waiters.push(resolve);
+		});
+	}
+
+	release(): void {
+		const next = this.waiters.shift();
+		if (next) {
+			// Hand the slot directly to the next waiter (count stays the same)
+			next();
+		} else {
+			this.count--;
+		}
+	}
+}
+
 // ─── Dispatch orchestration ─────────────────────────────────────────────────
 
 /**
@@ -175,6 +212,8 @@ export async function dispatchChildren(
 		state.children.map((c) => ({ label: c.label, dependsOn: c.dependsOn })),
 	);
 
+	const semaphore = new AsyncSemaphore(maxParallel);
+
 	for (let waveIdx = 0; waveIdx < waves.length; waveIdx++) {
 		const waveLabels = waves[waveIdx];
 		const waveChildren = state.children.filter((c) => waveLabels.includes(c.label));
@@ -183,19 +222,12 @@ export async function dispatchChildren(
 			`Wave ${waveIdx + 1}/${waves.length}: dispatching ${waveChildren.map((c) => c.label).join(", ")}`,
 		);
 
-		// Dispatch wave with concurrency limit
-		const semaphore = { count: 0 };
 		const promises = waveChildren.map(async (child) => {
-			// Wait for semaphore slot
-			while (semaphore.count >= maxParallel) {
-				await new Promise((r) => setTimeout(r, 100));
-			}
-			semaphore.count++;
-
+			await semaphore.acquire();
 			try {
 				await dispatchSingleChild(pi, state, child, childTimeoutMs, localModel, signal);
 			} finally {
-				semaphore.count--;
+				semaphore.release();
 			}
 		});
 
@@ -220,6 +252,9 @@ async function dispatchSingleChild(
 	localModel?: string,
 	signal?: AbortSignal,
 ): Promise<void> {
+	// Skip children that already failed (e.g., worktree creation failure)
+	if (child.status === "failed") return;
+
 	child.status = "running";
 	child.startedAt = new Date().toISOString();
 

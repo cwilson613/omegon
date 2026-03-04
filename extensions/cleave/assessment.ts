@@ -205,7 +205,18 @@ const SYSTEM_SIGNALS: Record<string, string[]> = {
 // CORE FUNCTIONS
 // ═══════════════════════════════════════════════════════════════════════════
 
-const FILE_EXT_RE = /\w+\.(ts|tsx|js|jsx|py|java|go|rs|rb|php|cpp|c|h|kt|swift|cs|m|scala)\b/g;
+/** Pattern for file extension detection. Use via fileExtMatches() — never call .test() on this directly. */
+const FILE_EXT_PATTERN = /\w+\.(ts|tsx|js|jsx|py|java|go|rs|rb|php|cpp|c|h|kt|swift|cs|m|scala)\b/g;
+
+/** Safe wrapper: always returns fresh matches, no global state leakage. */
+function fileExtMatches(text: string): RegExpMatchArray[] {
+	return [...text.matchAll(new RegExp(FILE_EXT_PATTERN.source, "g"))];
+}
+
+/** Safe wrapper for test: uses a non-global regex, no lastIndex mutation. */
+function hasFileExt(text: string): boolean {
+	return new RegExp(FILE_EXT_PATTERN.source).test(text);
+}
 
 /**
  * Estimate the number of architectural system boundaries in a directive.
@@ -217,7 +228,7 @@ const FILE_EXT_RE = /\w+\.(ts|tsx|js|jsx|py|java|go|rs|rb|php|cpp|c|h|kt|swift|c
 export function estimateSystems(directive: string): number {
 	const lower = directive.toLowerCase();
 
-	const fileMatches = [...lower.matchAll(FILE_EXT_RE)];
+	const fileMatches = fileExtMatches(lower);
 
 	const baseCount = Object.values(SYSTEM_SIGNALS).filter((keywords) =>
 		keywords.some((kw) => lower.includes(kw)),
@@ -272,9 +283,8 @@ export function matchPattern(directive: string): PatternMatch | null {
 		}
 
 		// Bug Fix: file-specific boost
-		if (patternId === "bug_fix" && FILE_EXT_RE.test(lower)) {
+		if (patternId === "bug_fix" && hasFileExt(lower)) {
 			confidence += 0.15;
-			FILE_EXT_RE.lastIndex = 0; // reset regex state
 		}
 
 		// Specific technology bonus
@@ -362,8 +372,7 @@ export function assessDirective(
 
 		// File detection can override pattern systems
 		const lower = directive.toLowerCase();
-		const fileMatches = [...lower.matchAll(FILE_EXT_RE)];
-		FILE_EXT_RE.lastIndex = 0;
+		const fileMatches = fileExtMatches(lower);
 
 		let systemsForCalc = match.systems;
 		let systemsForDisplay = match.systems;
