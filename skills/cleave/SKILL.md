@@ -83,9 +83,19 @@ Workspaces and worktrees live outside the target repo:
     1-db-layer/
 ```
 
-## State Machine
+## Execution Flow
 
-`ASSESS → PLAN → CONFIRM → DISPATCH → HARVEST → REUNIFY → REPORT → COMPLETE`
+The `/cleave` command handles assessment and planning inline (or via LLM delegation).
+`CleaveState` tracks execution from dispatch onward:
+
+```
+/cleave command:  assess → [openspec | llm plan] → user confirm
+cleave_run tool:  DISPATCH → HARVEST → REUNIFY → COMPLETE | FAILED
+```
+
+The `assess`, `plan`, `confirm`, and `report` phases exist in `CleavePhase`
+but are not currently used in state transitions — they're reserved for
+future resume capability.
 
 On merge failure, branches are preserved for manual resolution.
 On success, worktrees and branches are cleaned up automatically.
