@@ -1597,7 +1597,7 @@ export default function (pi: ExtensionAPI) {
 
     // Semantic search availability
     if (embeddingAvailable) {
-      parts.push(theme.fg("dim", "semantic"));
+      parts.push(theme.fg("dim", "🕸️ semantic"));
     }
 
     ctx.ui.setStatus("memory", parts.join(theme.fg("dim", " · ")));
