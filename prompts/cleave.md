@@ -1,9 +1,9 @@
 ---
-description: Recursive task decomposition via cleave CLI
+description: Recursive task decomposition via cleave extension
 ---
 # Recursive Task Decomposition
 
-Route complex directives to the `cleave` CLI orchestration engine.
+Route complex directives through the cleave extension.
 
 ## Usage
 
@@ -11,40 +11,18 @@ Route complex directives to the `cleave` CLI orchestration engine.
 /cleave "directive text"
 ```
 
-## Quick Reference
+## Tools
 
-### Prerequisite
+- `cleave_assess` — Assess complexity, get execute/cleave decision
+- `cleave_run` — Execute a split plan with git worktree isolation
 
-```bash
-which cleave || echo "cleave CLI not found — install it first"
-```
+## Workflow
 
-### State Machine
+1. Assess directive complexity (automatic or via `cleave_assess`)
+2. If complex: generate split plan (2–4 children)
+3. Confirm plan with user
+4. Dispatch children in dependency-ordered waves
+5. Harvest results, detect conflicts, merge branches
+6. Report status
 
-```
-PREFLIGHT → ASSESS → ROUTE → PLAN → REVIEW → EXECUTE → REPORT
-```
-
-Follow each state sequentially. Wait for user input at every gate.
-
-### Routing Tiers
-
-| Assessment | Complexity | Tier |
-|------------|-----------|------|
-| `"execute"` | any | **Direct** — execute in-session |
-| `"cleave"` | < 12 | **Orchestrator** — `cleave run` |
-| `"cleave"` | ≥ 12 | **Architect** — `cleave architect` |
-
-### Key Commands
-
-| Command | Purpose |
-|---------|---------|
-| `cleave assess -d "$1" -f json` | Complexity assessment |
-| `cleave run -d "$1" -r <repo> --confirm -f json` | Plan + pause |
-| `cleave run --resume <workspace> -f json` | Resume orchestrator |
-| `cleave architect -d "$1" -r <repo> --plan-only -f json` | Architect plan |
-| `cleave architect --resume <db_path> -f json` | Resume architect |
-
-## See Also
-
-Use `/skill:cleave` for the full skill with complete state machine documentation.
+See `/skill:cleave` for the full reference.

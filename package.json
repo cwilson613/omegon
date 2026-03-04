@@ -5,7 +5,9 @@
     "test": "npx tsx --test extensions/**/*.test.ts"
   },
   "description": "Pi package — extensions, prompts, skills, and themes for the pi coding agent",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "author": "",
   "license": "ISC",
   "pi": {
@@ -23,13 +25,21 @@
       "./extensions/style.ts",
       "./extensions/terminal-title.ts",
       "./extensions/view",
-      "./extensions/web-search"
+      "./extensions/web-search",
+      "./extensions/cleave"
     ],
-    "skills": ["./skills"],
-    "prompts": ["./prompts"]
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./prompts"
+    ]
   },
   "dependencies": {
+    "@mariozechner/pi-ai": "^0.55.4",
+    "@mariozechner/pi-coding-agent": "^0.55.4",
     "@modelcontextprotocol/sdk": "^1.12.1",
+    "@sinclair/typebox": "^0.34.48",
     "better-sqlite3": "^12.6.2"
   }
 }
