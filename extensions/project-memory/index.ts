@@ -61,6 +61,67 @@ import { SECTIONS } from "./template.js";
 import { serializeConversation, convertToLlm } from "@mariozechner/pi-coding-agent";
 import { sharedState } from "../shared-state.js";
 
+// ---------------------------------------------------------------------------
+// Compaction prompt constants (mirrors pi's internal prompts for local-model fallback)
+// ---------------------------------------------------------------------------
+
+const COMPACTION_SYSTEM_PROMPT = "You are a context summarization assistant. Your task is to read a conversation between a user and an AI coding assistant, then produce a structured summary following the exact format specified.\n\nDo NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.";
+
+const COMPACTION_INITIAL_PROMPT = `Create a structured context checkpoint summary that another LLM will use to continue the work.
+
+Use this EXACT format:
+
+## Goal
+[What is the user trying to accomplish?]
+
+## Constraints & Preferences
+- [Any constraints, preferences, or requirements mentioned]
+
+## Progress
+### Done
+- [x] [Completed tasks/changes]
+
+### In Progress
+- [ ] [Current work]
+
+### Blocked
+- [Issues preventing progress, if any]
+
+## Key Decisions
+- **[Decision]**: [Brief rationale]
+
+## Next Steps
+1. [Ordered list of what should happen next]
+
+## Critical Context
+- [Any data, examples, or references needed to continue]
+
+Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+
+const COMPACTION_UPDATE_PROMPT = `Update the existing structured summary with new information from the conversation. RULES:
+- PRESERVE all existing information from the previous summary
+- ADD new progress, decisions, and context
+- UPDATE Progress: move items from "In Progress" to "Done" when completed
+- UPDATE "Next Steps" based on what was accomplished
+
+Use the same format (Goal, Constraints & Preferences, Progress, Key Decisions, Next Steps, Critical Context).
+Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+
+const COMPACTION_TURN_PREFIX_PROMPT = `This is the PREFIX of a turn that was too large to keep. The SUFFIX (recent work) is retained.
+
+Summarize the prefix to provide context for the retained suffix:
+
+## Original Request
+[What did the user ask for?]
+
+## Early Progress
+- [Key decisions and work done in the prefix]
+
+## Context for Suffix
+- [Information needed to understand the retained recent work]
+
+Be concise. Focus on what's needed to understand the kept suffix.`;
+
 /**
  * Compute degeneracy pressure as an exponential curve from onset to warning threshold.
  * Returns 0 below onset, 1 at warning threshold, exponential growth between.
@@ -434,6 +495,145 @@ export default function (pi: ExtensionAPI) {
     store?.close(); globalStore?.close();
   });
 
+  // --- Local-model compaction fallback ---
+  // Intercept compaction to provide a local-model-generated summary.
+  // This makes compaction resilient to cloud API outages (overloaded_error, etc.).
+  // If a local model is available, we generate the summary ourselves and return it.
+  // If no local model is available, we return nothing and let pi try the cloud.
+  pi.on("session_before_compact", async (event, ctx) => {
+    const prep = event.preparation;
+    if (!prep || prep.messagesToSummarize.length === 0) return;
+
+    // Check if Ollama is available with a chat-capable model
+    const ollamaUrl = process.env.LOCAL_INFERENCE_URL || "http://localhost:11434";
+    let localModel: string | null = null;
+    try {
+      const resp = await fetch(`${ollamaUrl}/v1/models`, { signal: AbortSignal.timeout(2_000) });
+      if (resp.ok) {
+        const data = await resp.json() as { data?: Array<{ id: string }> };
+        // Prefer large models for summarization quality
+        const preferred = [
+          "devstral-small-2:24b", "qwen3:30b", "nemotron-3-nano:30b",
+          "devstral-small", "qwen3", "nemotron",
+        ];
+        const available = data.data?.map((m: { id: string }) => m.id) ?? [];
+        for (const p of preferred) {
+          const found = available.find((id: string) => id.includes(p));
+          if (found) { localModel = found; break; }
+        }
+        // Fallback: any model with reasonable size
+        if (!localModel && available.length > 0) {
+          localModel = available[0];
+        }
+      }
+    } catch {
+      // Ollama not available — fall through to cloud
+    }
+
+    if (!localModel) return; // No local model — let pi use cloud API
+
+    // Build summarization prompt (mirrors pi's internal SUMMARIZATION_PROMPT)
+    const llmMessages = convertToLlm(prep.messagesToSummarize);
+    const conversationText = serializeConversation(llmMessages);
+
+    let promptText = `<conversation>\n${conversationText}\n</conversation>\n\n`;
+    if (prep.previousSummary) {
+      promptText += `<previous-summary>\n${prep.previousSummary}\n</previous-summary>\n\n`;
+    }
+
+    // Inject project memory context for richer summaries
+    if (store) {
+      const mind = activeMind();
+      const facts = store.getActiveFacts(mind);
+      if (facts.length > 0) {
+        const factLines = facts.slice(0, 30).map((f: Fact) => `- [${f.section}] ${f.content}`).join("\n");
+        promptText += `<project-memory>\n${factLines}\n</project-memory>\n\n`;
+        promptText += "The project memory above provides persistent context. Reference relevant facts in your summary.\n\n";
+      }
+    }
+
+    const basePrompt = prep.previousSummary
+      ? COMPACTION_UPDATE_PROMPT
+      : COMPACTION_INITIAL_PROMPT;
+
+    const customInstructions = event.customInstructions;
+    promptText += customInstructions ? `${basePrompt}\n\nAdditional focus: ${customInstructions}` : basePrompt;
+
+    // Handle split turn prefix
+    let turnPrefixSummary = "";
+    if (prep.isSplitTurn && prep.turnPrefixMessages.length > 0) {
+      const prefixMessages = convertToLlm(prep.turnPrefixMessages);
+      const prefixText = serializeConversation(prefixMessages);
+      const prefixPrompt = `<conversation>\n${prefixText}\n</conversation>\n\n${COMPACTION_TURN_PREFIX_PROMPT}`;
+
+      try {
+        const prefixResp = await fetch(`${ollamaUrl}/v1/chat/completions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: localModel,
+            messages: [
+              { role: "system", content: COMPACTION_SYSTEM_PROMPT },
+              { role: "user", content: prefixPrompt },
+            ],
+            max_tokens: 2048,
+            temperature: 0.3,
+          }),
+          signal: event.signal,
+        });
+        if (prefixResp.ok) {
+          const prefixData = await prefixResp.json() as { choices?: Array<{ message?: { content?: string } }> };
+          turnPrefixSummary = prefixData.choices?.[0]?.message?.content ?? "";
+        }
+      } catch {
+        // If turn prefix fails, continue without it
+      }
+    }
+
+    // Generate main summary via local model
+    try {
+      const resp = await fetch(`${ollamaUrl}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: localModel,
+          messages: [
+            { role: "system", content: COMPACTION_SYSTEM_PROMPT },
+            { role: "user", content: promptText },
+          ],
+          max_tokens: 4096,
+          temperature: 0.3,
+        }),
+        signal: event.signal,
+      });
+
+      if (!resp.ok) return; // Local model failed — fall through to cloud
+
+      const data = await resp.json() as { choices?: Array<{ message?: { content?: string } }> };
+      let summary = data.choices?.[0]?.message?.content ?? "";
+      if (!summary.trim()) return; // Empty response — fall through to cloud
+
+      if (turnPrefixSummary) {
+        summary += `\n\n---\n\n**Turn Context (split turn):**\n\n${turnPrefixSummary}`;
+      }
+
+      if (ctx.hasUI) {
+        ctx.ui.notify("Compaction summary generated via local model (cloud bypass)", "info");
+      }
+
+      return {
+        compaction: {
+          summary,
+          firstKeptEntryId: prep.firstKeptEntryId,
+          tokensBefore: prep.tokensBefore,
+        },
+      };
+    } catch {
+      // Local model failed (timeout, connection error) — fall through to cloud
+      return;
+    }
+  });
+
   pi.on("session_compact", async (_event, ctx) => {
     postCompaction = true;
 
@@ -766,6 +966,10 @@ export default function (pi: ExtensionAPI) {
       }
       ctx.compact({
         customInstructions: "Session hit auto-compaction threshold. Preserve recent work context and any in-progress task state.",
+        onError: () => {
+          // Reset so auto-compaction can retry on the next tool_execution_end cycle
+          autoCompacted = false;
+        },
       });
     } else if (pct >= config.compactionWarningPercent && !compactionWarned) {
       // Mark warning — will be injected via before_agent_start
