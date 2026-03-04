@@ -215,6 +215,17 @@ function auditColors(filePath: string): string {
 export default function styleExtension(pi: ExtensionAPI) {
 	pi.registerCommand("style", {
 		description: "Verdant design system (usage: /style [palette|d2|excalidraw|check <file>])",
+		getArgumentCompletions: (prefix: string) => {
+			const parts = prefix.split(/\s+/);
+			if (parts.length <= 1) {
+				const subs = ["palette", "d2", "excalidraw", "check"];
+				const filtered = subs.filter(s => s.startsWith(parts[0] || ""));
+				return filtered.length > 0
+					? filtered.map(s => ({ value: s, label: s }))
+					: null;
+			}
+			return null;
+		},
 		handler: async (args, _ctx) => {
 			const trimmed = (args || "").trim();
 			const [subcommand, ...rest] = trimmed.split(/\s+/);
