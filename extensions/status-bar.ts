@@ -76,7 +76,7 @@ export default function (pi: ExtensionAPI) {
 
       parts.push(theme.fg("dim", `T${turns}`));
 
-      const bar = buildContextBar(ctx, 16);
+      const bar = buildContextBar(ctx, 24);
       if (bar) parts.push(bar);
 
       // Context % — colored by severity
