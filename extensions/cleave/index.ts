@@ -659,23 +659,29 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 					return;
 				}
 
-				// ── /assess <unknown> — treat as complexity directive ──
+				// ── /assess <freeform> — adversarial review with custom instructions
 				default: {
-					const fullDirective = args!.trim();
-					const assessment = assessDirective(fullDirective);
-					pi.sendMessage({
-						customType: "view",
-						content: [
-							formatAssessment(assessment),
-							"",
-							assessment.decision === "cleave"
-								? "**→ Decomposition recommended.** Use `/cleave " + fullDirective + "` to proceed."
-								: assessment.decision === "execute"
-									? "**→ Execute directly.** Task is below complexity threshold."
-									: "**→ Manual assessment needed.** No pattern matched.",
-						].join("\n"),
-						display: true,
-					});
+					pi.sendUserMessage([
+						"# Adversarial Assessment",
+						"",
+						"You are now operating as a hostile reviewer. Your job is to find everything wrong with the work completed in this session.",
+						"",
+						"**User instructions:** " + trimmed,
+						"",
+						"Follow the user's instructions above for tone and scope, but still perform a thorough review.",
+						"Read every file that was changed. Be specific. Cite line numbers.",
+						"",
+						"## Output Format",
+						"",
+						"### Verdict",
+						"One of: `PASS` | `PASS WITH CONCERNS` | `NEEDS REWORK` | `REJECT`",
+						"",
+						"### Critical Issues",
+						"### Warnings",
+						"### Nitpicks",
+						"### Omissions",
+						"### What Actually Worked",
+					].join("\n"));
 					return;
 				}
 			}
