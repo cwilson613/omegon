@@ -217,7 +217,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 	];
 
 	pi.registerCommand("assess", {
-		description: "Code assessment toolkit (usage: /assess <cleave|diff|spec|complexity> [args])",
+		description: "Adversarial review + auto-fix (default), or: /assess <diff|spec|complexity> [args]",
 		getArgumentCompletions: (prefix: string) => {
 			const parts = prefix.split(" ");
 			if (parts.length <= 1) {
@@ -230,7 +230,79 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			return null;
 		},
 		handler: async (args, ctx) => {
-			const parts = (args || "").trim().split(/\s+/);
+			const trimmed = (args || "").trim();
+
+			// Bare /assess → adversarial session review (no auto-fix)
+			if (!trimmed) {
+				pi.sendUserMessage([
+					"# Adversarial Assessment",
+					"",
+					"You are now operating as a hostile reviewer. Your job is to find everything wrong with the work completed in this session. Do not be polite. Do not hedge. If something is broken, say it's broken.",
+					"",
+					"## Procedure",
+					"",
+					"1. **Reconstruct scope** — Review the full conversation to identify every change made: files created, files edited, commands run, architectural decisions taken. Build a complete manifest.",
+					"",
+					"2. **Static analysis** — For every file touched, read the current state and check for:",
+					"   - Syntax errors, type mismatches, undefined references",
+					"   - Logic errors: off-by-ones, wrong operators, inverted conditions, unreachable branches",
+					"   - Unhandled edge cases: nil/null/empty inputs, boundary values, concurrent access",
+					"   - Resource leaks: unclosed handles, missing cleanup, unbounded growth",
+					"   - Security: injection vectors, hardcoded secrets, insecure defaults, path traversal",
+					"   - Dependency issues: missing imports, version conflicts, circular dependencies",
+					"",
+					"3. **Behavioral analysis** — Trace actual execution paths:",
+					"   - Does the happy path work end-to-end?",
+					"   - What happens on every error path? Are errors swallowed, misclassified, or leaked?",
+					"   - Race conditions, deadlocks, TOCTOU bugs?",
+					"   - State consistency across all paths?",
+					"",
+					"4. **Design critique** — Evaluate structural decisions:",
+					"   - Does the solution solve the *actual* problem or a simplified version?",
+					"   - Unnecessary abstractions, premature generalizations, gold-plating?",
+					"   - Does it violate existing codebase conventions?",
+					"   - Will it be maintainable by someone who didn't write it?",
+					"",
+					"5. **Test coverage** — If tests were written or modified:",
+					"   - Do tests assert the right things or just exercise code?",
+					"   - Missing negative tests, boundary tests, integration tests?",
+					"   - Could tests pass with a broken implementation (tautological)?",
+					"   - If no tests were written, should there have been?",
+					"",
+					"6. **Omission audit** — What was *not* done that should have been:",
+					"   - Missing error handling, logging, observability",
+					"   - Missing migrations, config changes, documentation",
+					"   - Missing cleanup of dead code, stale references",
+					"   - Incomplete implementation that was hand-waved",
+					"",
+					"## Output Format",
+					"",
+					"### Verdict",
+					"One of: `PASS` | `PASS WITH CONCERNS` | `NEEDS REWORK` | `REJECT`",
+					"",
+					"### Critical Issues",
+					"Problems that will cause failures, data loss, or security vulnerabilities. Each with file path, line number, and concrete description.",
+					"",
+					"### Warnings",
+					"Problems that won't immediately break but indicate fragility or future risk.",
+					"",
+					"### Nitpicks",
+					"Style, naming, or structural issues that are suboptimal but functional.",
+					"",
+					"### Omissions",
+					"Things that should exist but don't.",
+					"",
+					"### What Actually Worked",
+					"Brief acknowledgment of what was done correctly.",
+					"",
+					"---",
+					"",
+					"Do NOT ask clarifying questions. Do NOT skip files because they're \"probably fine.\" Read everything that was changed. Be thorough. Be specific. Cite line numbers.",
+				].join("\n"));
+				return;
+			}
+
+			const parts = trimmed.split(/\s+/);
 			const sub = parts[0] || "";
 			const rest = parts.slice(1).join(" ");
 
@@ -587,48 +659,20 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 					return;
 				}
 
-				// ── /assess (no subcommand) ────────────────────────────
+				// ── /assess <unknown> — treat as complexity directive ──
 				default: {
-					// If they typed something that's not a subcommand, treat
-					// it as a complexity assessment of the whole string
-					if (sub && !ASSESS_SUBS.some((s) => s.value === sub)) {
-						const fullDirective = args!.trim();
-						const assessment = assessDirective(fullDirective);
-						pi.sendMessage({
-							customType: "view",
-							content: [
-								formatAssessment(assessment),
-								"",
-								assessment.decision === "cleave"
-									? "**→ Decomposition recommended.** Use `/cleave " + fullDirective + "` to proceed."
-									: assessment.decision === "execute"
-										? "**→ Execute directly.** Task is below complexity threshold."
-										: "**→ Manual assessment needed.** No pattern matched.",
-							].join("\n"),
-							display: true,
-						});
-						return;
-					}
-
+					const fullDirective = args!.trim();
+					const assessment = assessDirective(fullDirective);
 					pi.sendMessage({
 						customType: "view",
 						content: [
-							"**Assess — Code Assessment Toolkit**",
+							formatAssessment(assessment),
 							"",
-							"| Subcommand | Description |",
-							"|---|---|",
-							"| `/assess cleave [ref]` | Adversarial review of recent work → auto-fix all issues |",
-							"| `/assess diff [ref]` | Review changes since ref (default: HEAD~1) — analysis only |",
-							"| `/assess spec [change]` | Assess implementation against OpenSpec spec scenarios |",
-							"| `/assess complexity <directive>` | Check if a task needs decomposition |",
-							"| `/assess <directive>` | Shorthand for `/assess complexity <directive>` |",
-							"",
-							"**`/assess cleave`** is the power move: reviews the last 3 commits,",
-							"finds Critical and Warning issues, then immediately fixes them all",
-							"and commits the result.",
-							"",
-							"**`/assess spec`** validates implementation against OpenSpec Given/When/Then",
-							"scenarios from delta specs.",
+							assessment.decision === "cleave"
+								? "**→ Decomposition recommended.** Use `/cleave " + fullDirective + "` to proceed."
+								: assessment.decision === "execute"
+									? "**→ Execute directly.** Task is below complexity threshold."
+									: "**→ Manual assessment needed.** No pattern matched.",
 						].join("\n"),
 						display: true,
 					});
