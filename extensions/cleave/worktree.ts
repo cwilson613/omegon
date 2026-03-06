@@ -75,10 +75,12 @@ export async function createWorktree(
 	childId: number,
 	baseBranch: string,
 ): Promise<WorktreeInfo> {
-	const branch = `cleave/${childId}-${childLabel}`;
+	// Sanitize childLabel to prevent path traversal via / or ..
+	const safeLabel = childLabel.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/^\.+/, "");
+	const branch = `cleave/${childId}-${safeLabel}`;
 	// Worktree goes in ~/.pi/cleave/wt/ to avoid polluting the repo or its parent
 	mkdirSync(WORKTREE_HOME, { recursive: true });
-	const worktreePath = join(WORKTREE_HOME, `${childId}-${childLabel}`);
+	const worktreePath = join(WORKTREE_HOME, `${childId}-${safeLabel}`);
 
 	// Delete branch if it already exists (leftover from a previous run)
 	await pi.exec("git", ["branch", "-D", branch], {

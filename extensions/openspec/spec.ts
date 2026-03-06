@@ -27,6 +27,30 @@ const CHANGES_DIR = "changes";
 const ARCHIVE_DIR = "archive";
 const BASELINE_DIR = "baseline";
 
+// ─── Validation ──────────────────────────────────────────────────────────────
+
+/** Validate a change name — prevent path traversal */
+export function validateChangeName(name: string): string | null {
+	if (!name) return "Change name cannot be empty";
+	if (name.length > 80) return "Change name too long (max 80 characters)";
+	if (name.includes("/") || name.includes("\\")) return "Change name cannot contain path separators";
+	if (name.includes("..")) return "Change name cannot contain '..'";
+	if (name.startsWith(".")) return "Change name cannot start with '.'";
+	if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) return "Change name must be lowercase alphanumeric with hyphens/underscores";
+	return null;
+}
+
+/** Validate a spec domain path — allow forward slashes for nesting but prevent traversal */
+export function validateDomain(domain: string): string | null {
+	if (!domain) return "Domain cannot be empty";
+	if (domain.length > 120) return "Domain too long (max 120 characters)";
+	if (domain.includes("\\")) return "Domain cannot contain backslashes";
+	if (domain.includes("..")) return "Domain cannot contain '..'";
+	if (domain.startsWith("/") || domain.startsWith(".")) return "Domain cannot start with '/' or '.'";
+	if (!/^[a-z0-9][a-z0-9_/-]*$/.test(domain)) return "Domain must be lowercase alphanumeric with hyphens, underscores, and forward slashes";
+	return null;
+}
+
 // ─── Change Discovery ────────────────────────────────────────────────────────
 
 /**
@@ -72,6 +96,9 @@ export function listChanges(repoPath: string): ChangeInfo[] {
  * Get a specific change by name.
  */
 export function getChange(repoPath: string, name: string): ChangeInfo | null {
+	const nameError = validateChangeName(name);
+	if (nameError) return null;
+
 	const openspecDir = getOpenSpecDir(repoPath);
 	if (!openspecDir) return null;
 
@@ -498,13 +525,21 @@ export function addSpec(
 	domain: string,
 	content: string,
 ): string {
+	// Validate domain to prevent path traversal
+	const domainError = validateDomain(domain);
+	if (domainError) throw new Error(domainError);
+
 	const specsDir = path.join(changePath, "specs");
 	fs.mkdirSync(specsDir, { recursive: true });
 
-	// Normalize domain to a file path
-	const specPath = domain.includes("/")
-		? path.join(specsDir, domain + ".md")
-		: path.join(specsDir, domain + ".md");
+	const specPath = path.join(specsDir, domain + ".md");
+
+	// Defense-in-depth: verify resolved path is within specs directory
+	const resolved = path.resolve(specPath);
+	const resolvedBase = path.resolve(specsDir);
+	if (!resolved.startsWith(resolvedBase + path.sep) && resolved !== resolvedBase) {
+		throw new Error(`Path traversal detected: domain '${domain}' resolves outside specs/`);
+	}
 
 	// Ensure parent dirs for nested domains
 	fs.mkdirSync(path.dirname(specPath), { recursive: true });
@@ -523,6 +558,9 @@ export function archiveChange(
 	repoPath: string,
 	changeName: string,
 ): { operations: string[]; archived: boolean } {
+	const nameError = validateChangeName(changeName);
+	if (nameError) return { operations: [nameError], archived: false };
+
 	const openspecDir = getOpenSpecDir(repoPath);
 	if (!openspecDir) return { operations: ["No openspec/ directory found"], archived: false };
 

@@ -25,6 +25,8 @@ import {
 	parseSpecsDir,
 	countScenarios,
 	summarizeSpecs,
+	validateChangeName,
+	validateDomain,
 } from "./spec.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -475,5 +477,116 @@ describe("countScenarios + summarizeSpecs", () => {
 
 	it("handles empty specs", () => {
 		assert.equal(summarizeSpecs([]), "No specs");
+	});
+});
+
+// ─── Validation ──────────────────────────────────────────────────────────────
+
+describe("validateChangeName", () => {
+	it("accepts valid names", () => {
+		assert.equal(validateChangeName("jwt-auth"), null);
+		assert.equal(validateChangeName("feature-123"), null);
+		assert.equal(validateChangeName("a"), null);
+	});
+
+	it("rejects empty names", () => {
+		assert.ok(validateChangeName(""));
+	});
+
+	it("rejects path separators", () => {
+		assert.ok(validateChangeName("../evil"));
+		assert.ok(validateChangeName("foo/bar"));
+		assert.ok(validateChangeName("foo\\bar"));
+	});
+
+	it("rejects dot-prefixed names", () => {
+		assert.ok(validateChangeName(".hidden"));
+	});
+
+	it("rejects names with double dots", () => {
+		assert.ok(validateChangeName("foo..bar"));
+	});
+
+	it("rejects uppercase names", () => {
+		assert.ok(validateChangeName("MyFeature"));
+	});
+});
+
+describe("validateDomain", () => {
+	it("accepts simple domains", () => {
+		assert.equal(validateDomain("auth"), null);
+		assert.equal(validateDomain("auth/tokens"), null);
+		assert.equal(validateDomain("core-api"), null);
+	});
+
+	it("rejects path traversal", () => {
+		assert.ok(validateDomain("../../etc/passwd"));
+		assert.ok(validateDomain("../secret"));
+	});
+
+	it("rejects backslashes", () => {
+		assert.ok(validateDomain("auth\\tokens"));
+	});
+
+	it("rejects absolute paths", () => {
+		assert.ok(validateDomain("/etc/passwd"));
+	});
+
+	it("rejects dot-prefixed domains", () => {
+		assert.ok(validateDomain(".hidden"));
+	});
+});
+
+describe("addSpec path traversal prevention", () => {
+	let tmpDir: string;
+	let changePath: string;
+
+	before(() => {
+		tmpDir = makeTmpDir();
+		const result = createChange(tmpDir, "secure-test", "Secure", "Testing security");
+		changePath = result.changePath;
+	});
+
+	after(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+	it("rejects path traversal in domain", () => {
+		assert.throws(
+			() => addSpec(changePath, "../../etc/passwd", "malicious content"),
+			/cannot contain/,
+		);
+	});
+
+	it("rejects absolute domain paths", () => {
+		assert.throws(
+			() => addSpec(changePath, "/etc/passwd", "malicious content"),
+			/cannot start/,
+		);
+	});
+});
+
+describe("getChange rejects invalid names", () => {
+	let tmpDir: string;
+
+	before(() => { tmpDir = makeTmpDir(); });
+	after(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+	it("returns null for path traversal attempts", () => {
+		assert.equal(getChange(tmpDir, "../../../etc"), null);
+	});
+
+	it("returns null for names with slashes", () => {
+		assert.equal(getChange(tmpDir, "foo/bar"), null);
+	});
+});
+
+describe("archiveChange rejects invalid names", () => {
+	let tmpDir: string;
+
+	before(() => { tmpDir = makeTmpDir(); });
+	after(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+	it("refuses path traversal names", () => {
+		const result = archiveChange(tmpDir, "../../../etc");
+		assert.equal(result.archived, false);
 	});
 });

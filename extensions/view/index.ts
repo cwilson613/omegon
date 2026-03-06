@@ -17,7 +17,7 @@
  *   - d2 — D2 diagram rendering
  */
 
-import { execSync, spawnSync } from "node:child_process";
+import { execSync, execFileSync, spawnSync } from "node:child_process";
 import {
 	existsSync, readFileSync, statSync, mkdtempSync,
 	readdirSync, accessSync, constants,
@@ -106,6 +106,18 @@ function run(cmd: string, opts?: { timeout?: number }): string {
 	}).trim();
 }
 
+/**
+ * Run a command with argument array — no shell interpolation, safe for untrusted paths.
+ * Preferred over run() for any command that takes a file path from tool parameters.
+ */
+function runSafe(cmd: string, args: string[], opts?: { timeout?: number }): string {
+	return execFileSync(cmd, args, {
+		encoding: "utf-8",
+		maxBuffer: 10 * 1024 * 1024,
+		timeout: opts?.timeout ?? 30_000,
+	}).trim();
+}
+
 function fileSizeStr(bytes: number): string {
 	if (bytes < 1024) return `${bytes}B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
@@ -168,13 +180,13 @@ interface ViewResult {
 
 function getImageDims(filePath: string): string | undefined {
 	try {
-		const out = run(`sips -g pixelWidth -g pixelHeight "${filePath}" 2>/dev/null`);
+		const out = runSafe("sips", ["-g", "pixelWidth", "-g", "pixelHeight", filePath]);
 		const w = out.match(/pixelWidth:\s+(\d+)/)?.[1];
 		const h = out.match(/pixelHeight:\s+(\d+)/)?.[1];
 		if (w && h) return `${w}×${h}`;
 	} catch { /* ignore */ }
 	try {
-		const out = run(`file "${filePath}"`);
+		const out = runSafe("file", [filePath]);
 		const m = out.match(/(\d+)\s*x\s*(\d+)/);
 		if (m) return `${m[1]}×${m[2]}`;
 	} catch { /* ignore */ }
@@ -205,11 +217,11 @@ function viewSvg(filePath: string): ViewResult {
 	let converted = false;
 
 	if (hasCmd("rsvg-convert")) {
-		try { run(`rsvg-convert "${filePath}" -o "${outPng}"`); converted = true; } catch {}
+		try { runSafe("rsvg-convert", [filePath, "-o", outPng]); converted = true; } catch {}
 	}
 	if (!converted) {
 		try {
-			run(`sips -s format png "${filePath}" --out "${outPng}" 2>/dev/null`);
+			runSafe("sips", ["-s", "format", "png", filePath, "--out", outPng]);
 			converted = existsSync(outPng) && statSync(outPng).size > 0;
 		} catch {}
 	}
@@ -240,7 +252,7 @@ function viewPdf(filePath: string, page?: number): ViewResult {
 	// Page count
 	let pageCount = 0;
 	try {
-		const info = run(`pdfinfo "${filePath}" 2>/dev/null`);
+		const info = runSafe("pdfinfo", [filePath]);
 		const m = info.match(/Pages:\s+(\d+)/);
 		if (m) pageCount = parseInt(m[1], 10);
 	} catch {}
@@ -254,7 +266,7 @@ function viewPdf(filePath: string, page?: number): ViewResult {
 		const last = page ?? Math.min(pageCount || 1, 3);
 
 		try {
-			run(`pdftoppm -png -r 200 -f ${first} -l ${last} "${filePath}" "${join(tmp, "page")}"`);
+			runSafe("pdftoppm", ["-png", "-r", "200", "-f", String(first), "-l", String(last), filePath, join(tmp, "page")]);
 			const pages = readdirSync(tmp).filter(f => f.endsWith(".png")).sort();
 
 			for (let i = 0; i < pages.length; i++) {
@@ -281,7 +293,7 @@ function viewPdf(filePath: string, page?: number): ViewResult {
 
 function appendPdfText(filePath: string, content: ContentPart[]) {
 	try {
-		const text = run(`pdftotext -layout "${filePath}" -`);
+		const text = runSafe("pdftotext", ["-layout", filePath, "-"]);
 		const preview = text.length > 8000 ? text.slice(0, 8000) + "\n… (truncated)" : text;
 		content.push({ type: "text", text: `\n\`\`\`\n${preview}\n\`\`\`` });
 	} catch {
@@ -312,7 +324,7 @@ function viewPandoc(filePath: string): ViewResult {
 	const fmt = formatMap[ext] ?? ext.slice(1);
 
 	try {
-		const md = run(`pandoc -f ${fmt} -t gfm --wrap=none "${filePath}"`, { timeout: 15_000 });
+		const md = runSafe("pandoc", ["-f", fmt, "-t", "gfm", "--wrap=none", filePath], { timeout: 15_000 });
 		const preview = md.length > 10000 ? md.slice(0, 10000) + "\n\n… (truncated)" : md;
 		return {
 			content: [{ type: "text", text: `${fileHeader(filePath, "📝", fmt.toUpperCase())}\n\n${preview}` }],
@@ -333,7 +345,7 @@ function viewDiagram(filePath: string): ViewResult {
 		const tmp = mkdtempSync(join(tmpdir(), "pi-view-d2-"));
 		const outPng = join(tmp, "diagram.png");
 		try {
-			run(`d2 --theme 200 --layout elk --pad 40 "${filePath}" "${outPng}" 2>/dev/null`, { timeout: 15_000 });
+			runSafe("d2", ["--theme", "200", "--layout", "elk", "--pad", "40", filePath, outPng], { timeout: 15_000 });
 			if (existsSync(outPng) && statSync(outPng).size > 0) {
 				const data = readFileSync(outPng).toString("base64");
 				return {
@@ -383,7 +395,7 @@ function viewBinary(filePath: string): ViewResult {
 	const stat = statSync(filePath);
 	let fileType = "binary";
 	try {
-		fileType = run(`file -b "${filePath}"`).slice(0, 120);
+		fileType = runSafe("file", ["-b", filePath]).slice(0, 120);
 	} catch {}
 
 	return {
