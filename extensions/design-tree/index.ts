@@ -302,64 +302,67 @@ function renderTreeText(
 export default function designTreeExtension(pi: ExtensionAPI): void {
   let tree: DesignTree = { nodes: new Map(), docsDir: "" };
   let focusedNode: string | null = null;
-  let compactWidget = false;
+  let widgetHidden = false;
 
   function reload(cwd: string): void {
     const docsDir = path.join(cwd, "docs");
     tree = scanDesignDocs(docsDir);
   }
 
+  /**
+   * Widget rendering.
+   *
+   * The widget is a persistent status bar — it must stay compact regardless
+   * of tree size. Full tree listing belongs in `/design list` command output.
+   *
+   * Layout (max 3 lines):
+   *   Line 1: ◈ Design Tree  3/8 decided · 5 exploring · 12?
+   *   Line 2: (if focused) ▸ Document Model — 5 open questions
+   *   Line 3: (if focused + next question) ? Flat vs nested node properties
+   */
   function updateWidget(ctx: ExtensionContext): void {
-    if (tree.nodes.size === 0) {
+    if (tree.nodes.size === 0 || widgetHidden) {
       ctx.ui.setWidget("design-tree", undefined);
       return;
     }
 
-    const roots = getRoots(tree);
     const lines: string[] = [];
 
     const decided = Array.from(tree.nodes.values()).filter((n) => n.status === "decided").length;
     const exploring = Array.from(tree.nodes.values()).filter(
       (n) => n.status === "exploring" || n.status === "seed"
     ).length;
+    const blocked = Array.from(tree.nodes.values()).filter((n) => n.status === "blocked").length;
     const total = tree.nodes.size;
     const openQ = getAllOpenQuestions(tree).length;
 
-    // Header
-    lines.push(
-      ctx.ui.theme.fg("accent", ctx.ui.theme.bold("◈ Design Tree")) +
-      ctx.ui.theme.fg("muted", ` ${decided}/${total} decided`) +
-      ctx.ui.theme.fg("dim", ` · ${exploring} exploring · ${openQ}?`)
-    );
-
-    // Compact mode: single line per root with counts
-    if (compactWidget && total > 12) {
-      for (const root of roots) {
-        const childCount = getChildren(tree, root.id).length;
-        const rootIcon = STATUS_ICONS[root.status];
-        const rootColor = STATUS_COLORS[root.status] as Parameters<typeof ctx.ui.theme.fg>[0];
-        lines.push(
-          ctx.ui.theme.fg(rootColor, `  ${rootIcon} ${root.title}`) +
-          ctx.ui.theme.fg("dim", ` (${childCount} children)`)
-        );
-      }
-    } else {
-      for (const root of roots) {
-        lines.push(renderTreeText(tree, root.id, ctx.ui.theme, "", true, total > 15));
-      }
+    // Line 1: summary stats
+    let summary = ctx.ui.theme.fg("accent", ctx.ui.theme.bold("◈ Design Tree"));
+    summary += ctx.ui.theme.fg("muted", ` ${decided}/${total} decided`);
+    summary += ctx.ui.theme.fg("dim", ` · ${exploring} exploring · ${openQ}?`);
+    if (blocked > 0) {
+      summary += ctx.ui.theme.fg("error", ` · ${blocked} blocked`);
     }
+    lines.push(summary);
 
-    // Focused node indicator
+    // Line 2-3: focused node context (if any)
     if (focusedNode) {
       const node = tree.nodes.get(focusedNode);
       if (node) {
-        lines.push(
-          ctx.ui.theme.fg("accent", `▸ `) +
-          ctx.ui.theme.fg("accent", ctx.ui.theme.bold(node.title)) +
-          (node.open_questions.length > 0
-            ? ctx.ui.theme.fg("dim", ` — ${node.open_questions.length} open questions`)
-            : "")
-        );
+        const icon = STATUS_ICONS[node.status];
+        const color = STATUS_COLORS[node.status] as Parameters<typeof ctx.ui.theme.fg>[0];
+        let focusLine = ctx.ui.theme.fg("accent", "▸ ");
+        focusLine += ctx.ui.theme.fg(color, `${icon} `);
+        focusLine += ctx.ui.theme.fg("accent", ctx.ui.theme.bold(node.title));
+        if (node.open_questions.length > 0) {
+          focusLine += ctx.ui.theme.fg("dim", ` — ${node.open_questions.length} open questions`);
+        }
+        lines.push(focusLine);
+
+        // Show the first open question as a nudge
+        if (node.open_questions.length > 0) {
+          lines.push(ctx.ui.theme.fg("dim", `  ? ${node.open_questions[0]}`));
+        }
       }
     }
 
@@ -377,11 +380,11 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
   // ─── Commands ────────────────────────────────────────────────
 
   pi.registerCommand("design", {
-    description: "Design tree: status | focus [id] | unfocus | decide [id] | explore [id] | block [id] | defer [id] | branch | frontier | new <id> <title> | update [id] | compact",
+    description: "Design tree: status | list | focus [id] | unfocus | decide [id] | explore [id] | block [id] | defer [id] | branch | frontier | new <id> <title> | update [id] | widget",
     getArgumentCompletions: (prefix: string) => {
       const subcommands = [
-        "status", "focus", "unfocus", "decide", "explore",
-        "branch", "frontier", "new", "update", "compact",
+        "status", "list", "focus", "unfocus", "decide", "explore",
+        "branch", "frontier", "new", "update", "widget",
       ];
       const parts = prefix.split(" ");
       if (parts.length <= 1) {
@@ -417,6 +420,45 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
           }
           updateWidget(ctx);
           ctx.ui.notify(`Design tree: ${tree.nodes.size} nodes`, "info");
+          break;
+        }
+
+        case "list": {
+          if (tree.nodes.size === 0) {
+            ctx.ui.notify("No design documents found.", "info");
+            return;
+          }
+          const total = tree.nodes.size;
+          const decided = Array.from(tree.nodes.values()).filter((n) => n.status === "decided").length;
+          const exploring = Array.from(tree.nodes.values()).filter(
+            (n) => n.status === "exploring" || n.status === "seed"
+          ).length;
+          const blocked = Array.from(tree.nodes.values()).filter((n) => n.status === "blocked").length;
+          const openQ = getAllOpenQuestions(tree).length;
+
+          // Build a compact multi-line summary using notify
+          const parts = [`${decided}/${total} decided, ${exploring} exploring, ${openQ} open questions`];
+          if (blocked > 0) parts[0] += `, ${blocked} blocked`;
+
+          // List nodes grouped by status
+          const byStatus = new Map<string, DesignNode[]>();
+          for (const node of tree.nodes.values()) {
+            const list = byStatus.get(node.status) || [];
+            list.push(node);
+            byStatus.set(node.status, list);
+          }
+          for (const [status, nodes] of byStatus) {
+            const icon = STATUS_ICONS[status as NodeStatus];
+            const names = nodes.map((n) => n.title).join(", ");
+            parts.push(`${icon} ${status}: ${names}`);
+          }
+
+          if (focusedNode) {
+            const node = tree.nodes.get(focusedNode);
+            if (node) parts.push(`▸ Focused: ${node.title}`);
+          }
+
+          ctx.ui.notify(parts.join("\n"), "info");
           break;
         }
 
@@ -786,16 +828,20 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
           break;
         }
 
-        case "compact": {
-          compactWidget = !compactWidget;
-          updateWidget(ctx);
-          ctx.ui.notify(`Widget ${compactWidget ? "compact" : "expanded"} mode`, "info");
+        case "widget": {
+          widgetHidden = !widgetHidden;
+          if (widgetHidden) {
+            ctx.ui.setWidget("design-tree", undefined);
+          } else {
+            updateWidget(ctx);
+          }
+          ctx.ui.notify(`Design tree widget ${widgetHidden ? "hidden" : "shown"}`, "info");
           break;
         }
 
         default:
           ctx.ui.notify(
-            "Subcommands: status, focus, unfocus, decide, explore, block, defer, branch, frontier, new, update, compact",
+            "Subcommands: status, focus, unfocus, decide, explore, block, defer, branch, frontier, new, update, widget",
             "info"
           );
       }
