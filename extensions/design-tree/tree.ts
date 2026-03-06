@@ -769,9 +769,7 @@ export function branchFromQuestion(
 	return child;
 }
 
-// ─── Slug Helper ─────────────────────────────────────────────────────────────
-
-// ─── Validation ──────────────────────────────────────────────────────────────
+// ─── Validation & Helpers ────────────────────────────────────────────────────
 
 /** Strict pattern for node IDs — no path traversal, no dots, no slashes */
 const VALID_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;

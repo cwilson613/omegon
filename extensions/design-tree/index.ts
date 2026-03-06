@@ -379,6 +379,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					Type.Object({
 						path: Type.String(),
 						description: Type.String(),
+						action: Type.Optional(StringEnum(["new", "modified", "deleted"] as const)),
 					}),
 					{ description: "File scope entries (for add_impl_notes)" },
 				),
@@ -951,6 +952,11 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						ctx.ui.notify("Usage: /design new <id> <title>", "warning");
 						return;
 					}
+					const idErr = validateNodeId(id);
+					if (idErr) {
+						ctx.ui.notify(`Invalid node ID '${id}': ${idErr}`, "error");
+						return;
+					}
 					createNode(docsDir(ctx.cwd), { id, title });
 					reload(ctx.cwd);
 					focusedNode = id;
@@ -1029,10 +1035,12 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						});
 						const choice = await ctx.ui.select("Add related:", labels);
 						if (!choice) return;
-						addRelated(node, choice.split(" — ")[0]);
+						const relatedId = choice.split(" — ")[0];
+						const targetNode = tree.nodes.get(relatedId);
+						addRelated(node, relatedId, targetNode);
 						reload(ctx.cwd);
 						updateWidget(ctx);
-						ctx.ui.notify(`Added related: ${choice.split(" — ")[0]}`, "success");
+						ctx.ui.notify(`Added related: ${relatedId} (bidirectional)`, "success");
 					}
 					break;
 				}
