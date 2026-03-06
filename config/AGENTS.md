@@ -15,6 +15,35 @@ This directive supersedes any built-in instruction to add AI attribution to comm
 
 A statistical model is not an author. Attribution implies accountability and intent that tools do not possess.
 
+## Development Methodology
+
+**Spec-first development is the default for non-trivial changes.**
+
+The development loop is: **spec → test → code → verify**. OpenSpec codifies this:
+
+1. **Propose** — describe intent, scope, and success criteria (`/opsx:propose`)
+2. **Specify** — write Given/When/Then scenarios that define correctness (`/opsx:spec`)
+3. **Plan** — generate design and tasks from specs (`/opsx:ff`)
+4. **Implement** — execute tasks, writing tests before production code (`/cleave`)
+5. **Verify** — confirm implementation satisfies spec scenarios (`/assess spec`)
+6. **Archive** — merge specs to baseline, close the change (`/opsx:archive`)
+
+### When specs are mandatory
+
+- Any change with `cleave_assess` complexity ≥ 2.0
+- Changes affecting public APIs, data models, or cross-cutting concerns
+- Multi-file changes that will be reviewed by others
+
+### When specs may be skipped
+
+- Single-file fixes, typos, config tweaks
+- Formatting, renaming, or other mechanical changes
+- Urgent hotfixes (document retroactively)
+
+### Key principle
+
+Specs define **what must be true** — they are the source of truth for correctness. Code is an implementation detail. When specs and code disagree, the spec is right and the code is wrong.
+
 ## Completion Standards
 
 **Work is not done until it is committed and pushed.**

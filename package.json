@@ -17,6 +17,7 @@
       "./extensions/01-auth",
       "./extensions/chronos",
       "./extensions/cleave",
+      "./extensions/openspec",
       "./extensions/defaults.ts",
       "./extensions/distill.ts",
       "./extensions/render",
