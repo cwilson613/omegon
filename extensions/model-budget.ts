@@ -21,13 +21,27 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "./lib/typebox-helpers";
 
-const TIERS = {
-  opus: { id: "claude-opus-4-6", label: "opus", icon: "🧠" },
-  sonnet: { id: "claude-sonnet-4-6", label: "sonnet", icon: "⚡" },
-  haiku: { id: "claude-haiku-4-5", label: "haiku", icon: "💨" },
+/** Static tier metadata — model IDs resolved dynamically at runtime */
+const TIER_META = {
+  opus:   { prefix: "claude-opus",   label: "opus",   icon: "🧠" },
+  sonnet: { prefix: "claude-sonnet", label: "sonnet", icon: "⚡" },
+  haiku:  { prefix: "claude-haiku",  label: "haiku",  icon: "💨" },
 } as const;
 
-type TierName = keyof typeof TIERS;
+type TierName = keyof typeof TIER_META;
+
+/**
+ * Find the best matching Anthropic model for a tier by prefix.
+ * Picks the latest model ID alphabetically (higher version = later sort).
+ */
+function findTierModel(ctx: any, tier: TierName): ReturnType<typeof ctx.modelRegistry.find> | undefined {
+  const meta = TIER_META[tier];
+  const all = ctx.modelRegistry.getAll();
+  const candidates = all
+    .filter((m: any) => m.provider === "anthropic" && m.id.startsWith(meta.prefix))
+    .sort((a: any, b: any) => b.id.localeCompare(a.id)); // latest version first
+  return candidates[0] ?? undefined;
+}
 
 // Thinking levels ordered by cost/depth (xhigh excluded — OpenAI-only)
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high"] as const;
@@ -42,8 +56,7 @@ const THINKING_LABELS: Record<ThinkingLevelName, { icon: string; label: string }
 };
 
 async function switchTo(tier: TierName, pi: ExtensionAPI, ctx: any): Promise<boolean> {
-  const spec = TIERS[tier];
-  const model = ctx.modelRegistry.find("anthropic", spec.id);
+  const model = findTierModel(ctx, tier);
   if (!model) return false;
   const success = await pi.setModel(model);
   return success;
@@ -52,8 +65,8 @@ async function switchTo(tier: TierName, pi: ExtensionAPI, ctx: any): Promise<boo
 function currentTierName(ctx: ExtensionContext): TierName | null {
   const model = ctx.model;
   if (!model) return null;
-  for (const [name, spec] of Object.entries(TIERS)) {
-    if (model.id === spec.id) return name as TierName;
+  for (const [name, meta] of Object.entries(TIER_META)) {
+    if (model.id.startsWith(meta.prefix)) return name as TierName;
   }
   return null;
 }
@@ -96,16 +109,18 @@ export default function (pi: ExtensionAPI) {
       _onUpdate,
       ctx,
     ) => {
+      const meta = TIER_META[params.tier];
       const success = await switchTo(params.tier, pi, ctx);
-      const spec = TIERS[params.tier];
       if (success) {
+        const resolved = findTierModel(ctx, params.tier);
+        const modelId = resolved?.id ?? meta.prefix;
         const thinking = pi.getThinkingLevel();
-        ctx.ui.notify(`${spec.icon} → ${spec.label} (thinking: ${thinking}): ${params.reason}`, "info");
+        ctx.ui.notify(`${meta.icon} → ${meta.label} (thinking: ${thinking}): ${params.reason}`, "info");
         return {
           content: [
             {
               type: "text" as const,
-              text: `Switched to ${spec.label} (${spec.id}), thinking: ${thinking}. ${params.reason}`,
+              text: `Switched to ${meta.label} (${modelId}), thinking: ${thinking}. ${params.reason}`,
             },
           ],
         };
@@ -114,7 +129,7 @@ export default function (pi: ExtensionAPI) {
         content: [
           {
             type: "text" as const,
-            text: `Failed to switch to ${spec.label} — model not found or no API key`,
+            text: `Failed to switch to ${meta.label} — no matching ${meta.prefix}-* model found or no API key`,
           },
         ],
       };
@@ -171,13 +186,13 @@ export default function (pi: ExtensionAPI) {
   });
 
   // --- Manual commands for direct control ---
-  for (const [name, spec] of Object.entries(TIERS)) {
+  for (const [name, meta] of Object.entries(TIER_META)) {
     pi.registerCommand(name, {
-      description: `Switch to ${spec.label} (${spec.icon})`,
+      description: `Switch to ${meta.label} (${meta.icon})`,
       handler: async (_args, ctx) => {
         const success = await switchTo(name as TierName, pi, ctx);
         if (!success) {
-          ctx.ui.notify(`Failed to switch to ${spec.label}`, "error");
+          ctx.ui.notify(`Failed to switch to ${meta.label}`, "error");
         }
       },
     });

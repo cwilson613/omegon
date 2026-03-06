@@ -20,6 +20,8 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 import type { ChildPlan, SplitPlan } from "./types.js";
+// Re-use the canonical detection function from the openspec extension
+import { getOpenSpecDir } from "../openspec/spec.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -71,12 +73,11 @@ export interface OpenSpecContext {
 
 /**
  * Detect whether an OpenSpec workspace exists in the given repo.
+ * Delegates to the canonical openspec/spec.ts implementation.
  * Returns the path to openspec/ if found, null otherwise.
  */
 export function detectOpenSpec(repoPath: string): string | null {
-	const openspecDir = join(repoPath, "openspec");
-	if (existsSync(openspecDir)) return openspecDir;
-	return null;
+	return getOpenSpecDir(repoPath);
 }
 
 /**

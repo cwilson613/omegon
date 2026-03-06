@@ -57,20 +57,13 @@ function normalizeModelId(name: string): string {
 
 async function checkAnthropic(): Promise<boolean> {
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5",
-        max_tokens: 1,
-        messages: [{ role: "user", content: "." }],
-      }),
+    // Use GET on the models endpoint — lightweight, no billing, confirms API reachability.
+    // Any HTTP response (even 401) means the network path works.
+    const res = await fetch("https://api.anthropic.com/v1/models", {
+      method: "GET",
+      headers: { "anthropic-version": "2023-06-01" },
       signal: AbortSignal.timeout(5000),
     });
-    // Any HTTP response means network is reachable
     return true;
   } catch {
     return false;
@@ -179,7 +172,21 @@ async function goOnline(
   }
 
   const provider = savedCloudProvider || "anthropic";
-  const modelId = savedCloudModel || "claude-opus-4-6";
+  let modelId = savedCloudModel;
+
+  // If no saved model, find the best available opus model by prefix
+  if (!modelId) {
+    const all = ctx.modelRegistry.getAll();
+    const opus = all
+      .filter((m: any) => m.provider === "anthropic" && m.id.startsWith("claude-opus"))
+      .sort((a: any, b: any) => b.id.localeCompare(a.id));
+    modelId = opus[0]?.id;
+  }
+
+  if (!modelId) {
+    return { success: false, message: "No Anthropic opus model found in registry." };
+  }
+
   const model = ctx.modelRegistry.find(provider, modelId);
 
   if (!model) {

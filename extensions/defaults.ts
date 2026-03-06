@@ -11,6 +11,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as crypto from "node:crypto";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 const AGENT_DIR = path.join(
@@ -24,8 +25,15 @@ const GLOBAL_AGENTS_PATH = path.join(AGENT_DIR, "AGENTS.md");
 /** Marker embedded in the deployed AGENTS.md to identify pi-kit ownership */
 const PIKIT_MARKER = "<!-- managed by pi-kit -->";
 
+/** Hash file tracks the last content we deployed, so we detect user edits */
+const HASH_PATH = path.join(AGENT_DIR, ".agents-md-hash");
+
 /** Path to the template shipped with the pi-kit package */
 const TEMPLATE_PATH = path.join(import.meta.dirname, "..", "config", "AGENTS.md");
+
+function contentHash(content: string): string {
+  return crypto.createHash("sha256").update(content).digest("hex").slice(0, 16);
+}
 
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
@@ -61,15 +69,31 @@ export default function (pi: ExtensionAPI) {
         const existing = fs.readFileSync(GLOBAL_AGENTS_PATH, "utf8");
 
         if (existing.includes(PIKIT_MARKER)) {
-          // We own this file — update if template has changed
+          // We own this file — check if user has edited it since last deploy
           if (existing !== deployContent) {
-            fs.writeFileSync(GLOBAL_AGENTS_PATH, deployContent, "utf8");
+            const lastHash = fs.existsSync(HASH_PATH) ? fs.readFileSync(HASH_PATH, "utf8").trim() : null;
+            const existingHash = contentHash(existing);
+
+            if (lastHash && lastHash !== existingHash) {
+              // File was modified externally — warn, don't overwrite
+              if (ctx.hasUI) {
+                ctx.ui.notify(
+                  "pi-kit: ~/.pi/agent/AGENTS.md has local edits. Remove the pi-kit marker to keep them, or delete the file to re-deploy.",
+                  "warning",
+                );
+              }
+            } else {
+              // File matches our last deploy (or no hash yet) — safe to update
+              fs.writeFileSync(GLOBAL_AGENTS_PATH, deployContent, "utf8");
+              fs.writeFileSync(HASH_PATH, contentHash(deployContent), "utf8");
+            }
           }
         }
-        // else: user-authored file, don't touch it
+        // else: user-authored file (no marker), don't touch it
       } else {
         // No AGENTS.md exists — deploy ours
         fs.writeFileSync(GLOBAL_AGENTS_PATH, deployContent, "utf8");
+        fs.writeFileSync(HASH_PATH, contentHash(deployContent), "utf8");
         if (ctx.hasUI) {
           ctx.ui.notify("pi-kit: deployed global directives to ~/.pi/agent/AGENTS.md", "success");
         }
