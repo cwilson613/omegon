@@ -11,10 +11,10 @@ import type { EffortConfig, EffortLevel } from "./types.ts";
 // ─── tierConfig ─────────────────────────────────────────────────────────────
 
 describe("tierConfig", () => {
-  it("Low tier (1) is fully local", () => {
+  it("Servitor tier (1) is fully local", () => {
     const c = tierConfig(1);
     assert.equal(c.level, 1);
-    assert.equal(c.name, "Low");
+    assert.equal(c.name, "Servitor");
     assert.equal(c.driver, "local");
     assert.equal(c.thinking, "off");
     assert.equal(c.extraction, "local");
@@ -156,8 +156,8 @@ describe("parseTierName", () => {
     assert.equal(parseTierName("Ruthless"), 4);
   });
 
-  it("resolves 'Low' to level 1", () => {
-    assert.equal(parseTierName("Low"), 1);
+  it("resolves 'Servitor' to level 1", () => {
+    assert.equal(parseTierName("Servitor"), 1);
   });
 
   it("resolves 'Omnissiah' to level 7", () => {
@@ -190,7 +190,7 @@ describe("parseTierName", () => {
 
   it("resolves all 7 tier names", () => {
     const expected: [string, number][] = [
-      ["Low", 1], ["Average", 2], ["Substantial", 3],
+      ["Servitor", 1], ["Average", 2], ["Substantial", 3],
       ["Ruthless", 4], ["Lethal", 5], ["Absolute", 6],
       ["Omnissiah", 7],
     ];
@@ -212,7 +212,7 @@ describe("effort constants", () => {
   });
 
   it("TIER_NAMES contains all expected names", () => {
-    assert.ok(TIER_NAMES.includes("Low"));
+    assert.ok(TIER_NAMES.includes("Servitor"));
     assert.ok(TIER_NAMES.includes("Average"));
     assert.ok(TIER_NAMES.includes("Substantial"));
     assert.ok(TIER_NAMES.includes("Ruthless"));

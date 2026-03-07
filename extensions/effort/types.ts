@@ -2,7 +2,7 @@
  * effort/types — Type definitions for the effort-tiers system.
  *
  * Effort tiers provide 7-level global inference cost control,
- * from fully-local (Low) to all-opus (Omnissiah).
+ * from fully-local (Servitor) to all-opus (Omnissiah).
  */
 
 // ─── Model Tiers ─────────────────────────────────────────────
@@ -20,7 +20,7 @@ export type EffortLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 /** Human-readable tier names, indexed by level. */
 export const EFFORT_NAMES = {
-  1: "Low",
+  1: "Servitor",
   2: "Average",
   3: "Substantial",
   4: "Ruthless",

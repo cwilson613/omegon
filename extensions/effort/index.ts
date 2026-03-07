@@ -2,7 +2,7 @@
  * effort — Global inference cost control extension.
  *
  * Provides a single `/effort` command to switch between 7 named tiers
- * (Low → Omnissiah), each controlling the driver model, thinking level,
+ * (Servitor → Omnissiah), each controlling the driver model, thinking level,
  * and downstream settings for cleave dispatch, extraction, and compaction.
  *
  * On session_start: resolves the active tier from PI_EFFORT env var,

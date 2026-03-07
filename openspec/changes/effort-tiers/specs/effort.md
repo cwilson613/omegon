@@ -6,9 +6,9 @@
 
 `tierConfig(level)` is a pure function mapping a numeric level (1-7) to an `EffortConfig` object. Each config specifies: driver model, thinking level, extraction model preference, compaction model preference, cleave preferLocal flag, cleave floor tier, and review model.
 
-#### Scenario: Low tier is fully local
+#### Scenario: Servitor tier is fully local
 
-Given level 1 (Low)
+Given level 1 (Servitor)
 When tierConfig is called
 Then driver is "local", thinking is "off", extraction is "local", compaction is "local", cleavePreferLocal is true, cleaveFloor is "local", reviewModel is "local"
 
@@ -48,9 +48,9 @@ Then sharedState.effort contains the default tier config (Substantial, level 3)
 
 #### Scenario: PI_EFFORT env var overrides default
 
-Given PI_EFFORT=Low
+Given PI_EFFORT=Servitor
 When session_start fires
-Then sharedState.effort.level is 1 and sharedState.effort.name is "Low"
+Then sharedState.effort.level is 1 and sharedState.effort.name is "Servitor"
 
 #### Scenario: .pi/config.json effort key sets default
 
@@ -61,7 +61,7 @@ Then sharedState.effort.level is 4
 
 #### Scenario: Env var takes priority over config file
 
-Given PI_EFFORT=Omnissiah and .pi/config.json contains {"effort": "Low"}
+Given PI_EFFORT=Omnissiah and .pi/config.json contains {"effort": "Servitor"}
 When session_start fires
 Then sharedState.effort.level is 7
 
@@ -146,7 +146,7 @@ Then the switch succeeds
 
 The cleave dispatcher reads `sharedState.effort` to determine `preferLocal` and the floor tier for child classification.
 
-#### Scenario: Low tier forces all children local
+#### Scenario: Servitor tier forces all children local
 
 Given sharedState.effort.level is 1
 When cleave dispatches children

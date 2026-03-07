@@ -94,20 +94,20 @@ describe("checkEffortCap", () => {
     });
 
     it("blocks opus when capped at haiku", () => {
-      setEffortCap("local", "Low", 1);
+      setEffortCap("local", "Servitor", 1);
       const result = checkEffortCap("opus");
       assert.equal(result.blocked, true);
-      assert.ok(result.message!.includes("Low"));
+      assert.ok(result.message!.includes("Servitor"));
     });
 
-    it("blocks sonnet when capped at local (Low)", () => {
-      setEffortCap("local", "Low", 1);
+    it("blocks sonnet when capped at local (Servitor)", () => {
+      setEffortCap("local", "Servitor", 1);
       const result = checkEffortCap("sonnet");
       assert.equal(result.blocked, true);
     });
 
-    it("blocks haiku when capped at local (Low)", () => {
-      setEffortCap("local", "Low", 1);
+    it("blocks haiku when capped at local (Servitor)", () => {
+      setEffortCap("local", "Servitor", 1);
       const result = checkEffortCap("haiku");
       assert.equal(result.blocked, true);
     });

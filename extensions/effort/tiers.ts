@@ -11,7 +11,7 @@ import { EFFORT_NAMES } from "./types.ts";
  * Static tier configuration table.
  * Each entry is a complete EffortConfig for levels 1-7.
  *
- *  1 = Low        — all local
+ *  1 = Servitor        — all local
  *  2 = Average    — local driver, local background
  *  3 = Substantial — sonnet driver, local background (daily default)
  *  4 = Ruthless   — sonnet + medium thinking
@@ -22,7 +22,7 @@ import { EFFORT_NAMES } from "./types.ts";
 const TIERS: Record<EffortLevel, EffortConfig> = {
   1: {
     level: 1,
-    name: "Low",
+    name: "Servitor",
     driver: "local",
     thinking: "off",
     extraction: "local",

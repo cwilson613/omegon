@@ -2,7 +2,7 @@
 
 ## 1. Tier configuration returns correct EffortConfig for each level
 
-- [ ] 1.1 Low tier is fully local
+- [ ] 1.1 Servitor tier is fully local
 - [ ] 1.2 Substantial tier is the daily driver
 - [ ] 1.3 Omnissiah tier is all opus
 - [ ] 1.4 Tier name resolves to level number
@@ -41,7 +41,7 @@
 
 ## 6. Cleave reads effort config for dispatch decisions
 
-- [ ] 6.1 Low tier forces all children local
+- [ ] 6.1 Servitor tier forces all children local
 - [ ] 6.2 Absolute tier raises the floor to sonnet
 - [ ] 6.3 Effort not set falls back to default behavior
 - [ ] 6.4 Write tests for Cleave reads effort config for dispatch decisions

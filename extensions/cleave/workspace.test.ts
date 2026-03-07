@@ -734,10 +734,10 @@ describe("resolveExecuteModel — effort integration", () => {
 		delete (globalThis as any)[SHARED_KEY].effort;
 	}
 
-	it("Low tier forces all children local regardless of scope", () => {
+	it("Servitor tier forces all children local regardless of scope", () => {
 		setEffort({
 			level: 1,
-			name: "Low",
+			name: "Servitor",
 			cleavePreferLocal: true,
 			cleaveFloor: "local",
 		});
@@ -788,7 +788,7 @@ describe("resolveExecuteModel — effort integration", () => {
 	it("explicit annotation bypasses effort floor", () => {
 		setEffort({
 			level: 1,
-			name: "Low",
+			name: "Servitor",
 			cleavePreferLocal: true,
 			cleaveFloor: "local",
 		});

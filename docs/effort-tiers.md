@@ -1,6 +1,6 @@
 ---
 id: effort-tiers
-title: Effort Tiers — Global Inference Cost Control (Low → Omnissiah)
+title: Effort Tiers — Global Inference Cost Control (Servitor → Omnissiah)
 status: implementing
 tags: [cost, local-inference, architecture, cross-cutting]
 open_questions: []
@@ -8,11 +8,11 @@ branches: ["feature/effort-tiers"]
 openspec_change: effort-tiers
 ---
 
-# Effort Tiers — Global Inference Cost Control (Low → Omnissiah)
+# Effort Tiers — Global Inference Cost Control (Servitor → Omnissiah)
 
 ## Overview
 
-A single global knob controlling the ratio of local-vs-cloud inference across the entire harness. Seven named tiers inspired by Space Marine 2 difficulty levels and 40K threat designations. From fully local (Low) to all-opus-all-the-time (Omnissiah). Replaces the current patchwork of per-extension model selection with a unified control plane.
+A single global knob controlling the ratio of local-vs-cloud inference across the entire harness. Seven named tiers inspired by Space Marine 2 difficulty levels and 40K threat designations. From fully local (Servitor) to all-opus-all-the-time (Omnissiah). Replaces the current patchwork of per-extension model selection with a unified control plane.
 
 ## Research
 
@@ -27,8 +27,8 @@ A single global knob controlling the ratio of local-vs-cloud inference across th
 | 3 | **Compaction model** | `project-memory/index.ts` → `compactionLocalFirst` | Config boolean | Boolean flip based on tier |
 | 4 | **Cleave child tier** | `cleave/dispatcher.ts` → `resolveExecuteModel()` | `preferLocal` + scope autoclassification | Override `preferLocal` + adjust thresholds |
 | 5 | **Review loop model** | `cleave/review.ts` → executor.review() | Hardcoded `"opus"` in dispatcher.ts | Tier-dependent: local/sonnet/opus |
-| 6 | **Episode generation** | `project-memory/extraction-v2.ts` → `generateEpisodeDirect` | Always local (qwen3:30b) | Keep local for Low-Ruthless, cloud for Lethal+ |
-| 7 | **Offline driver** | `offline-driver.ts` → `pi.setModel()` | Manual `/offline` command | Auto-activate at Low/Average |
+| 6 | **Episode generation** | `project-memory/extraction-v2.ts` → `generateEpisodeDirect` | Always local (qwen3:30b) | Keep local for Servitor-Ruthless, cloud for Lethal+ |
+| 7 | **Offline driver** | `offline-driver.ts` → `pi.setModel()` | Manual `/offline` command | Auto-activate at Servitor/Average |
 
 **Existing infrastructure that already supports this:**
 - `sharedState` (globalThis symbol) for cross-extension reads
@@ -42,7 +42,7 @@ A single global knob controlling the ratio of local-vs-cloud inference across th
 
 | Tier | Name | Driver | Thinking | Extraction | Compaction | Cleave Default | Review | Est. Cloud % |
 |------|------|--------|----------|------------|------------|----------------|--------|:------------:|
-| 1 | **Low** | local (offline) | off | local | local | all local | local | **0%** |
+| 1 | **Servitor** | local (offline) | off | local | local | all local | local | **0%** |
 | 2 | **Average** | local (offline) | minimal | local | local | scope-based (local bias) | local | **0%** |
 | 3 | **Substantial** | sonnet | low | local | local | scope-based (normal) | sonnet | **~30%** |
 | 4 | **Ruthless** | sonnet | medium | local | local | scope-based (normal) | sonnet | **~45%** |
@@ -73,7 +73,7 @@ extensions/effort/
 ```typescript
 interface EffortConfig {
   level: EffortLevel;          // 1-7
-  name: string;                // "Low" | "Average" | ... | "Omnissiah"
+  name: string;                // "Servitor" | "Average" | ... | "Omnissiah"
   driver: "local" | "sonnet" | "opus";
   thinking: ThinkingLevel;
   extraction: "local" | "sonnet" | "opus";
@@ -91,13 +91,13 @@ interface EffortConfig {
 
 **Persistence:**
 - `.pi/config.json` → `{"effort": "Ruthless"}` for project-level default
-- `PI_EFFORT=Low` env var for CI / automation / override
+- `PI_EFFORT=Servitor` env var for CI / automation / override
 - `/effort <name>` command for mid-session switching
 - Priority: env var > command > config > default (Substantial)
 
 **Mid-session switching:**
 - `/effort Omnissiah` → writes to shared state → calls `pi.setModel(opus)` + `pi.setThinkingLevel("high")`
-- `/effort Low` → writes to shared state → calls `pi.setModel(local_model)` + `pi.setThinkingLevel("off")`
+- `/effort Servitor` → writes to shared state → calls `pi.setModel(local_model)` + `pi.setThinkingLevel("off")`
 - Extensions pick up the change on next decision point (extraction cycle, cleave dispatch, etc.)
 - No retroactive effect on in-flight operations
 
@@ -126,7 +126,7 @@ interface EffortConfig {
 **What needs care:**
 1. **Extension load order** — effort must initialize shared state before other extensions read it. Pi loads extensions in package.json order, so effort goes first.
 2. **model-budget interaction** — the `set_model_tier` / `set_thinking_level` tools let the agent override within a tier's ceiling. Effort sets the default; agent can downgrade but not upgrade past the tier ceiling. Or: the tools remain unconstrained for flexibility, and effort is a "starting position" not a hard cap. Operator can always `/effort` to change.
-3. **Local model availability** — tiers 1-2 REQUIRE Ollama running. If Ollama is down, `/effort Low` should warn and refuse, or auto-start Ollama (the local-inference extension already has `ollamaStart()`).
+3. **Local model availability** — tiers 1-2 REQUIRE Ollama running. If Ollama is down, `/effort Servitor` should warn and refuse, or auto-start Ollama (the local-inference extension already has `ollamaStart()`).
 4. **The adversarial review bugs (C1-C3)** should be fixed first — they're in the code paths effort will route through.
 
 **Estimated scope:**
