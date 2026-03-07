@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
 import { matchScenariosToChildren, generateTaskFile, buildSkillSection, buildGuardrailSection } from "./workspace.ts";
 import type { SkillDirective } from "./workspace.ts";
-import { buildChildPrompt, resolveExecuteModel, mapModelTierToFlag } from "./dispatcher.ts";
+import { buildChildPrompt, resolveExecuteModel, classifyByScope, mapModelTierToFlag } from "./dispatcher.ts";
 import type { ChildPlan, ModelTier } from "./types.ts";
 import type { OpenSpecContext } from "./openspec.ts";
 
@@ -444,6 +444,129 @@ describe("resolveExecuteModel", () => {
 			false,
 			false,
 			() => undefined,
+		);
+		assert.equal(result, "sonnet");
+	});
+});
+
+// ─── classifyByScope ────────────────────────────────────────────────────────
+
+describe("classifyByScope", () => {
+	it("returns local for 1 file", () => {
+		assert.equal(classifyByScope(["src/api.ts"]), "local");
+	});
+
+	it("returns local for 3 non-test files", () => {
+		assert.equal(classifyByScope(["src/a.ts", "src/b.ts", "src/c.ts"]), "local");
+	});
+
+	it("returns sonnet for 4 non-test files", () => {
+		assert.equal(classifyByScope(["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"]), "sonnet");
+	});
+
+	it("returns sonnet for 8 non-test files", () => {
+		const scope = Array.from({ length: 8 }, (_, i) => `src/file${i}.ts`);
+		assert.equal(classifyByScope(scope), "sonnet");
+	});
+
+	it("returns opus for 9+ non-test files", () => {
+		const scope = Array.from({ length: 9 }, (_, i) => `src/file${i}.ts`);
+		assert.equal(classifyByScope(scope), "opus");
+	});
+
+	it("test files are excluded from non-test count", () => {
+		// 2 non-test + 3 test = 5 total but only 2 effective → local
+		assert.equal(classifyByScope([
+			"src/api.ts", "src/types.ts",
+			"src/api.test.ts", "src/types.test.ts", "src/integration.test.ts",
+		]), "local");
+	});
+
+	it("returns undefined for empty scope", () => {
+		assert.equal(classifyByScope([]), undefined);
+	});
+
+	it(".spec.ts files are also excluded from non-test count", () => {
+		assert.equal(classifyByScope([
+			"src/api.ts", "src/api.spec.ts",
+		]), "local");
+	});
+});
+
+// ─── resolveExecuteModel with scope autoclassification ──────────────────────
+
+describe("resolveExecuteModel — scope autoclassification", () => {
+	it("classifies small scope (≤3 files) as local when local available", () => {
+		const result = resolveExecuteModel(
+			{ scope: ["src/api.ts", "src/types.ts"], skills: [] },
+			false,
+			true,
+		);
+		assert.equal(result, "local");
+	});
+
+	it("classifies medium scope (4-8 files) as sonnet", () => {
+		const scope = Array.from({ length: 5 }, (_, i) => `src/file${i}.ts`);
+		const result = resolveExecuteModel(
+			{ scope, skills: [] },
+			false,
+			true,
+		);
+		assert.equal(result, "sonnet");
+	});
+
+	it("classifies large scope (9+ files) as opus", () => {
+		const scope = Array.from({ length: 10 }, (_, i) => `src/file${i}.ts`);
+		const result = resolveExecuteModel(
+			{ scope, skills: [] },
+			false,
+			true,
+		);
+		assert.equal(result, "opus");
+	});
+
+	it("explicit annotation overrides scope classification", () => {
+		const result = resolveExecuteModel(
+			{ scope: ["src/a.ts"], skills: [], executeModel: "opus" },
+			false,
+			true,
+		);
+		assert.equal(result, "opus", "explicit opus should override scope-based local");
+	});
+
+	it("preferLocal caps scope classification to local", () => {
+		const scope = Array.from({ length: 6 }, (_, i) => `src/file${i}.ts`);
+		const result = resolveExecuteModel(
+			{ scope, skills: [] },
+			true, // preferLocal
+			true,
+		);
+		assert.equal(result, "local", "preferLocal should force local regardless of scope size");
+	});
+
+	it("scope classification skipped when local model unavailable", () => {
+		const result = resolveExecuteModel(
+			{ scope: ["src/a.ts"], skills: [] },
+			false,
+			false, // no local model
+		);
+		assert.equal(result, "sonnet", "should fall through to default when no local model");
+	});
+
+	it("no scope falls through to preferLocal", () => {
+		const result = resolveExecuteModel(
+			{ skills: [] },
+			true,
+			true,
+		);
+		assert.equal(result, "local");
+	});
+
+	it("no scope, no preferLocal, no skills → default sonnet", () => {
+		const result = resolveExecuteModel(
+			{ skills: [] },
+			false,
+			true,
 		);
 		assert.equal(result, "sonnet");
 	});

@@ -27,6 +27,8 @@ export interface MemoryConfig {
   compactionAutoPercent: number;
   /** Use local model as fallback when cloud compaction fails */
   compactionLocalFallback: boolean;
+  /** Try local model FIRST for compaction (cloud only if local unavailable) */
+  compactionLocalFirst: boolean;
   /** Timeout for local model compaction inference in ms */
   compactionLocalTimeout: number;
   /** Max consecutive compaction retry attempts before giving up for the session */
@@ -41,13 +43,14 @@ export const DEFAULT_CONFIG: MemoryConfig = {
   minimumTokensBetweenUpdate: 5_000,
   toolCallsBetweenUpdates: 8,
   manualStoreThreshold: 3,
-  extractionModel: "claude-sonnet-4-6",
+  extractionModel: "devstral-small-2:24b",
   extractionTimeout: 60_000,
   shutdownExtractionTimeout: 15_000,
   pressureOnsetPercent: 55,
   compactionWarningPercent: 75,
   compactionAutoPercent: 85,
   compactionLocalFallback: true,
+  compactionLocalFirst: true,
   compactionLocalTimeout: 120_000,
   compactionRetryLimit: 3,
   globalExtractionEnabled: false,

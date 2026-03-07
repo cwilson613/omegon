@@ -230,9 +230,79 @@ export function formatFactsForExtraction(facts: Fact[]): string {
   return lines.join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// Direct Ollama extraction (no pi subprocess overhead)
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if extraction model looks like a local Ollama model name.
+ * Ollama models use the format "name:tag" (e.g., "devstral-small-2:24b")
+ * or bare names without the "claude-" prefix.
+ */
+function isLocalModel(model: string): boolean {
+  // Cloud model names start with "claude-" or contain a "/" (provider/model)
+  if (model.startsWith("claude-") || model.includes("/")) return false;
+  return true;
+}
+
+/**
+ * Run extraction directly via Ollama HTTP API.
+ * ~10x faster than spawning a pi subprocess — no process startup overhead.
+ * Returns null if Ollama is unreachable (caller should fall back to subprocess).
+ */
+async function runExtractionDirect(
+  systemPrompt: string,
+  userMessage: string,
+  config: MemoryConfig,
+  opts?: { ollamaUrl?: string },
+): Promise<string | null> {
+  const baseUrl = opts?.ollamaUrl ?? process.env.LOCAL_INFERENCE_URL ?? "http://localhost:11434";
+  const timeout = config.extractionTimeout;
+
+  try {
+    const resp = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: config.extractionModel,
+        stream: false,
+        options: {
+          temperature: 0.2,
+          num_predict: 2048,
+          num_ctx: 32768,
+        },
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+      }),
+      signal: AbortSignal.timeout(timeout),
+    });
+
+    if (!resp.ok) return null;
+
+    const data = await resp.json() as { message?: { content?: string } };
+    const raw = data.message?.content?.trim();
+    if (!raw) return null;
+
+    // Strip code fences and <think> blocks from reasoning models
+    return raw
+      .replace(/^```(?:jsonl?|json)?\n?/, "")
+      .replace(/\n?```\s*$/, "")
+      .replace(/<think>[\s\S]*?<\/think>\s*/g, "")
+      .trim();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Run project extraction (Phase 1).
  * Returns raw JSONL output from the extraction agent.
+ *
+ * When extractionModel is a local model, talks directly to Ollama HTTP API
+ * (no subprocess overhead). Falls back to pi subprocess for cloud models
+ * or if Ollama is unreachable.
  */
 export async function runExtractionV2(
   cwd: string,
@@ -251,9 +321,16 @@ export async function runExtractionV2(
     "\n\nOutput JSONL actions based on what you observe.",
   ].join("");
 
+  // Try direct Ollama path for local models (bypasses pi subprocess entirely)
+  if (isLocalModel(config.extractionModel)) {
+    const result = await runExtractionDirect(prompt, userMessage, config);
+    if (result !== null) return result;
+    // Ollama unreachable — fall through to subprocess with cloud fallback
+  }
+
   return spawnExtraction({
     cwd,
-    model: config.extractionModel,
+    model: isLocalModel(config.extractionModel) ? "claude-sonnet-4-6" : config.extractionModel,
     systemPrompt: prompt,
     userMessage,
     timeout: config.extractionTimeout,
@@ -360,6 +437,7 @@ export function formatGlobalExtractionInput(
 /**
  * Run global extraction (Phase 2).
  * Only called when Phase 1 produced new facts.
+ * Uses direct Ollama path for local models, falls back to pi subprocess.
  */
 export async function runGlobalExtraction(
   cwd: string,
@@ -375,10 +453,18 @@ export async function runGlobalExtraction(
     "\n\nOutput JSONL actions: promote generalizable facts and identify connections between GLOBAL facts.",
   ].join("");
 
+  const systemPrompt = buildGlobalExtractionPrompt();
+
+  // Try direct Ollama path for local models
+  if (isLocalModel(config.extractionModel)) {
+    const result = await runExtractionDirect(systemPrompt, userMessage, config);
+    if (result !== null) return result;
+  }
+
   return spawnExtraction({
     cwd,
-    model: config.extractionModel,
-    systemPrompt: buildGlobalExtractionPrompt(),
+    model: isLocalModel(config.extractionModel) ? "claude-sonnet-4-6" : config.extractionModel,
+    systemPrompt,
     userMessage,
     timeout: config.extractionTimeout,
     label: "Global extraction",

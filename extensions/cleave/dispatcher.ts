@@ -51,16 +51,62 @@ export function extractResultSection(content: string): string {
 // ─── Model resolution ───────────────────────────────────────────────────────
 
 /**
+ * Scope-based autoclassification thresholds.
+ *
+ * Ground rule: once classified as "local", the child STAYS local.
+ * If the local model fails, the task fails — it never silently escalates
+ * to cloud. This prevents autoclassification from being a leaky abstraction
+ * that degrades to cloud spend under pressure.
+ */
+const LOCAL_SCOPE_THRESHOLD = 3;      // ≤ this many files → local
+const SONNET_SCOPE_THRESHOLD = 8;     // ≤ this many files → sonnet, > → opus
+
+/**
+ * File extensions that signal complex reasoning (prefer cloud models).
+ * These are patterns where subtle bugs are expensive and local models
+ * are more likely to produce incorrect results.
+ */
+const COMPLEX_FILE_PATTERNS = [
+	/\.test\.(ts|tsx|js|jsx)$/,     // Test files often need cross-file understanding
+	// Note: tests removed from complex — local models handle single-file tests fine
+];
+
+/**
+ * Classify a child's execution tier based on scope analysis.
+ *
+ * Returns a tier suggestion or undefined if scope doesn't give a clear signal.
+ * The caller decides whether to use this or defer to other resolution steps.
+ */
+export function classifyByScope(
+	scope: string[],
+): ModelTier | undefined {
+	if (scope.length === 0) return undefined;
+
+	// Count the unique non-test files in scope
+	const nonTestFiles = scope.filter((f) => !f.endsWith(".test.ts") && !f.endsWith(".test.js") && !f.endsWith(".spec.ts") && !f.endsWith(".spec.js"));
+	const effectiveSize = nonTestFiles.length;
+
+	if (effectiveSize <= LOCAL_SCOPE_THRESHOLD) return "local";
+	if (effectiveSize <= SONNET_SCOPE_THRESHOLD) return "sonnet";
+	return "opus";
+}
+
+/**
  * Resolve the execution model tier for a child.
  *
  * Resolution order (first non-null wins):
- * 1. Local override — if preferLocal is true and a local model is available
- * 2. Explicit annotation — child.executeModel already set (from plan or annotation)
+ * 1. Explicit annotation — child.executeModel already set (from plan or task annotation)
+ * 2. Scope-based autoclassification — ≤3 files → local, ≤8 → sonnet, >8 → opus
+ *    (only when local model is available)
  * 3. Skill tier hint — highest preferredTier from matched skills
  * 4. Default — sonnet
+ *
+ * NO-FAIL-PAST RULE: Once a child is assigned "local" tier here, the dispatcher
+ * will NOT escalate to cloud on failure. The child either succeeds locally or fails.
+ * This is enforced structurally — dispatchSingleChild has no retry/escalation path.
  */
 export function resolveExecuteModel(
-	child: { skills?: string[]; executeModel?: ModelTier },
+	child: { scope?: string[]; skills?: string[]; executeModel?: ModelTier },
 	preferLocal: boolean,
 	localModelAvailable: boolean,
 	getPreferredTierFn?: (skills: string[]) => ModelTier | undefined,
@@ -68,7 +114,17 @@ export function resolveExecuteModel(
 	// 1. Explicit annotation on the child plan — always respected
 	if (child.executeModel) return child.executeModel;
 
-	// 2. Local override — applies when no explicit annotation
+	// 2. Scope-based autoclassification (when local is available)
+	if (localModelAvailable && child.scope && child.scope.length > 0) {
+		const scopeTier = classifyByScope(child.scope);
+		if (scopeTier) {
+			// preferLocal mode: cap at local (never auto-classify UP to cloud)
+			if (preferLocal && scopeTier !== "local") return "local";
+			return scopeTier;
+		}
+	}
+
+	// 2b. Global prefer_local flag (no scope info but local requested)
 	if (preferLocal && localModelAvailable) return "local";
 
 	// 3. Skill-based tier hint

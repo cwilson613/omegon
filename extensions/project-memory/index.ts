@@ -589,12 +589,16 @@ export default function (pi: ExtensionAPI) {
     store?.close(); globalStore?.close();
   });
 
-  // --- Local-model compaction fallback ---
-  // Only intercepts compaction when `useLocalCompaction` flag is set (after cloud failure).
-  // Cloud gets first attempt; this is the safety net.
+  // --- Local-model compaction ---
+  // Two modes:
+  // 1. compactionLocalFirst=true (default): intercept ALL compactions, try local first.
+  //    Cloud is only used if local model is unavailable (Ollama not running).
+  // 2. compactionLocalFirst=false: only intercept when useLocalCompaction flag is set
+  //    (after cloud failure). Cloud gets first attempt; local is the safety net.
   pi.on("session_before_compact", async (event, ctx) => {
-    if (!useLocalCompaction || !config.compactionLocalFallback) return;
-    useLocalCompaction = false; // consume the flag
+    const shouldIntercept = config.compactionLocalFirst || useLocalCompaction;
+    if (!shouldIntercept || !config.compactionLocalFallback) return;
+    useLocalCompaction = false; // consume the flag if it was set
 
     const prep = event.preparation;
     if (!prep || prep.messagesToSummarize.length === 0) return;
@@ -603,7 +607,12 @@ export default function (pi: ExtensionAPI) {
     if (!localModel) return; // No local model — cloud retry will also fail, but that's logged
 
     if (ctx.hasUI) {
-      ctx.ui.notify("Cloud compaction failed — falling back to local model", "warning");
+      ctx.ui.notify(
+        config.compactionLocalFirst
+          ? "Compacting via local model"
+          : "Cloud compaction failed — falling back to local model",
+        config.compactionLocalFirst ? "info" : "warning",
+      );
     }
 
     const timeoutSignal = AbortSignal.timeout(config.compactionLocalTimeout);
