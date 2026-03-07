@@ -15,6 +15,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { OverlayHandle } from "@mariozechner/pi-tui";
 import type { GuardrailResult } from "../cleave/guardrails.ts";
 import { DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
 import { DashboardFooter } from "./footer.ts";
@@ -24,6 +25,9 @@ import { debug } from "../debug.ts";
 
 /** Mode cycle order for ctrl+` toggling */
 const MODE_CYCLE: DashboardMode[] = ["compact", "raised", "panel", "focused"];
+
+/** Valid /dashboard subcommands for tab completion */
+const DASHBOARD_SUBCOMMANDS = ["compact", "raised", "panel", "focus", "open"];
 
 export default function (pi: ExtensionAPI) {
   const state: DashboardState = {
@@ -36,12 +40,14 @@ export default function (pi: ExtensionAPI) {
   let unsubscribeEvents: (() => void) | null = null;
 
   // ── Non-capturing overlay state ─────────────────────────────
-  /** Overlay handle from ctx.ui.custom() for non-capturing panel */
-  let overlayHandle: { hide(): void; setHidden(h: boolean): void; isHidden(): boolean; focus(): void; unfocus(): void; isFocused(): boolean } | null = null;
-  /** The done() callback to resolve the custom() promise when permanently closing */
+  /** Overlay handle for non-capturing panel (visibility + focus control) */
+  let overlayHandle: OverlayHandle | null = null;
+  /** The done() callback to resolve the custom() promise on permanent close */
   let overlayDone: ((result: void) => void) | null = null;
-  /** Track whether we've created the non-capturing overlay this session */
+  /** Whether the non-capturing overlay has been created this session */
   let overlayCreated = false;
+  /** Whether focus should be applied once the handle arrives (handles async creation) */
+  let pendingFocus = false;
 
   /**
    * Restore persisted dashboard mode from session entries.
@@ -90,7 +96,7 @@ export default function (pi: ExtensionAPI) {
 
   /**
    * Show the non-capturing overlay panel.
-   * Creates it on first call, then toggles visibility.
+   * Creates it on first call, then toggles visibility via setHidden.
    */
   function showPanel(ctx: ExtensionContext): void {
     if (overlayHandle && !overlayHandle.isHidden()) {
@@ -106,7 +112,8 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (overlayCreated) {
-      // Was permanently closed — don't recreate in same session
+      // Overlay was created but handle hasn't arrived yet (async), or
+      // was permanently destroyed — don't recreate in same session
       return;
     }
 
@@ -122,7 +129,7 @@ export default function (pi: ExtensionAPI) {
             state.mode = "panel";
             tui?.requestRender();
           } else {
-            // Esc from panel → hide
+            // Esc from unfocused panel → hide
             hidePanel();
           }
         });
@@ -132,7 +139,7 @@ export default function (pi: ExtensionAPI) {
       {
         overlay: true,
         overlayOptions: {
-          anchor: "right-center" as any,
+          anchor: "right-center",
           width: "40%",
           minWidth: 40,
           maxHeight: "80%",
@@ -142,6 +149,11 @@ export default function (pi: ExtensionAPI) {
         },
         onHandle: (handle) => {
           overlayHandle = handle;
+          // Apply deferred focus if cycleTo("focused") requested it before handle arrived
+          if (pendingFocus) {
+            pendingFocus = false;
+            handle.focus();
+          }
         },
       },
     );
@@ -151,6 +163,7 @@ export default function (pi: ExtensionAPI) {
    * Hide the non-capturing overlay without destroying it.
    */
   function hidePanel(): void {
+    pendingFocus = false;
     if (overlayHandle) {
       if (overlayHandle.isFocused()) {
         overlayHandle.unfocus();
@@ -167,29 +180,32 @@ export default function (pi: ExtensionAPI) {
   function focusPanel(): void {
     if (overlayHandle && !overlayHandle.isHidden()) {
       overlayHandle.focus();
+    } else {
+      // Handle not yet available — defer until onHandle fires
+      pendingFocus = true;
     }
   }
 
   /**
-   * Cycle through dashboard modes: compact → raised → panel → focused → compact
+   * Cycle to a specific dashboard mode.
    */
   function cycleTo(ctx: ExtensionContext, targetMode: DashboardMode): void {
     state.mode = targetMode;
 
     switch (targetMode) {
       case "compact":
-        hidePanel();
-        break;
       case "raised":
         hidePanel();
+        // hidePanel sets mode to "compact"; override for "raised"
+        state.mode = targetMode;
         break;
       case "panel":
+        pendingFocus = false;
         showPanel(ctx);
         break;
       case "focused":
         showPanel(ctx);
-        // Small delay to ensure overlay is created before focusing
-        setTimeout(() => focusPanel(), 50);
+        focusPanel();
         break;
     }
 
@@ -223,6 +239,7 @@ export default function (pi: ExtensionAPI) {
     overlayHandle = null;
     overlayDone = null;
     overlayCreated = false;
+    pendingFocus = false;
     restoreMode(ctx);
     debug("dashboard", "session_start:mode", { mode: state.mode });
 
@@ -315,6 +332,7 @@ export default function (pi: ExtensionAPI) {
       overlayDone = null;
     }
     overlayCreated = false;
+    pendingFocus = false;
     footer = null;
     tui = null;
   });
@@ -348,6 +366,12 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("dashboard", {
     description: "Toggle dashboard mode. Subcommands: compact, raised, panel, focus, open (legacy modal)",
+    getArgumentCompletions: (prefix) => {
+      const lower = prefix.toLowerCase();
+      return DASHBOARD_SUBCOMMANDS
+        .filter(s => s.startsWith(lower))
+        .map(s => ({ label: s, value: s }));
+    },
     handler: async (args, ctx) => {
       const arg = (args ?? "").trim().toLowerCase();
 

@@ -49,7 +49,7 @@
     ]
   },
   "dependencies": {
-    "@mariozechner/pi-ai": "^0.55.4",
+    "@mariozechner/pi-ai": "^0.57.0",
     "@mariozechner/pi-coding-agent": "^0.57.0",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@sinclair/typebox": "^0.34.48",

@@ -202,7 +202,7 @@ export class DashboardFooter implements Component {
       dashParts.push(gauge);
     }
 
-    // Add /dashboard hint — right-aligned on the summary line
+    // Append /dashboard hint for discoverability
     const dashHint = theme.fg("dim", "/dashboard");
 
     if (dashParts.length > 0) {
