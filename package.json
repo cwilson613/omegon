@@ -34,7 +34,8 @@
       "./extensions/web-search",
       "./extensions/design-tree",
       "./extensions/dashboard",
-      "./extensions/version-check.ts"
+      "./extensions/vault",
+    "./extensions/version-check.ts"
     ],
     "skills": [
       "./skills"
