@@ -40,31 +40,7 @@ import {
 	generateSpecFile,
 } from "./spec.js";
 import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.js";
-import { scanDesignDocs, setNodeStatus } from "../design-tree/tree.js";
-
-// ─── Design Tree Archive Gate ────────────────────────────────────────────────
-
-/**
- * Scan the design tree for nodes whose openspec_change matches the archived
- * change name. Transition any node in "implementing" status to "implemented".
- * Returns the list of transitioned node IDs.
- */
-function transitionDesignNodesOnArchive(cwd: string, changeName: string): string[] {
-	const docsDir = path.join(cwd, "docs");
-	if (!fs.existsSync(docsDir)) return [];
-
-	const tree = scanDesignDocs(docsDir);
-	const transitioned: string[] = [];
-
-	for (const node of tree.nodes.values()) {
-		if (node.openspec_change === changeName && node.status === "implementing") {
-			setNodeStatus(node, "implemented");
-			transitioned.push(node.id);
-		}
-	}
-
-	return transitioned;
-}
+import { transitionDesignNodesOnArchive } from "./archive-gate.js";
 
 // ─── Dashboard State Emitter ─────────────────────────────────────────────────
 

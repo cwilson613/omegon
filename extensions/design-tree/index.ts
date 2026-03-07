@@ -84,6 +84,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						status: focused.status,
 						questions: [...focused.open_questions],
 						branch: focused.branches?.[0],
+						branchCount: focused.branches?.length ?? 0,
 					}
 				: null,
 			implementingNodes: nodes

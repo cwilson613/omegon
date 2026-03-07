@@ -9,23 +9,7 @@ import * as os from "node:os";
 
 import { scanDesignDocs, setNodeStatus, generateFrontmatter } from "../design-tree/tree.ts";
 import type { DesignNode } from "../design-tree/types.ts";
-
-// We test the transitionDesignNodesOnArchive logic directly by
-// recreating the same pattern used in openspec/index.ts.
-
-function transitionDesignNodesOnArchive(cwd: string, changeName: string): string[] {
-	const docsDir = path.join(cwd, "docs");
-	if (!fs.existsSync(docsDir)) return [];
-	const tree = scanDesignDocs(docsDir);
-	const transitioned: string[] = [];
-	for (const node of tree.nodes.values()) {
-		if (node.openspec_change === changeName && node.status === "implementing") {
-			setNodeStatus(node, "implemented");
-			transitioned.push(node.id);
-		}
-	}
-	return transitioned;
-}
+import { transitionDesignNodesOnArchive } from "./archive-gate.ts";
 
 function writeDesignDoc(docsDir: string, id: string, status: string, openspecChange?: string): void {
 	const node: any = {

@@ -145,7 +145,7 @@ export class DashboardFooter implements Component {
     if (dt && dt.nodeCount > 0) {
       const statusParts: string[] = [];
       if (dt.decidedCount > 0) statusParts.push(theme.fg("success", `${dt.decidedCount} decided`));
-      if (dt.implementingCount > 0) statusParts.push(theme.fg("info" as any, `${dt.implementingCount} implementing`));
+      if (dt.implementingCount > 0) statusParts.push(theme.fg("warning", `${dt.implementingCount} implementing`));
       if (dt.implementedCount > 0) statusParts.push(theme.fg("success", `${dt.implementedCount} implemented`));
       if (dt.exploringCount > 0) statusParts.push(theme.fg("accent", `${dt.exploringCount} exploring`));
       if (dt.blockedCount > 0) statusParts.push(theme.fg("error", `${dt.blockedCount} blocked`));
@@ -164,8 +164,11 @@ export class DashboardFooter implements Component {
           ? theme.fg("dim", ` — ${dt.focusedNode.questions.length} open questions`)
           : "";
         // Show branch association for implementing nodes
+        const branchExtra = (dt.focusedNode.branchCount ?? 0) > 1
+          ? theme.fg("dim", ` +${dt.focusedNode.branchCount! - 1}`)
+          : "";
         const branchInfo = dt.focusedNode.status === "implementing" && dt.focusedNode.branch
-          ? theme.fg("dim", ` → ${dt.focusedNode.branch}`)
+          ? theme.fg("dim", ` → ${dt.focusedNode.branch}`) + branchExtra
           : "";
         lines.push(`  ${statusIcon} ${dt.focusedNode.title}${branchInfo}${qCount}`);
       }

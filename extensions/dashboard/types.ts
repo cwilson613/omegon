@@ -16,6 +16,7 @@ export interface DesignTreeFocusedNode {
   status: string;
   questions: string[];
   branch?: string;
+  branchCount?: number;
 }
 
 export interface DesignTreeDashboardState {
