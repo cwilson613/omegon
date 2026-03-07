@@ -2,7 +2,7 @@
   "name": "pi-kit",
   "version": "0.1.1",
   "scripts": {
-    "test": "npx tsx --test extensions/**/*.test.ts"
+    "test": "npx tsx --test extensions/*.test.ts extensions/**/*.test.ts"
   },
   "description": "Pi package — extensions, prompts, skills, and themes for the pi coding agent",
   "keywords": [
@@ -33,7 +33,8 @@
       "./extensions/terminal-title.ts",
       "./extensions/view",
       "./extensions/web-search",
-      "./extensions/design-tree"
+      "./extensions/design-tree",
+      "./extensions/version-check.ts"
     ],
     "skills": [
       "./skills"
