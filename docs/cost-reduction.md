@@ -149,6 +149,11 @@ Models already wired (offline-driver): nemotron-3-nano:30b, devstral-small-2:24b
 **Status:** decided
 **Rationale:** Summarization is a well-suited local model task. nemotron-3-nano with 1M context is ideal. Flip the order: try local first, fall back to cloud only if Ollama is unreachable.
 
+### Decision: Role-split local model preferences: Qwen3 32B driver, Qwen2.5-Coder 32B leaf, Qwen2.5 72B reasoning
+
+**Status:** decided
+**Rationale:** Different tasks have different local model needs. Qwen3 32B Q8 (~35GB) is the best all-round driver: top tool-call JSON reliability, 128K ctx, thinking-mode toggle, leaves 29GB for KV cache. Qwen2.5-Coder 32B is purpose-built for Rust/TS code tasks and leads for cleave leaf children. Qwen2.5 72B is listed for deep reasoning but is slow (~10-15 tok/s on M1) so not the default. Previous flat list (nemotron/devstral/qwen3:30b) is retained as fallback chain — users who haven't pulled the new models get graceful degradation.
+
 ## Open Questions
 
 *No open questions.*
