@@ -6,6 +6,8 @@ A batteries-included extension package for the [pi coding agent](https://github.
 pi install https://github.com/cwilson613/pi-kit
 ```
 
+> **Note:** `pi install` and `pi update` track the `main` branch. There is no tag-pinned install yet — see [#5](https://github.com/cwilson613/pi-kit/issues/5). The version-check extension notifies you when a new release is available.
+
 ## Architecture
 
 ![pi-kit Architecture](docs/img/architecture.png)
