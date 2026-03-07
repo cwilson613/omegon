@@ -146,11 +146,60 @@ export function evaluateCondition(condition: string, cwd: string): boolean {
   return true;
 }
 
+// ─── Project Skill Resolution ────────────────────────────────────────────────
+
+/**
+ * Quick scan: which skills are relevant to this project based on files present?
+ * Returns skill names (not full paths — use resolveSkillPath from skills.ts for that).
+ */
+function detectProjectSkills(cwd: string): string[] {
+  const skills: string[] = [];
+  if (existsSync(join(cwd, "tsconfig.json")) || existsSync(join(cwd, "package.json"))) {
+    skills.push("typescript");
+  }
+  if (existsSync(join(cwd, "pyproject.toml")) || existsSync(join(cwd, "setup.py"))) {
+    skills.push("python");
+  }
+  if (existsSync(join(cwd, "Cargo.toml"))) {
+    skills.push("rust");
+  }
+  return skills;
+}
+
+/**
+ * Resolve project-relevant skill SKILL.md paths for guardrail frontmatter parsing.
+ * Uses the same search logic as skills.ts resolveSkillPath.
+ */
+export function resolveProjectSkillPaths(cwd: string): string[] {
+  const skillNames = detectProjectSkills(cwd);
+  const paths: string[] = [];
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+
+  for (const name of skillNames) {
+    // Search well-known skill directories (mirrors skills.ts getSkillSearchPaths)
+    const candidates = [
+      join(cwd, "skills", name, "SKILL.md"),
+      ...(home ? [
+        join(home, ".pi", "agent", "skills", name, "SKILL.md"),
+      ] : []),
+    ];
+    for (const c of candidates) {
+      if (existsSync(c)) {
+        paths.push(c);
+        break;
+      }
+    }
+  }
+  return paths;
+}
+
 // ─── Discovery ───────────────────────────────────────────────────────────────
 
 /**
  * Discover guardrail checks from package.json, auto-detection, and skill frontmatter.
  * Priority: package-script > auto-detect > skill-frontmatter (dedup by name).
+ *
+ * If skillPaths is not provided, automatically resolves project-relevant skills.
  */
 export function discoverGuardrails(
   cwd: string,
@@ -234,9 +283,10 @@ export function discoverGuardrails(
     });
   }
 
-  // 3. Skill frontmatter
-  if (skillPaths) {
-    for (const sp of skillPaths) {
+  // 3. Skill frontmatter — auto-resolve if not provided
+  const effectiveSkillPaths = skillPaths ?? resolveProjectSkillPaths(cwd);
+  if (effectiveSkillPaths.length > 0) {
+    for (const sp of effectiveSkillPaths) {
       if (!existsSync(sp)) continue;
       try {
         const content = readFileSync(sp, "utf-8");

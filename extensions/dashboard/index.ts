@@ -18,6 +18,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { GuardrailResult } from "../cleave/guardrails.ts";
 import { DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
 import { DashboardFooter } from "./footer.ts";
 import { showDashboardOverlay } from "./overlay.ts";
@@ -141,9 +142,9 @@ export default function (pi: ExtensionAPI) {
         if (checks.length === 0) return;
         const suite = runGuardrails(ctx.cwd, checks);
         if (!suite.allPassed) {
-          const failures = suite.results.filter((r: { passed: boolean }) => !r.passed);
+          const failures = suite.results.filter((r: GuardrailResult) => !r.passed);
           const msg = failures
-            .map((f: { check: { name: string }; exitCode: number; output: string }) =>
+            .map((f: GuardrailResult) =>
               `${f.check.name}: ${f.exitCode !== 0 ? f.output.split("\n").length + " errors" : "failed"}`,
             )
             .join(", ");

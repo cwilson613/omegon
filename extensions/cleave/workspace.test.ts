@@ -498,15 +498,21 @@ describe("generateTaskFile with guardrails", () => {
 
 describe("buildGuardrailSection", () => {
 	it("returns guardrail section for a project with tsconfig.json", () => {
-		// Use the current repo root which has tsconfig.json
+		// Use the current repo root which has tsconfig.json + package.json
 		const section = buildGuardrailSection(process.cwd());
-		// Should discover at least typecheck
-		assert.ok(section.includes("## Project Guardrails") || section === "", "Should return section or empty");
+		assert.ok(section.includes("## Project Guardrails"), "Should contain guardrails header");
+		assert.ok(section.includes("typecheck"), "Should contain typecheck guardrail");
+		assert.ok(section.includes("Before reporting success"), "Should contain instruction text");
 	});
 
 	it("returns empty string for directory with no project files", () => {
 		const section = buildGuardrailSection("/tmp");
 		assert.equal(section, "");
+	});
+
+	it("includes command in guardrail section", () => {
+		const section = buildGuardrailSection(process.cwd());
+		assert.ok(section.includes("`"), "Should contain backtick-wrapped command");
 	});
 });
 

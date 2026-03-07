@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   discoverGuardrails,
+  resolveProjectSkillPaths,
   parseSkillFrontmatter,
   formatGuardrailResults,
   evaluateCondition,
@@ -228,6 +229,38 @@ guardrails:
   it("returns empty for directory with no indicators", () => {
     const checks = discoverGuardrails(tmpDir);
     assert.equal(checks.length, 0);
+  });
+
+  it("auto-resolves skill frontmatter when skillPaths not provided", () => {
+    // Create a project with tsconfig.json and a local skills/typescript/SKILL.md
+    writeFileSync(join(tmpDir, "tsconfig.json"), "{}");
+    mkdirSync(join(tmpDir, "skills", "typescript"), { recursive: true });
+    writeFileSync(
+      join(tmpDir, "skills", "typescript", "SKILL.md"),
+      `---
+name: typescript
+guardrails:
+  - name: skill-typecheck
+    cmd: echo skill-guardrail
+    condition: file_exists(tsconfig.json)
+---
+# TS Skill
+`
+    );
+    const checks = discoverGuardrails(tmpDir);
+    // Should find auto-detect typecheck AND the skill-frontmatter one
+    // But auto-detect has higher priority so skill-typecheck is separate name
+    assert.ok(checks.some(c => c.name === "typecheck" && c.source === "auto-detect"),
+      "Should auto-detect typecheck from tsconfig.json");
+    assert.ok(checks.some(c => c.name === "skill-typecheck" && c.source === "skill-frontmatter"),
+      "Should discover skill-typecheck from SKILL.md frontmatter");
+  });
+
+  it("auto-resolves skill paths from project root", () => {
+    // The current repo has skills/typescript/SKILL.md with guardrails frontmatter
+    const paths = resolveProjectSkillPaths(process.cwd());
+    assert.ok(paths.length > 0, "Should resolve at least typescript skill");
+    assert.ok(paths.some(p => p.includes("typescript")), "Should include typescript skill path");
   });
 });
 

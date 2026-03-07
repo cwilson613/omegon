@@ -103,7 +103,7 @@ export function generateWorkspacePath(directive: string): string {
 export function initWorkspace(
 	state: CleaveState,
 	plan: SplitPlan,
-	_repoPath: string,
+	repoPath: string,
 	openspecContext?: OpenSpecContext | null,
 	resolvedSkills?: Map<number, SkillDirective[]>,
 ): string {
@@ -119,7 +119,7 @@ export function initWorkspace(
 	const scenarioAssignments = matchScenariosToChildren(plan.children, openspecContext);
 
 	// Discover guardrails once, reuse for all children
-	const guardrailSection = buildGuardrailSection(_repoPath);
+	const guardrailSection = buildGuardrailSection(repoPath);
 
 	// Generate child task files
 	for (let i = 0; i < plan.children.length; i++) {

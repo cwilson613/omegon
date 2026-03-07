@@ -15,6 +15,8 @@
  *   - >50% reappearance → bail + escalate
  */
 
+import { discoverGuardrails, runGuardrails, formatGuardrailResults } from "./guardrails.ts";
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 /** Severity level for a review issue */
@@ -413,8 +415,6 @@ export function detectChurn(
 
 // ─── Guardrail Integration ──────────────────────────────────────────────────
 
-import { discoverGuardrails, runGuardrails, formatGuardrailResults } from "./guardrails.ts";
-
 /**
  * Callback interface for the review loop to spawn subprocesses.
  *
@@ -479,17 +479,12 @@ export async function executeWithReview(
 		};
 	}
 
-	// Step 1.5: Run guardrails before review (deterministic checks)
-	let guardrailOutput: string | undefined;
+	// Discover guardrails once (fast — file existence checks only)
+	let guardrailChecks: import("./guardrails.ts").GuardrailCheck[] = [];
 	try {
-		const checks = discoverGuardrails(worktreePath);
-		if (checks.length > 0) {
-			const suite = runGuardrails(worktreePath, checks);
-			const formatted = formatGuardrailResults(suite);
-			if (formatted) guardrailOutput = formatted;
-		}
+		guardrailChecks = discoverGuardrails(worktreePath);
 	} catch {
-		// Guardrail discovery/execution failed — continue without it
+		// Discovery failed — continue without guardrails
 	}
 
 	// Step 2+: Review loop
@@ -501,12 +496,24 @@ export async function executeWithReview(
 		// Re-read task content (may have been updated by execute/fix)
 		const currentTaskContent = executor.readFile(taskFilePath);
 
-		// Run review — include guardrail output on first round
+		// Run guardrails fresh each round (code may have changed after fix iterations)
+		let guardrailOutput: string | undefined;
+		if (guardrailChecks.length > 0) {
+			try {
+				const suite = runGuardrails(worktreePath, guardrailChecks);
+				const formatted = formatGuardrailResults(suite);
+				if (formatted) guardrailOutput = formatted;
+			} catch {
+				// Execution failed — continue without guardrail output
+			}
+		}
+
+		// Run review — always include latest guardrail output
 		const reviewPrompt = buildReviewPrompt(
 			currentTaskContent,
 			rootDirective,
 			worktreePath,
-			round === 0 ? guardrailOutput : undefined,
+			guardrailOutput,
 		);
 		const reviewResult = await executor.review(reviewPrompt, worktreePath);
 
