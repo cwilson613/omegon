@@ -3,6 +3,20 @@
 All notable changes to pi-kit are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-03-07
+
+### Added
+
+- **Version-check extension** — polls GitHub releases on session start and hourly. Notifies operator to run `pi update` when a newer release exists. Respects `PI_SKIP_VERSION_CHECK` and `PI_OFFLINE` env vars.
+
+### Fixed
+
+- Test command glob now includes root-level `extensions/*.test.ts` files (were silently missed by `**` glob).
+
+### Changed
+
+- README documents main-branch tracking limitation with link to [#5](https://github.com/cwilson613/pi-kit/issues/5).
+
 ## [0.1.1] - 2026-03-07
 
 ### Added
