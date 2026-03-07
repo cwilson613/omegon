@@ -41,6 +41,10 @@ export interface OpenSpecChangeEntry {
   stage: string;
   tasksDone: number;
   tasksTotal: number;
+  /** Which lifecycle artifacts exist */
+  artifacts?: ("proposal" | "design" | "specs" | "tasks")[];
+  /** Spec domain names (e.g. ["auth", "api/tokens"]) */
+  specDomains?: string[];
 }
 
 export interface OpenSpecDashboardState {

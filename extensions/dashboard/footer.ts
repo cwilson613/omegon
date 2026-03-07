@@ -119,12 +119,19 @@ export class DashboardFooter implements Component {
         dashParts.push(theme.fg("accent", `◈ ${dt.decidedCount}/${dt.nodeCount}`) +
           ` ${statusIcon} ${dt.focusedNode.title}${qSuffix}`);
       } else if (wide) {
-        // Wide: spell out counts
+        // Wide: spell out counts + top node IDs
         const parts = [`${dt.decidedCount} decided`];
         if (dt.exploringCount > 0) parts.push(`${dt.exploringCount} exploring`);
         if (dt.implementingCount > 0) parts.push(`${dt.implementingCount} impl`);
         if (dt.openQuestionCount > 0) parts.push(`${dt.openQuestionCount}?`);
-        dashParts.push(theme.fg("accent", `◈ Design`) + theme.fg("dim", ` ${parts.join(", ")}`));
+        // Show first 2 node IDs for context when no focus
+        let nodeHint = "";
+        if (!dt.focusedNode && dt.nodes && dt.nodes.length > 0) {
+          const ids = dt.nodes.slice(0, 2).map(n => n.id);
+          const overflow = dt.nodes.length > 2 ? "…" : "";
+          nodeHint = theme.fg("dim", ` (${ids.join(", ")}${overflow})`);
+        }
+        dashParts.push(theme.fg("accent", `◈ Design`) + theme.fg("dim", ` ${parts.join(", ")}`) + nodeHint);
       } else {
         // Narrow: terse
         let dtSummary = `◈ D:${dt.decidedCount}`;
@@ -293,13 +300,9 @@ export class DashboardFooter implements Component {
 
     lines.push(theme.fg("accent", "◈ Design Tree") + "  " + statusParts.join(" · "));
 
+    // Focused node gets priority display
     if (dt.focusedNode) {
-      const statusIcon = dt.focusedNode.status === "decided" ? theme.fg("success", "●")
-        : dt.focusedNode.status === "implementing" ? theme.fg("accent", "⚙")
-        : dt.focusedNode.status === "implemented" ? theme.fg("success", "✓")
-        : dt.focusedNode.status === "exploring" ? theme.fg("accent", "◐")
-        : dt.focusedNode.status === "blocked" ? theme.fg("error", "✕")
-        : theme.fg("dim", "○");
+      const statusIcon = this.nodeStatusIcon(dt.focusedNode.status);
       const qCount = dt.focusedNode.questions.length > 0
         ? theme.fg("dim", ` — ${dt.focusedNode.questions.length} open questions`)
         : "";
@@ -312,6 +315,7 @@ export class DashboardFooter implements Component {
       lines.push(`  ${statusIcon} ${dt.focusedNode.title}${branchInfo}${qCount}`);
     }
 
+    // Implementing nodes (if no focused node)
     if (dt.implementingNodes && dt.implementingNodes.length > 0 && !dt.focusedNode) {
       for (const n of dt.implementingNodes.slice(0, 3)) {
         const branchSuffix = n.branch ? theme.fg("dim", ` → ${n.branch}`) : "";
@@ -319,7 +323,33 @@ export class DashboardFooter implements Component {
       }
     }
 
+    // If no focused node and no implementing nodes, show all nodes (up to 4)
+    if (!dt.focusedNode && (!dt.implementingNodes || dt.implementingNodes.length === 0) && dt.nodes) {
+      const maxShow = 4;
+      for (const n of dt.nodes.slice(0, maxShow)) {
+        const icon = this.nodeStatusIcon(n.status);
+        const qSuffix = n.questionCount > 0 ? theme.fg("dim", ` (${n.questionCount}?)`) : "";
+        lines.push(`  ${icon} ${theme.fg("dim", n.id)}${qSuffix}`);
+      }
+      if (dt.nodes.length > maxShow) {
+        lines.push(theme.fg("dim", `  +${dt.nodes.length - maxShow} more`));
+      }
+    }
+
     return lines;
+  }
+
+  private nodeStatusIcon(status: string): string {
+    const theme = this.theme;
+    switch (status) {
+      case "decided": return theme.fg("success", "●");
+      case "implementing": return theme.fg("accent", "⚙");
+      case "implemented": return theme.fg("success", "✓");
+      case "exploring": return theme.fg("accent", "◐");
+      case "blocked": return theme.fg("error", "✕");
+      case "seed": return theme.fg("dim", "○");
+      default: return theme.fg("dim", "○");
+    }
   }
 
   private buildOpenSpecLines(_width: number): string[] {
@@ -328,15 +358,42 @@ export class DashboardFooter implements Component {
     const os = sharedState.openspec;
     if (!os || os.changes.length === 0) return lines;
 
-    lines.push(theme.fg("accent", "◎ OpenSpec") + "  " + theme.fg("dim", `${os.changes.length} change${os.changes.length > 1 ? "s" : ""}`));
-    for (const c of os.changes.slice(0, 3)) {
+    // Header with count and aggregate progress
+    const totalDone = os.changes.reduce((s, c) => s + c.tasksDone, 0);
+    const totalAll = os.changes.reduce((s, c) => s + c.tasksTotal, 0);
+    const allComplete = totalAll > 0 && totalDone >= totalAll;
+    const aggregateProgress = totalAll > 0
+      ? theme.fg(allComplete ? "success" : "dim", ` ${totalDone}/${totalAll} tasks`)
+      : "";
+    lines.push(theme.fg("accent", "◎ OpenSpec") + "  " +
+      theme.fg("dim", `${os.changes.length} change${os.changes.length > 1 ? "s" : ""}`) +
+      aggregateProgress);
+
+    for (const c of os.changes.slice(0, 4)) {
       const done = c.tasksTotal > 0 && c.tasksDone >= c.tasksTotal;
       const icon = done ? theme.fg("success", "✓") : theme.fg("dim", "◦");
       const progress = c.tasksTotal > 0
         ? theme.fg(done ? "success" : "dim", ` ${c.tasksDone}/${c.tasksTotal}`)
         : "";
-      const stage = c.stage ? theme.fg("dim", ` [${c.stage}]`) : "";
-      lines.push(`  ${icon} ${c.name}${progress}${stage}`);
+
+      // Stage with semantic coloring
+      const stageColor = c.stage === "verifying" ? "warning"
+        : c.stage === "implementing" ? "accent"
+        : c.stage === "ready" ? "success"
+        : "dim";
+      const stage = c.stage ? theme.fg(stageColor, ` [${c.stage}]`) : "";
+
+      // Artifact badges — show which lifecycle files exist
+      const artifacts = c.artifacts && c.artifacts.length > 0
+        ? " " + theme.fg("dim", c.artifacts.map(a => a[0]).join(""))
+        : "";
+
+      lines.push(`  ${icon} ${c.name}${progress}${stage}${artifacts}`);
+    }
+
+    // Hint for actionable next steps
+    if (allComplete && os.changes.some(c => c.stage === "verifying")) {
+      lines.push(theme.fg("dim", "  → /opsx:verify → /opsx:archive"));
     }
 
     return lines;

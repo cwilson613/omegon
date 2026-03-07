@@ -53,12 +53,22 @@ import { debug } from "../debug.ts";
 function emitOpenSpecState(cwd: string, pi: ExtensionAPI): void {
 	try {
 		const changes = listChanges(cwd);
-		const mapped = changes.map((c) => ({
-			name: c.name,
-			stage: c.stage || "proposal",
-			tasksDone: c.doneTasks,
-			tasksTotal: c.totalTasks,
-		}));
+		const mapped = changes.map((c) => {
+			const artifacts: string[] = [];
+			if (c.hasProposal) artifacts.push("proposal");
+			if (c.hasDesign) artifacts.push("design");
+			if (c.hasSpecs) artifacts.push("specs");
+			if (c.hasTasks) artifacts.push("tasks");
+			const specDomains = c.specs.map((s) => s.domain).filter(Boolean);
+			return {
+				name: c.name,
+				stage: c.stage || "proposal",
+				tasksDone: c.doneTasks,
+				tasksTotal: c.totalTasks,
+				artifacts,
+				specDomains,
+			};
+		});
 		(sharedState as any).openspec = { changes: mapped };
 		debug("openspec", "emitState", { count: mapped.length, cwd });
 		pi.events.emit(DASHBOARD_UPDATE_EVENT, { source: "openspec" });
