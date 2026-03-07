@@ -76,7 +76,7 @@ export async function createWorktree(
 	baseBranch: string,
 ): Promise<WorktreeInfo> {
 	// Sanitize childLabel to prevent path traversal via / or ..
-	const safeLabel = childLabel.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/^\.+/, "");
+	const safeLabel = childLabel.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/^\.+/, "") || "task";
 	const branch = `cleave/${childId}-${safeLabel}`;
 	// Worktree goes in ~/.pi/cleave/wt/ to avoid polluting the repo or its parent
 	mkdirSync(WORKTREE_HOME, { recursive: true });

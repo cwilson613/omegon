@@ -18,6 +18,7 @@
  */
 
 import { execSync, execFileSync, spawnSync } from "node:child_process";
+// Note: execSync retained solely for hasCmd() which takes hardcoded strings only
 import {
 	existsSync, readFileSync, statSync, mkdtempSync,
 	readdirSync, accessSync, constants,
@@ -98,17 +99,8 @@ function hasCmd(cmd: string): boolean {
 	}
 }
 
-function run(cmd: string, opts?: { timeout?: number }): string {
-	return execSync(cmd, {
-		encoding: "utf-8",
-		maxBuffer: 10 * 1024 * 1024,
-		timeout: opts?.timeout ?? 30_000,
-	}).trim();
-}
-
 /**
  * Run a command with argument array — no shell interpolation, safe for untrusted paths.
- * Preferred over run() for any command that takes a file path from tool parameters.
  */
 function runSafe(cmd: string, args: string[], opts?: { timeout?: number }): string {
 	return execFileSync(cmd, args, {

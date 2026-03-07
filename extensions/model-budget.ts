@@ -30,16 +30,24 @@ const TIER_META = {
 
 type TierName = keyof typeof TIER_META;
 
+interface RegistryModel {
+  id: string;
+  provider: string;
+  [key: string]: unknown;
+}
+
 /**
  * Find the best matching Anthropic model for a tier by prefix.
  * Picks the latest model ID alphabetically (higher version = later sort).
+ * Pi-core prefers short aliases (claude-opus-4-6) over dated versions
+ * (claude-opus-4-6-20250514), and lexicographic descending gets the alias.
  */
-function findTierModel(ctx: any, tier: TierName): ReturnType<typeof ctx.modelRegistry.find> | undefined {
+function findTierModel(ctx: any, tier: TierName): RegistryModel | undefined {
   const meta = TIER_META[tier];
-  const all = ctx.modelRegistry.getAll();
+  const all: RegistryModel[] = ctx.modelRegistry.getAll();
   const candidates = all
-    .filter((m: any) => m.provider === "anthropic" && m.id.startsWith(meta.prefix))
-    .sort((a: any, b: any) => b.id.localeCompare(a.id)); // latest version first
+    .filter((m) => m.provider === "anthropic" && m.id.startsWith(meta.prefix))
+    .sort((a, b) => b.id.localeCompare(a.id)); // latest version first
   return candidates[0] ?? undefined;
 }
 
@@ -55,11 +63,11 @@ const THINKING_LABELS: Record<ThinkingLevelName, { icon: string; label: string }
   high: { icon: "🧠", label: "deep thinking" },
 };
 
-async function switchTo(tier: TierName, pi: ExtensionAPI, ctx: any): Promise<boolean> {
+async function switchTo(tier: TierName, pi: ExtensionAPI, ctx: any): Promise<RegistryModel | null> {
   const model = findTierModel(ctx, tier);
-  if (!model) return false;
+  if (!model) return null;
   const success = await pi.setModel(model);
-  return success;
+  return success ? model : null;
 }
 
 function currentTierName(ctx: ExtensionContext): TierName | null {
@@ -110,17 +118,15 @@ export default function (pi: ExtensionAPI) {
       ctx,
     ) => {
       const meta = TIER_META[params.tier];
-      const success = await switchTo(params.tier, pi, ctx);
-      if (success) {
-        const resolved = findTierModel(ctx, params.tier);
-        const modelId = resolved?.id ?? meta.prefix;
+      const model = await switchTo(params.tier, pi, ctx);
+      if (model) {
         const thinking = pi.getThinkingLevel();
         ctx.ui.notify(`${meta.icon} → ${meta.label} (thinking: ${thinking}): ${params.reason}`, "info");
         return {
           content: [
             {
               type: "text" as const,
-              text: `Switched to ${meta.label} (${modelId}), thinking: ${thinking}. ${params.reason}`,
+              text: `Switched to ${meta.label} (${model.id}), thinking: ${thinking}. ${params.reason}`,
             },
           ],
         };
@@ -190,8 +196,8 @@ export default function (pi: ExtensionAPI) {
     pi.registerCommand(name, {
       description: `Switch to ${meta.label} (${meta.icon})`,
       handler: async (_args, ctx) => {
-        const success = await switchTo(name as TierName, pi, ctx);
-        if (!success) {
+        const model = await switchTo(name as TierName, pi, ctx);
+        if (!model) {
           ctx.ui.notify(`Failed to switch to ${meta.label}`, "error");
         }
       },

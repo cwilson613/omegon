@@ -62,6 +62,7 @@ export default function (pi: ExtensionAPI) {
     // --- Global AGENTS.md deployment ---
     try {
       if (!fs.existsSync(TEMPLATE_PATH)) return;
+      fs.mkdirSync(AGENT_DIR, { recursive: true });
       const template = fs.readFileSync(TEMPLATE_PATH, "utf8");
       const deployContent = `${template.trimEnd()}\n\n${PIKIT_MARKER}\n`;
 
@@ -74,7 +75,17 @@ export default function (pi: ExtensionAPI) {
             const lastHash = fs.existsSync(HASH_PATH) ? fs.readFileSync(HASH_PATH, "utf8").trim() : null;
             const existingHash = contentHash(existing);
 
-            if (lastHash && lastHash !== existingHash) {
+            if (!lastHash) {
+              // First run with hash tracking — adopt current content as baseline
+              // so we don't overwrite edits made before the hash mechanism existed
+              fs.writeFileSync(HASH_PATH, existingHash, "utf8");
+              if (ctx.hasUI) {
+                ctx.ui.notify(
+                  "pi-kit: AGENTS.md template updated. Changes will apply on next session start.",
+                  "info",
+                );
+              }
+            } else if (lastHash !== existingHash) {
               // File was modified externally — warn, don't overwrite
               if (ctx.hasUI) {
                 ctx.ui.notify(
@@ -83,7 +94,7 @@ export default function (pi: ExtensionAPI) {
                 );
               }
             } else {
-              // File matches our last deploy (or no hash yet) — safe to update
+              // File matches our last deploy — safe to update
               fs.writeFileSync(GLOBAL_AGENTS_PATH, deployContent, "utf8");
               fs.writeFileSync(HASH_PATH, contentHash(deployContent), "utf8");
             }
