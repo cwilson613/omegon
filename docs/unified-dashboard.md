@@ -1,7 +1,7 @@
 ---
 id: unified-dashboard
 title: Unified Live Dashboard for Cleave + Design Tree + OpenSpec
-status: decided
+status: implemented
 tags: [tui, ux, dashboard, pi-kit]
 open_questions: []
 ---

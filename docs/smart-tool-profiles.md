@@ -1,7 +1,7 @@
 ---
 id: smart-tool-profiles
 title: "Smart Tool & Skill Profiles for Project Context"
-status: decided
+status: implemented
 tags: [ux, configuration, extensions]
 open_questions: []
 ---

@@ -1,7 +1,7 @@
 ---
 id: non-capturing-dashboard
 title: Non-Capturing Dashboard Overlay
-status: decided
+status: implemented
 tags: [dashboard, overlay, upstream-api]
 open_questions: []
 ---

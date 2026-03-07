@@ -1,7 +1,7 @@
 ---
 id: design-tree-lifecycle
 title: "Design Tree Lifecycle: Implementation Tracking + Branch Binding"
-status: decided
+status: implemented
 tags: [design-tree, lifecycle, git, dashboard]
 open_questions: []
 ---

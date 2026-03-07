@@ -1,7 +1,7 @@
 ---
 id: bootstrap
 title: Pi-kit Bootstrap — First-time setup and dependency management
-status: decided
+status: implemented
 tags: [bootstrap, ux, onboarding, dependencies]
 open_questions: []
 ---
