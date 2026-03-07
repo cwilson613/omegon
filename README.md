@@ -43,6 +43,9 @@ Recursive task decomposition, code assessment, and OpenSpec lifecycle integratio
 - **OpenSpec integration**: When `openspec/` exists, uses `tasks.md` as the split plan, enriches child tasks with design.md decisions and spec acceptance criteria, writes back task completion, and guides through verify → archive
 - **API contract validation**: `/assess spec` reads `api.yaml` and verifies endpoint paths, request/response schemas, status codes, and security schemes against the implementation
 - **Session awareness**: Surfaces active OpenSpec changes with task progress on session start
+- **Skill-aware dispatch**: Auto-matches skill files to children based on file scope patterns (e.g. `*.py` → python, `Containerfile` → oci). Annotations (`<!-- skills: python, k8s -->`) override auto-matching. Children receive "read these SKILL.md files" directives rather than inlined content
+- **Model tier routing**: Each child resolves an execution model — explicit annotation > local override > skill-based hint > default (sonnet). Enables opus for complex children while keeping routine work on cheaper tiers
+- **Adversarial review loop** (opt-in via `review: true`): After each child completes, an opus-tier reviewer checks for bugs, security issues, and spec compliance. Severity-gated: nits→accept, warnings→1 fix iteration, criticals→2 fixes then escalate, security→immediate escalate. Churn detection bails when >50% of issues reappear between rounds
 
 ### 🌲 Design Tree
 
