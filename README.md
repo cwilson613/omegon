@@ -14,11 +14,9 @@ pi-kit extends the pi agent with **23 extensions**, **7 skills**, and **2 prompt
 
 ### Development Methodology
 
-pi-kit enforces **spec-first development** for non-trivial changes. The pipeline:
+pi-kit enforces **spec-first development** for non-trivial changes:
 
-```
-propose → spec → design → [api contract] → implement → verify → archive
-```
+![Spec-Driven Pipeline](docs/img/spec-pipeline.png)
 
 When a change involves an API, Given/When/Then scenarios are translated into an **OpenAPI 3.1 contract** (`api.yaml`) before implementation begins. The contract is the source of truth for API shape — code implements the contract, not the reverse.
 
