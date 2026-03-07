@@ -37,7 +37,7 @@
       "./extensions/dashboard",
       "./extensions/tool-profile",
       "./extensions/vault",
-    "./extensions/version-check.ts"
+      "./extensions/version-check.ts"
     ],
     "skills": [
       "./skills"
@@ -52,5 +52,8 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@sinclair/typebox": "^0.34.48",
     "better-sqlite3": "^12.6.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
   }
 }
