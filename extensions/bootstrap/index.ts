@@ -17,9 +17,9 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DEPS, checkAll, formatReport, bestInstallCmd, sortByRequires, type DepStatus, type DepTier } from "./deps.ts";
 
@@ -105,6 +105,28 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			await interactiveSetup(cmdCtx);
+		},
+	});
+
+	// --- /refresh: clear jiti transpilation cache + reload ---
+	// jiti's fs cache uses path-based hashing, so source changes aren't
+	// detected on /reload. /refresh clears the cache first.
+	pi.registerCommand("refresh", {
+		description: "Clear transpilation cache and reload extensions",
+		handler: async (_args, ctx) => {
+			const jitiCacheDir = join(tmpdir(), "jiti");
+			let cleared = 0;
+			if (existsSync(jitiCacheDir)) {
+				try {
+					const files = readdirSync(jitiCacheDir);
+					cleared = files.length;
+					rmSync(jitiCacheDir, { recursive: true, force: true });
+				} catch { /* best-effort */ }
+			}
+			ctx.say(cleared > 0
+				? `Cleared ${cleared} cached transpilations. Reloading…`
+				: "No transpilation cache found. Reloading…");
+			await ctx.reload();
 		},
 	});
 }
