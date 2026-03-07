@@ -873,7 +873,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 							display: true,
 						});
 					}
-					const change = matched;
+					const change = matched!;
 					const result = change ? openspecChangeToSplitPlanWithContext(change.path) : null;
 
 					if (result) {

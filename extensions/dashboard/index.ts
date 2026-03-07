@@ -53,9 +53,9 @@ export default function (pi: ExtensionAPI) {
   /**
    * Persist the current mode to the session.
    */
-  function persistMode(ctx: ExtensionContext): void {
+  function persistMode(_ctx: ExtensionContext): void {
     try {
-      ctx.appendEntry("dashboard-state", { mode: state.mode });
+      pi.appendEntry("dashboard-state", { mode: state.mode });
     } catch { /* session may not support it */ }
   }
 
