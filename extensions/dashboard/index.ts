@@ -292,47 +292,27 @@ export default function (pi: ExtensionAPI) {
       tui?.requestRender();
     });
 
-    // Non-blocking guardrail health check — runs each check in a child process
-    // to avoid blocking the event loop (execSync freezes the TUI).
+    // Non-blocking capability health check — probes pi-kit's own runtime deps
+    // (ollama, d2, pandoc, etc.) using the bootstrap DEPS registry.
+    // This is NOT a project linter — it tells the user which pi-kit features
+    // won't work in the current environment.
     setTimeout(async () => {
       try {
-        const { discoverGuardrails } = await import("../cleave/guardrails.ts");
-        const { exec } = await import("node:child_process");
-        const checks = discoverGuardrails(ctx.cwd);
-        if (checks.length === 0) return;
+        const { DEPS } = await import("../bootstrap/deps.ts");
+        const probed = DEPS.filter(d => d.tier === "core" || d.tier === "recommended");
+        const missing = probed.filter(d => !d.check());
+        if (missing.length === 0) return;
 
-        const failures: string[] = [];
-        let pending = checks.length;
-
-        for (const check of checks) {
-          const timeoutMs = (check.timeout ?? 30) * 1000;
-          exec(check.cmd, { cwd: ctx.cwd, timeout: timeoutMs, encoding: "utf-8" }, (err) => {
-            if (err) {
-              const exitCode = (err as any).code;
-              const code = exitCode === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" ? "output overflow" :
-                (err as any).killed ? `timeout after ${check.timeout}s` :
-                exitCode === 127 ? "command not found" :
-                exitCode === 126 ? "not executable" :
-                exitCode === 1 ? "errors found" :
-                `exit ${exitCode ?? "?"}`;
-              failures.push(`${check.name}: ${code}`);
-            }
-            pending--;
-            if (pending === 0 && failures.length > 0) {
-              const summary = failures.join(", ");
-              ctx.ui.notify(`Guardrails: ${summary}`, "info");
-              // Inject context the agent can see — notify() is TUI-only chrome
-              pi.sendMessage({
-                customType: "guardrail-health-check",
-                content: `[pi-kit startup health check] Guardrail failures detected: ${summary}. `
-                  + `These are static analysis checks auto-discovered by pi-kit's guardrail system `
-                  + `(see extensions/cleave/guardrails.ts). Checks ran: ${checks.map(c => `\`${c.cmd}\``).join(", ")}. `
-                  + `This is informational — the project may have pre-existing lint/type issues unrelated to current work.`,
-                display: true,
-              });
-            }
-          });
-        }
+        const summary = missing.map(d => d.name).join(", ");
+        const details = missing.map(d => `• ${d.name} — ${d.purpose}`).join("\n");
+        ctx.ui.notify(`Missing pi-kit deps: ${summary}`, "info");
+        pi.sendMessage({
+          customType: "guardrail-health-check",
+          content: `[pi-kit startup check] Missing runtime dependencies: ${summary}.\n\n`
+            + `These pi-kit features may not work:\n${details}\n\n`
+            + `Run \`/bootstrap\` to install interactively.`,
+          display: true,
+        });
       } catch {
         /* non-fatal */
       }
