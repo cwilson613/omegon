@@ -12,7 +12,7 @@ import {
 	extractResultSection,
 	resolveModelIdForTier,
 	LARGE_RUN_THRESHOLD,
-	mapModelTierToFlag,
+	dispatchChildren,
 } from "./dispatcher.ts";
 import type { RegistryModel } from "../lib/model-routing.ts";
 import { getDefaultPolicy } from "../lib/model-routing.ts";
@@ -342,12 +342,29 @@ describe("resolveModelIdForTier", () => {
 	});
 
 	it("does not pass bare 'opus' alias (spec: Child execution passes resolved model ID)", () => {
-		// The old mapModelTierToFlag returned "opus" (fuzzy alias)
-		// resolveModelIdForTier must NOT return bare "opus" when registry has models
-		const oldFuzzy = mapModelTierToFlag("opus");
-		const newExplicit = resolveModelIdForTier("opus", mockModels, defaultPolicy);
-		assert.equal(oldFuzzy, "opus"); // old behavior still works
-		assert.notEqual(newExplicit, "opus"); // new behavior is explicit
+		// resolveModelIdForTier must NOT return bare tier alias — must be explicit model ID
+		const result = resolveModelIdForTier("opus", mockModels, defaultPolicy);
+		assert.notEqual(result, "opus", "Must not return bare alias 'opus'");
+		assert.notEqual(result, "haiku", "Must not return bare alias 'haiku'");
+		assert.ok(result && result.includes("-"), `Expected explicit model ID (with dash), got: ${result}`);
+	});
+
+	it("does not pass bare alias even for haiku tier (spec: Prefer explicit IDs)", () => {
+		const result = resolveModelIdForTier("haiku", mockModels, defaultPolicy);
+		assert.notEqual(result, "haiku", "Must not return bare alias 'haiku'");
+		assert.ok(result && result.includes("-"), `Expected explicit model ID, got: ${result}`);
+	});
+
+	it("returns undefined (not bare alias) when registry is empty and tier is opus", () => {
+		// When the registry is empty, we cannot get an explicit ID. Returning the bare
+		// alias violates the spec — return undefined so no --model flag is passed.
+		const result = resolveModelIdForTier("opus", [], defaultPolicy);
+		assert.equal(result, undefined, "Empty registry: should return undefined, not bare alias");
+	});
+
+	it("returns undefined (not bare alias) when registry is empty and tier is haiku", () => {
+		const result = resolveModelIdForTier("haiku", [], defaultPolicy);
+		assert.equal(result, undefined, "Empty registry: should return undefined, not bare alias");
 	});
 
 	it("avoids avoided providers and falls back (spec: Session policy can avoid a provider)", () => {
@@ -396,5 +413,174 @@ describe("LARGE_RUN_THRESHOLD", () => {
 		const isLargeRun = childCount >= LARGE_RUN_THRESHOLD || (reviewEnabled && childCount >= LARGE_RUN_THRESHOLD - 1);
 		// With LARGE_RUN_THRESHOLD=4, LARGE_RUN_THRESHOLD-1=3, childCount=1 < 3
 		assert.equal(isLargeRun, false, "Review + 1 child should not be large run");
+	});
+});
+
+// ─── dispatchChildren preflight integration ─────────────────────────────────
+//
+// These tests verify that dispatchChildren() *actually calls* pi.ui.input()
+// when a large run triggers preflight, and *does not call it* for small runs.
+// Pure arithmetic tests (above) only verify the formula — these tests catch
+// cases where the preflight block is deleted or bypassed in dispatchChildren().
+//
+// Strategy: inject a mock pi with a trackable ui.input(), set routingPolicy
+// on sharedState so requirePreflightForLargeRuns=true, and supply enough
+// pre-failed children so dispatch waves complete immediately without spawning.
+// ────────────────────────────────────────────────────────────────────────────
+
+import { sharedState } from "../shared-state.ts";
+import type { CleaveState, ChildState } from "./types.ts";
+
+/** Build a minimal CleaveState with N pre-failed children for test isolation. */
+function makeTestState(childCount: number): CleaveState {
+	const children: ChildState[] = Array.from({ length: childCount }, (_, i) => ({
+		childId: i,
+		label: `child-${i}`,
+		status: "failed" as const, // pre-failed: dispatchSingleChild skips immediately
+		dependsOn: [],
+		branch: `branch-${i}`,
+		worktreePath: undefined,
+		executeModel: "sonnet",
+	}));
+	return {
+		runId: "test-run",
+		phase: "dispatch",
+		directive: "test directive",
+		repoPath: "/tmp",
+		baseBranch: "main",
+		assessment: null,
+		plan: null,
+		children,
+		workspacePath: "/tmp",
+		totalDurationSec: 0,
+		createdAt: new Date().toISOString(),
+	};
+}
+
+/** Build a mock pi object that tracks ui.input() calls. */
+function makeMockPi() {
+	let inputCallCount = 0;
+	const pi = {
+		ui: {
+			input: async (_prompt: string): Promise<string> => {
+				inputCallCount++;
+				return ""; // operator presses Enter → keep current
+			},
+		},
+		// Minimal stubs so dispatchSingleChild doesn't crash looking for pi internals
+		modelRegistry: { getAll: () => [] },
+	} as any;
+	return { pi, getInputCallCount: () => inputCallCount };
+}
+
+describe("dispatchChildren preflight — integration (spec: Large/Small run triggers)", () => {
+	// Save and restore routingPolicy around each test to avoid cross-test pollution
+	let savedRoutingPolicy: unknown;
+	const setup = () => {
+		savedRoutingPolicy = (sharedState as any).routingPolicy;
+	};
+	const teardown = () => {
+		(sharedState as any).routingPolicy = savedRoutingPolicy;
+	};
+
+	it("calls pi.ui.input() when large run + requirePreflightForLargeRuns=true (spec: Large run triggers preflight prompt)", async () => {
+		setup();
+		try {
+			(sharedState as any).routingPolicy = {
+				providerOrder: ["anthropic", "openai", "local"],
+				preferCheapCloud: false,
+				requirePreflightForLargeRuns: true,
+				avoidProviders: [],
+			};
+
+			const { pi, getInputCallCount } = makeMockPi();
+			const state = makeTestState(LARGE_RUN_THRESHOLD); // exactly at threshold
+
+			const messages: string[] = [];
+			await dispatchChildren(pi, state, 4, 5000, undefined, undefined, (msg) => messages.push(msg));
+
+			assert.ok(getInputCallCount() > 0, 
+				`pi.ui.input() should have been called once for large run (${LARGE_RUN_THRESHOLD} children), but was called ${getInputCallCount()} times`);
+			// Preflight progress message should have been emitted
+			assert.ok(
+				messages.some((m) => m.includes("Preflight") || m.includes("preflight") || m.includes("provider")),
+				`Expected a preflight-related progress message, got: ${JSON.stringify(messages)}`,
+			);
+		} finally {
+			teardown();
+		}
+	});
+
+	it("does NOT call pi.ui.input() for small run (spec: Small run does not interrupt with preflight)", async () => {
+		setup();
+		try {
+			(sharedState as any).routingPolicy = {
+				providerOrder: ["anthropic", "openai", "local"],
+				preferCheapCloud: false,
+				requirePreflightForLargeRuns: true,
+				avoidProviders: [],
+			};
+
+			const { pi, getInputCallCount } = makeMockPi();
+			const smallChildCount = LARGE_RUN_THRESHOLD - 2; // clearly below threshold
+			const state = makeTestState(smallChildCount > 0 ? smallChildCount : 1);
+
+			await dispatchChildren(pi, state, 4, 5000, undefined, undefined, undefined);
+
+			assert.equal(getInputCallCount(), 0,
+				`pi.ui.input() should NOT be called for small run (${state.children.length} children < threshold ${LARGE_RUN_THRESHOLD})`);
+		} finally {
+			teardown();
+		}
+	});
+
+	it("does NOT call pi.ui.input() when requirePreflightForLargeRuns=false even for large run", async () => {
+		setup();
+		try {
+			(sharedState as any).routingPolicy = {
+				providerOrder: ["anthropic", "openai", "local"],
+				preferCheapCloud: false,
+				requirePreflightForLargeRuns: false,  // preflight disabled
+				avoidProviders: [],
+			};
+
+			const { pi, getInputCallCount } = makeMockPi();
+			const state = makeTestState(LARGE_RUN_THRESHOLD + 2); // large run but preflight disabled
+
+			await dispatchChildren(pi, state, 4, 5000, undefined, undefined, undefined);
+
+			assert.equal(getInputCallCount(), 0,
+				"pi.ui.input() should NOT be called when requirePreflightForLargeRuns=false");
+		} finally {
+			teardown();
+		}
+	});
+
+	it("skips preflight gracefully when pi.ui.input is not a function (spec: C2 regression)", async () => {
+		setup();
+		try {
+			(sharedState as any).routingPolicy = {
+				providerOrder: ["anthropic"],
+				preferCheapCloud: false,
+				requirePreflightForLargeRuns: true,
+				avoidProviders: [],
+			};
+
+			// pi.ui exists but .input is not a function — the C2 bug scenario
+			const mockPi = { ui: { /* no input */ }, modelRegistry: { getAll: () => [] } } as any;
+			const state = makeTestState(LARGE_RUN_THRESHOLD);
+			const messages: string[] = [];
+
+			// Should not throw; should emit a "skipped" progress message
+			await assert.doesNotReject(
+				dispatchChildren(mockPi, state, 4, 5000, undefined, undefined, (msg) => messages.push(msg)),
+			);
+			assert.ok(
+				messages.some((m) => m.toLowerCase().includes("skipped")),
+				`Expected a 'skipped' progress message when ui.input is absent, got: ${JSON.stringify(messages)}`,
+			);
+		} finally {
+			teardown();
+		}
 	});
 });

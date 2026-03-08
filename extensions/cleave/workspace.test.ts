@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
 import { matchScenariosToChildren, generateTaskFile, buildSkillSection, buildGuardrailSection } from "./workspace.ts";
 import type { SkillDirective } from "./workspace.ts";
-import { buildChildPrompt, resolveExecuteModel, classifyByScope, mapModelTierToFlag, applyEffortFloor } from "./dispatcher.ts";
+import { buildChildPrompt, resolveExecuteModel, classifyByScope, applyEffortFloor } from "./dispatcher.ts";
 import type { ChildPlan, ModelTier } from "./types.ts";
 import type { OpenSpecContext } from "./openspec.ts";
 
@@ -639,29 +639,11 @@ describe("buildGuardrailSection", () => {
 	});
 });
 
-// ─── mapModelTierToFlag ─────────────────────────────────────────────────────
-
-describe("mapModelTierToFlag", () => {
-	it("maps local to localModel name", () => {
-		assert.equal(mapModelTierToFlag("local", "llama3:8b"), "llama3:8b");
-	});
-
-	it("maps local to undefined when no localModel available", () => {
-		assert.equal(mapModelTierToFlag("local"), undefined);
-	});
-
-	it("maps haiku to 'haiku'", () => {
-		assert.equal(mapModelTierToFlag("haiku"), "haiku");
-	});
-
-	it("maps sonnet to undefined (default, no --model needed)", () => {
-		assert.equal(mapModelTierToFlag("sonnet"), undefined);
-	});
-
-	it("maps opus to 'opus'", () => {
-		assert.equal(mapModelTierToFlag("opus"), "opus");
-	});
-});
+// ─── mapModelTierToFlag removed ─────────────────────────────────────────────
+// mapModelTierToFlag() was a deprecated internal-only function that returned
+// fuzzy tier aliases (e.g. "opus", "haiku"). It has been unexported per C5
+// review finding: "Dead exports are test surface for wrong behavior."
+// Use resolveModelIdForTier() (tested in dispatcher.test.ts) instead.
 
 // ─── applyEffortFloor — effort tier integration ─────────────────────────────
 

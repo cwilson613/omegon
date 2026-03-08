@@ -72,10 +72,10 @@ export function resolveModelIdForTier(
 	}
 
 	// Fallback: if resolver found nothing (empty registry, no API keys),
-	// return undefined for sonnet (pi's default) or the tier name as alias
-	// for other tiers so callers still get something to pass.
-	if (tier === "sonnet") return undefined;
-	return tier;
+	// return undefined so no --model flag is passed. Callers must NEVER pass
+	// a bare tier alias — that violates the spec decision "Prefer explicit model IDs
+	// over fuzzy tier aliases at execution time."
+	return undefined;
 }
 
 // ─── Result section parsing ─────────────────────────────────────────────────
@@ -244,7 +244,7 @@ export function resolveExecuteModel(
  * fuzzy matching (e.g. "opus" → "claude-opus-4-..."). This works with pi's
  * built-in Anthropic models but may mismatch with custom registries.
  */
-export function mapModelTierToFlag(
+function mapModelTierToFlag(
 	tier: ModelTier,
 	localModel?: string,
 ): string | undefined {
@@ -478,34 +478,43 @@ export async function dispatchChildren(
 		onProgress?.(
 			`Preflight: ${childCount} children${reviewEnabled ? " + review" : ""} — asking operator for provider preference…`,
 		);
-		try {
-			// pi.ui.input() is available at runtime but not typed on ExtensionAPI
-			const answer = await (pi as any).ui?.input(
-				`🗂️  Large Cleave run (${childCount} children${reviewEnabled ? ", review on" : ""}). ` +
-				`Which provider should be favored?\n` +
-				`  [1] anthropic  [2] openai  [3] local  [Enter] keep current (${policy.providerOrder[0] ?? "anthropic"}): `,
-			) as string | undefined;
-			const trimmed = (answer ?? "").trim();
-			let chosenProvider: string | undefined;
-			if (trimmed === "1" || trimmed.toLowerCase() === "anthropic") chosenProvider = "anthropic";
-			else if (trimmed === "2" || trimmed.toLowerCase() === "openai") chosenProvider = "openai";
-			else if (trimmed === "3" || trimmed.toLowerCase() === "local") chosenProvider = "local";
-
-			if (chosenProvider) {
-				// Update the session-wide routing policy: move chosen provider to front
-				const newOrder = [
-					chosenProvider as any,
-					...policy.providerOrder.filter((p) => p !== chosenProvider),
-				];
-				policy.providerOrder = newOrder;
-				(sharedState as any).routingPolicy = policy;
-				onProgress?.(`Provider order updated: ${newOrder.join(" → ")}`);
-			} else {
-				onProgress?.(`Keeping current provider order: ${policy.providerOrder.join(" → ")}`);
-			}
-		} catch {
-			// pi.input() may not be available in --no-session mode; proceed with defaults
+		// Guard: pi.ui.input must exist and be a function. Optional chaining on
+		// pi.ui?.input silently returns undefined if input is absent — that path
+		// would fall through without any log and is indistinguishable from the
+		// operator pressing Enter. Explicit typeof check surfaces the skip.
+		const uiInput = (pi as any).ui?.input;
+		if (typeof uiInput !== "function") {
 			onProgress?.("Preflight skipped (input not available in non-interactive mode)");
+		} else {
+			try {
+				const answer = await uiInput.call(
+					(pi as any).ui,
+					`🗂️  Large Cleave run (${childCount} children${reviewEnabled ? ", review on" : ""}). ` +
+					`Which provider should be favored?\n` +
+					`  [1] anthropic  [2] openai  [3] local  [Enter] keep current (${policy.providerOrder[0] ?? "anthropic"}): `,
+				) as string | undefined;
+				const trimmed = (answer ?? "").trim().toLowerCase();
+				let chosenProvider: string | undefined;
+				if (trimmed === "1" || trimmed === "anthropic") chosenProvider = "anthropic";
+				else if (trimmed === "2" || trimmed === "openai") chosenProvider = "openai";
+				else if (trimmed === "3" || trimmed === "local") chosenProvider = "local";
+
+				if (chosenProvider) {
+					// Update the session-wide routing policy: move chosen provider to front
+					const newOrder = [
+						chosenProvider as any,
+						...policy.providerOrder.filter((p) => p !== chosenProvider),
+					];
+					policy.providerOrder = newOrder;
+					(sharedState as any).routingPolicy = policy;
+					onProgress?.(`Provider order updated: ${newOrder.join(" → ")}`);
+				} else {
+					onProgress?.(`Keeping current provider order: ${policy.providerOrder.join(" → ")}`);
+				}
+			} catch {
+				// pi.input() threw unexpectedly; proceed with defaults
+				onProgress?.("Preflight skipped (input threw an unexpected error)");
+			}
 		}
 	}
 
