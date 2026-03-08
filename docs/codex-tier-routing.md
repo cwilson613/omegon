@@ -1,7 +1,7 @@
 ---
 id: codex-tier-routing
 title: Codex Tier Routing — Provider-aware model selection for Cleave and tooling
-status: implementing
+status: implemented
 tags: [models, provider, cleave, effort, architecture]
 open_questions: []
 branches: ["feature/codex-tier-routing"]
