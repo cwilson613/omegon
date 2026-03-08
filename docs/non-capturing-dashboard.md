@@ -122,6 +122,21 @@ There is no mechanism for an overlay to reduce the available width for main cont
 
 **Conclusion**: Content reflow around a persistent panel requires an upstream pi-tui feature (split-pane or reserved-region support). The current overlay API is overlay-only — it paints on top, never beside.
 
+### Overlay width limitation — conversation reflow not feasible
+
+**Request**: when the side panel is open, restrict conversation output width so text wraps as if the terminal ended at the panel boundary (left edge of overlay).
+
+**Assessment**: Not feasible without pi-tui internals changes.
+
+pi-tui overlays are composited on top of the terminal buffer — the overlay is painted over the right portion of an already-rendered full-width frame. The chat renderer writes at full terminal width, then the overlay is layered on top. There is no "reserved columns" API that would constrain the chat renderer's output width before it writes.
+
+**What would be required upstream**:
+- A `setReservedColumns(right: number)` API on the TUI/chat-renderer that the overlay system calls when a non-capturing overlay is shown or hidden.
+- The chat output renderer would then use `termWidth - reservedColumns` as its effective wrap width.
+- This is a pi-tui concern, not something extensions can implement today.
+
+**Workaround**: None. Panel-mode users see conversation text flowing under the overlay. The overlay is positioned and sized so its left edge falls within the text area, which is the current behavior.
+
 ## Decisions
 
 ### Decision: ctrl+shift+b intercepted by Kitty — must change keybind

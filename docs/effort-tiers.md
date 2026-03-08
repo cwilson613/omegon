@@ -3,7 +3,8 @@ id: effort-tiers
 title: Effort Tiers — Global Inference Cost Control (Servitor → Omnissiah)
 status: decided
 tags: [cost, local-inference, architecture, cross-cutting]
-open_questions: []
+open_questions:
+  - "How should EffortConfig represent the active provider? Options: (A) abstract capability labels (\"mid\"/\"frontier\") resolved per authenticated provider; (B) explicit provider+model pairs per tier; (C) primary provider setting + fallback chain"
 branches: ["feature/effort-tiers"]
 openspec_change: effort-tiers
 ---
@@ -141,6 +142,28 @@ interface EffortConfig {
 
 **Total: ~8 files touched, ~500 lines new, ~100 lines modified. Good /cleave candidate with 3-4 children.**
 
+### OpenAI Codex — First-Class Provider via ChatGPT Pro OAuth
+
+**Discovery**: pi ships `openaiCodexOAuthProvider` as a built-in OAuth provider in `pi-ai/dist/utils/oauth/index.js`. No API key needed — uses PKCE browser OAuth against `auth.openai.com`, stores `chatgpt_account_id` in AuthStorage.
+
+**Auth flow**: `authStorage.login("openai-codex", callbacks)` → browser opens → token stored. Auto-refreshes. The `/login` slash command in pi TUI triggers this.
+
+**Endpoint**: `https://chatgpt.com/backend-api/codex/responses` (WebSocket + REST, not the OpenAI API)
+
+**Available models** (all `reasoning: true`, 272K context unless noted):
+| Model | Cost (in/out) | Notes |
+|---|---|---|
+| `gpt-5.3-codex-spark` | **$0 / $0**, 128K | Free under Pro |
+| `gpt-5.1-codex-mini` | $0.25 / $2 | Cheap reasoning |
+| `gpt-5.1` | $1.25 / $10 | Mid-tier |
+| `gpt-5.2` / `gpt-5.2-codex` | $1.75 / $14 | |
+| `gpt-5.3-codex` | $1.75 / $14 | |
+| `gpt-5.4` | $2.50 / $15 | Frontier |
+
+**Key implication**: `gpt-5.3-codex-spark` ($0) is a zero-cost cloud reasoning model — it belongs at tier 3-4 (Substantial/Ruthless) alongside Sonnet but from a different provider. The current `EffortConfig.driver: "local" | "sonnet" | "opus"` cannot represent this.
+
+**Thinking format**: Codex models use `reasoning_effort` ("low"/"medium"/"high"), not Anthropic's thinking token budget. The `thinkingFormat` field in ModelDef handles this but `setThinkingLevel()` in model-budget.ts currently maps only to Anthropic's format.
+
 ## Decisions
 
 ### Decision: /effort cap: locks current tier, agent downgrades only
@@ -160,4 +183,4 @@ interface EffortConfig {
 
 ## Open Questions
 
-*No open questions.*
+- How should EffortConfig represent the active provider? Options: (A) abstract capability labels ("mid"/"frontier") resolved per authenticated provider; (B) explicit provider+model pairs per tier; (C) primary provider setting + fallback chain
