@@ -113,7 +113,7 @@ export interface Fact {
   supersedes: string | null;
   superseded_at: string | null;
   archived_at: string | null;
-  source: "manual" | "extraction" | "ingest" | "migration";
+  source: "manual" | "extraction" | "ingest" | "migration" | "lifecycle";
   content_hash: string;
   confidence: number;
   last_reinforced: string;

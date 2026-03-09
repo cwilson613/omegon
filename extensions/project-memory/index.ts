@@ -67,6 +67,13 @@ import { migrateToFactStore, needsMigration, markMigrated } from "./migration.ts
 import { SECTIONS } from "./template.ts";
 import { serializeConversation, convertToLlm } from "@mariozechner/pi-coding-agent";
 import { sharedState } from "../shared-state.ts";
+import {
+  ingestLifecycleCandidate,
+  ingestLifecycleCandidatesBatch,
+  type LifecycleCandidate,
+  type LifecycleCandidateResult,
+  type BatchIngestResult,
+} from "./lifecycle.ts";
 import { 
   resolveTier, 
   getTierDisplayLabel, 
@@ -1428,6 +1435,49 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
+  // --- Lifecycle Candidate Ingestion API ---
+  
+  /**
+   * Process a lifecycle candidate through the structured ingestion pipeline.
+   * Entry point for design-tree, openspec, and cleave to emit lifecycle candidates.
+   * 
+   * @param candidate - The lifecycle candidate to process
+   * @returns Result indicating whether it was stored, reinforced, or deferred
+   */
+  function ingestLifecycle(candidate: LifecycleCandidate): LifecycleCandidateResult {
+    if (!store) {
+      return {
+        autoStored: false,
+        duplicate: false,
+        reason: "Project memory not initialized",
+      };
+    }
+    
+    const mind = activeMind();
+    return ingestLifecycleCandidate(store, mind, candidate);
+  }
+  
+  /**
+   * Process multiple lifecycle candidates in a batch.
+   * 
+   * @param candidates - Array of lifecycle candidates to process
+   * @returns Aggregated batch results
+   */
+  function ingestLifecycleBatch(candidates: LifecycleCandidate[]): BatchIngestResult {
+    if (!store) {
+      return {
+        autoStored: 0,
+        reinforced: 0,
+        rejected: 0,
+        deferred: 0,
+        factIds: [],
+      };
+    }
+    
+    const mind = activeMind();
+    return ingestLifecycleCandidatesBatch(store, mind, candidates);
+  }
+
   // --- Tools ---
 
   pi.registerTool({
@@ -2236,6 +2286,12 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  // Expose lifecycle ingestion API to other extensions
+  (pi as any).memory = {
+    ingestLifecycle,
+    ingestLifecycleBatch,
+  };
+
   function updateStatus(ctx: ExtensionContext): void {
     if (!ctx.hasUI || !store) return;
 
@@ -2263,6 +2319,103 @@ export default function (pi: ExtensionAPI) {
 
     ctx.ui.setStatus("memory", theme.fg("dim", status));
   }
+
+  // --- Lifecycle Testing Tool ---
+
+  pi.registerTool({
+    name: "memory_ingest_lifecycle",
+    label: "Ingest Lifecycle Candidate",
+    description: [
+      "Internal tool for testing lifecycle candidate ingestion.",
+      "Used by design-tree, openspec, and cleave extensions to emit structured lifecycle facts.",
+      "Not intended for direct agent use - use memory_store for manual fact creation.",
+    ].join(" "),
+    promptSnippet: "Test lifecycle candidate ingestion (internal tool)",
+    parameters: Type.Object({
+      source_kind: Type.Union([
+        Type.Literal("design-decision"),
+        Type.Literal("design-constraint"),
+        Type.Literal("openspec-archive"),
+        Type.Literal("openspec-assess"),
+        Type.Literal("cleave-outcome"),
+        Type.Literal("cleave-bug-fix"),
+      ], {
+        description: "Source kind that generated this candidate",
+      }),
+      authority: Type.Union([
+        Type.Literal("explicit"),
+        Type.Literal("inferred"),
+      ], {
+        description: "Authority level - explicit auto-stores, inferred needs confirmation",
+      }),
+      section: StringEnum(
+        ["Architecture", "Decisions", "Constraints", "Known Issues", "Patterns & Conventions", "Specs"] as const,
+        { description: "Target memory section" },
+      ),
+      content: Type.String({
+        description: "Fact content",
+      }),
+      artifact_ref_type: Type.Optional(Type.Union([
+        Type.Literal("design-node"),
+        Type.Literal("openspec-spec"),
+        Type.Literal("openspec-baseline"),
+        Type.Literal("cleave-review"),
+      ], {
+        description: "Type of artifact",
+      })),
+      artifact_ref_path: Type.Optional(Type.String({
+        description: "Path or identifier",
+      })),
+      artifact_ref_sub: Type.Optional(Type.String({
+        description: "Optional sub-reference (e.g. decision title, spec section)",
+      })),
+      supersedes: Type.Optional(Type.String({
+        description: "Optional fact ID to supersede",
+      })),
+    }),
+    async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, _ctx: any): Promise<any> {
+      const candidate: LifecycleCandidate = {
+        sourceKind: params.source_kind,
+        authority: params.authority,
+        section: params.section,
+        content: params.content,
+        supersedes: params.supersedes,
+      };
+
+      if (params.artifact_ref_type && params.artifact_ref_path) {
+        candidate.artifactRef = {
+          type: params.artifact_ref_type,
+          path: params.artifact_ref_path,
+          subRef: params.artifact_ref_sub,
+        };
+      }
+
+      const result = ingestLifecycle(candidate);
+
+      let responseText = "";
+      if (result.autoStored) {
+        if (result.duplicate) {
+          responseText = `✓ Reinforced existing fact [${result.factId}]: ${candidate.content}`;
+        } else {
+          responseText = `✓ Stored new lifecycle fact [${result.factId}]: ${candidate.content}`;
+        }
+      } else {
+        responseText = `⚠ Candidate not stored: ${result.reason}`;
+      }
+
+      return {
+        content: [{ type: "text", text: responseText }],
+        details: {
+          sourceKind: candidate.sourceKind,
+          authority: candidate.authority,
+          autoStored: result.autoStored,
+          duplicate: result.duplicate,
+          factId: result.factId,
+          reason: result.reason,
+        },
+      };
+    },
+  });
 
   // --- Commands ---
 
