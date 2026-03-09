@@ -75,10 +75,13 @@ When OpenSpec is present, the complete lifecycle is:
 ```
 
 After `/cleave` completes with an OpenSpec change:
-- Tasks are automatically marked `[x]` done in `tasks.md`
+- Tasks are automatically reconciled in `tasks.md`
+- If completed work cannot be mapped back to task groups, treat that as a lifecycle reconciliation warning and fix the OpenSpec plan before archive
 - The report includes Next Steps guidance
 - If all tasks complete: `/assess spec` → `/opsx:verify` → `/opsx:archive`
 - If partial: `/opsx:apply` or `/cleave` again
+- After `/assess spec` or `/assess cleave`, run post-assess reconciliation so failed/partial review can reopen implementation state and append design-tree implementation-note deltas
+- Before archive, ensure the bound design-tree node and OpenSpec task state both reflect reality
 
 ### Session Start
 

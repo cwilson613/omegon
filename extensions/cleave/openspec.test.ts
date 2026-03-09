@@ -855,6 +855,7 @@ describe("writeBackTaskCompletion", () => {
 		const result = writeBackTaskCompletion(dir, ["auth"]);
 		assert.equal(result.updated, 2);
 		assert.equal(result.allDone, false);
+		assert.deepStrictEqual(result.unmatchedLabels, []);
 
 		const content = fs.readFileSync(path.join(dir, "tasks.md"), "utf-8");
 		assert.ok(content.includes("[x] 1.1 Create login form"));
@@ -894,12 +895,14 @@ describe("writeBackTaskCompletion", () => {
 
 		const result = writeBackTaskCompletion(dir, ["nonexistent"]);
 		assert.equal(result.updated, 0);
+		assert.deepStrictEqual(result.unmatchedLabels, ["nonexistent"]);
 	});
 
 	it("returns zero when no tasks.md", () => {
 		const result = writeBackTaskCompletion(dir, ["auth"]);
 		assert.equal(result.updated, 0);
 		assert.equal(result.totalTasks, 0);
+		assert.deepStrictEqual(result.unmatchedLabels, ["auth"]);
 	});
 
 	it("handles multi-word label slugs", () => {
@@ -911,6 +914,19 @@ describe("writeBackTaskCompletion", () => {
 
 		const result = writeBackTaskCompletion(dir, ["database-layer"]);
 		assert.equal(result.updated, 2);
+	});
+
+	it("reports unmatched labels alongside matched groups", () => {
+		fs.writeFileSync(path.join(dir, "tasks.md"), [
+			"## 1. Auth",
+			"- [ ] 1.1 Create login form",
+			"## 2. API",
+			"- [ ] 2.1 Create endpoints",
+		].join("\n"));
+
+		const result = writeBackTaskCompletion(dir, ["auth", "missing-group"]);
+		assert.equal(result.updated, 1);
+		assert.deepStrictEqual(result.unmatchedLabels, ["missing-group"]);
 	});
 
 	it("preserves non-task lines unchanged", () => {

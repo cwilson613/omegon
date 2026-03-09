@@ -28,6 +28,21 @@ Specs define **what must be true** before code is written. They are the source o
 | **verifying** | all tasks done | `/assess spec <change>` → `/opsx:archive` |
 | **archived** | specs merged to baseline | complete |
 
+## Lifecycle Reconciliation (required)
+
+OpenSpec artifacts are not write-once planning docs. Treat them as runtime lifecycle state.
+
+At these checkpoints, reconcile the artifacts to match reality:
+
+1. **Implement / scaffold** — ensure the design-tree node is bound to the OpenSpec change and marked `implementing`
+2. **Post-cleave** — ensure `tasks.md` reflects merged work, not just original intent
+3. **Post-assess / post-fix** — after `/assess spec` or `/assess cleave`, reopen lifecycle state if review found remaining work, and append implementation-note deltas when fixes expanded file scope or constraints
+4. **Pre-archive** — ensure the bound design-tree node and `tasks.md` are current before closing the change
+
+Archive is expected to refuse obviously stale lifecycle state, especially:
+- incomplete tasks in `tasks.md`
+- no design-tree binding for the change
+
 ## Directory Structure
 
 ```

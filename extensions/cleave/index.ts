@@ -20,6 +20,7 @@ import { Type } from "@sinclair/typebox";
 
 import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
 import { debug } from "../debug.ts";
+import { emitOpenSpecState } from "../openspec/dashboard-state.ts";
 import { assessDirective, PATTERNS } from "./assessment.ts";
 import { detectConflicts, parseTaskResult } from "./conflicts.ts";
 import { dispatchChildren, resolveExecuteModel } from "./dispatcher.ts";
@@ -420,6 +421,22 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 						return;
 					}
 
+					let postAssessInstruction: string[] = [];
+					const activeOpenSpec = getActiveChangesStatus(ctx.cwd)
+						.filter((s) => s.totalTasks > 0)
+						.sort((a, b) => b.lastModifiedMs - a.lastModifiedMs);
+					if (activeOpenSpec.length > 0) {
+						const targetChange = activeOpenSpec[0].name;
+						postAssessInstruction = [
+							"",
+							`After review/fixes/tests, call \`openspec_manage\` with action \`reconcile_after_assess\`, change_name \`${targetChange}\`, assessment_kind \`cleave\`, and outcome:`,
+							"- `pass` if all Critical/Warning work is resolved cleanly",
+							"- `reopen` if remaining work or follow-up fixes reopen implementation",
+							"- `ambiguous` if you cannot safely map reviewer findings back to task state",
+							"Include `changed_files` for any follow-up fix files and `constraints` for new implementation constraints discovered during review.",
+						];
+					}
+
 					pi.sendMessage({
 						customType: "view",
 						content: [
@@ -496,6 +513,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 							"",
 							"After all fixes, run the test suite to verify nothing broke.",
 							"Then commit with a conventional commit message summarizing all fixes.",
+							...postAssessInstruction,
 						].join("\n"),
 						{ deliverAs: "followUp" },
 					);
@@ -743,6 +761,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 							"3. Summarize with a count: N/M scenarios passing",
 							"4. For any FAIL items, explain what's wrong and suggest fixes",
 							"5. Do NOT auto-fix — this is assessment only",
+							`6. After the assessment, if the result reopens work or reveals new constraints/file-scope drift, call \`openspec_manage\` with action \`reconcile_after_assess\`, change_name \`${target.name}\`, assessment_kind \`spec\`, and outcome \`reopen\` or \`ambiguous\` as appropriate. If all scenarios pass cleanly, call it with outcome \`pass\` to refresh lifecycle state.`,
 							...(diffContent ? [
 								"",
 								"### Recent Changes (for context)",
@@ -1030,7 +1049,8 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 		promptSnippet:
 			"Execute a cleave decomposition plan — parallel child dispatch in git worktrees, conflict detection, merge, and report",
 		promptGuidelines: [
-			"When an OpenSpec change was used to generate the plan, ALWAYS pass `openspec_change_path` so child tasks get design context and tasks.md is updated on completion.",
+			"When an OpenSpec change was used to generate the plan, ALWAYS pass `openspec_change_path` so child tasks get design context and tasks.md is reconciled on completion.",
+			"Treat lifecycle reconciliation as required: after cleave_run, ensure tasks.md, design-tree status, and dashboard-facing progress reflect the merged reality before archive.",
 			"After cleave_run completes with OpenSpec, follow the Next Steps in the report (typically `/assess spec` → `/opsx:verify` → `/opsx:archive`).",
 		],
 		parameters: Type.Object({
@@ -1291,13 +1311,14 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 
 			// ── TASK WRITE-BACK ────────────────────────────────────────
 			// Mark completed child tasks as [x] done in OpenSpec tasks.md
-			let writeBackResult: { updated: number; totalTasks: number; allDone: boolean } | null = null;
+			let writeBackResult: { updated: number; totalTasks: number; allDone: boolean; unmatchedLabels: string[] } | null = null;
 			if (params.openspec_change_path && mergeFailures.length === 0) {
 				const completedLabels = state.children
 					.filter((c) => c.status === "completed")
 					.map((c) => c.label);
 				try {
 					writeBackResult = writeBackTaskCompletion(params.openspec_change_path, completedLabels);
+					emitOpenSpecState(repoPath, pi);
 				} catch {
 					// Non-fatal — report will note write-back wasn't possible
 				}
@@ -1427,6 +1448,16 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 					"",
 					"### Task Write-Back",
 					`  ✓ Marked ${writeBackResult.updated} tasks as done in \`tasks.md\``,
+				);
+			}
+			if (writeBackResult && writeBackResult.unmatchedLabels.length > 0) {
+				reportLines.push(
+					"",
+					"### Lifecycle Reconciliation Warning",
+					"  ⚠ Completed cleave work could not be mapped back into `tasks.md` for:",
+					...writeBackResult.unmatchedLabels.map((label) => `  - ${label}`),
+					"",
+					"  tasks.md no longer matches the implementation plan. Reconcile the OpenSpec task groups before archive.",
 				);
 			}
 

@@ -635,9 +635,11 @@ function mergeSmallGroups(groups: TaskGroup[], maxGroups: number): TaskGroup[] {
 export function writeBackTaskCompletion(
 	changePath: string,
 	completedLabels: string[],
-): { updated: number; totalTasks: number; allDone: boolean } {
+): { updated: number; totalTasks: number; allDone: boolean; unmatchedLabels: string[] } {
 	const tasksPath = join(changePath, "tasks.md");
-	if (!existsSync(tasksPath)) return { updated: 0, totalTasks: 0, allDone: false };
+	if (!existsSync(tasksPath)) {
+		return { updated: 0, totalTasks: 0, allDone: false, unmatchedLabels: [...completedLabels] };
+	}
 
 	const content = readFileSync(tasksPath, "utf-8");
 	const groups = parseTasksFile(content);
@@ -647,6 +649,7 @@ export function writeBackTaskCompletion(
 
 	// Track which group numbers are completed
 	const completedGroupNumbers = new Set<number>();
+	const matchedLabels = new Set<string>();
 	for (const group of groups) {
 		const groupSlug = group.title
 			.toLowerCase()
@@ -658,12 +661,17 @@ export function writeBackTaskCompletion(
 
 		if (completedSet.has(groupSlug)) {
 			completedGroupNumbers.add(group.number);
+			matchedLabels.add(groupSlug);
 		}
 	}
 
+	const unmatchedLabels = completedLabels
+		.map((label) => label.toLowerCase())
+		.filter((label) => !matchedLabels.has(label));
+
 	if (completedGroupNumbers.size === 0) {
 		const totalTasks = groups.reduce((sum, g) => sum + g.tasks.length, 0);
-		return { updated: 0, totalTasks, allDone: false };
+		return { updated: 0, totalTasks, allDone: false, unmatchedLabels };
 	}
 
 	// Rewrite tasks.md line by line, checking off tasks in completed groups
@@ -704,7 +712,7 @@ export function writeBackTaskCompletion(
 	const wasDone = groups.reduce((sum, g) => sum + g.tasks.filter((t) => t.done).length, 0);
 	const allDone = wasDone + updated >= totalTasks;
 
-	return { updated, totalTasks, allDone };
+	return { updated, totalTasks, allDone, unmatchedLabels };
 }
 
 // ─── Active Changes Status ──────────────────────────────────────────────────

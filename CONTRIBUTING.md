@@ -138,6 +138,20 @@ Files that should never cause merge conflicts due to their nature:
 
 See `.gitignore` (repo root) and `.pi/.gitignore` (memory directory) for the authoritative ignore rules. Key principle: `facts.jsonl` is tracked, `*.db` files are not.
 
+Lifecycle artifacts under `docs/` and `openspec/` are also treated as durable project records and should be version controlled by default. These files are not scratch space — they are part of the human-readable design, planning, and verification history for the repo.
+
+By contrast, transient cleave runtime artifacts such as machine-local workspaces and worktrees remain optional and should live outside the durable lifecycle paths. If something is experimental or disposable, do not leave it under `docs/` or `openspec/`.
+
+The standard validation path enforces this policy:
+
+```bash
+npm run check
+```
+
+If it reports untracked lifecycle artifacts, either:
+- `git add` the durable files under `docs/` / `openspec/`, or
+- move transient scratch material elsewhere.
+
 ### `pi update` and `bin/deploy` Safety
 
 Both `pi update` and `bin/deploy` run `git clean -fdx` as part of their pull-and-reinstall cycle. This removes **all** untracked and gitignored files, including:
