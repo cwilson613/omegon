@@ -20,7 +20,7 @@ describe("formatMemoryAuditSummary", () => {
         payloadChars: 4800,
         estimatedTokens: 1200,
       }),
-      "Memory semantic · f:30 · wm:4 · ep:3 · g:15 · ~1200",
+      "Memory semantic · facts:30 · wm:4 · ep:3 · global:15 · ~1200 tok",
     );
   });
 

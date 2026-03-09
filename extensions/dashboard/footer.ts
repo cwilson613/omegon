@@ -362,7 +362,7 @@ export class DashboardFooter implements Component {
         ? theme.fg("dim", ` +${dt.focusedNode.branchCount! - 1}`)
         : "";
       const branchInfo = dt.focusedNode.status === "implementing" && dt.focusedNode.branch
-        ? theme.fg("dim", ` → ${dt.focusedNode.branch}`) + branchExtra
+        ? theme.fg("dim", ` · ${dt.focusedNode.branch}`) + branchExtra
         : "";
       const linkedTitle = linkDashboardFile(dt.focusedNode.title, dt.focusedNode.filePath);
       lines.push(`  ${statusIcon} ${linkedTitle}${branchInfo}${qCount}`);
@@ -371,7 +371,7 @@ export class DashboardFooter implements Component {
     // Implementing nodes (if no focused node)
     if (dt.implementingNodes && dt.implementingNodes.length > 0 && !dt.focusedNode) {
       for (const n of dt.implementingNodes.slice(0, 3)) {
-        const branchSuffix = n.branch ? theme.fg("dim", ` → ${n.branch}`) : "";
+        const branchSuffix = n.branch ? theme.fg("dim", ` · ${n.branch}`) : "";
         const linkedTitle = linkDashboardFile(n.title, n.filePath);
         lines.push(`  ${theme.fg("accent", "⚙")} ${linkedTitle}${branchSuffix}`);
       }
@@ -413,46 +413,38 @@ export class DashboardFooter implements Component {
     const os = sharedState.openspec;
     if (!os || os.changes.length === 0) return lines;
 
-    // Header with count and aggregate progress
     const totalDone = os.changes.reduce((s, c) => s + c.tasksDone, 0);
     const totalAll = os.changes.reduce((s, c) => s + c.tasksTotal, 0);
     const allComplete = totalAll > 0 && totalDone >= totalAll;
     const aggregateProgress = totalAll > 0
-      ? theme.fg(allComplete ? "success" : "dim", ` ${totalDone}/${totalAll} tasks`)
+      ? theme.fg(allComplete ? "success" : "dim", ` ${totalDone}/${totalAll}`)
       : "";
-    lines.push(theme.fg("accent", "◎ OpenSpec") + "  " +
+    lines.push(
+      theme.fg("accent", "◎ OpenSpec") + "  " +
       theme.fg("dim", `${os.changes.length} change${os.changes.length > 1 ? "s" : ""}`) +
-      aggregateProgress);
+      aggregateProgress,
+    );
 
-    for (const c of os.changes.slice(0, 4)) {
+    for (const c of os.changes.slice(0, 3)) {
       const done = c.tasksTotal > 0 && c.tasksDone >= c.tasksTotal;
       const icon = done ? theme.fg("success", "✓") : theme.fg("dim", "◦");
       const progress = c.tasksTotal > 0
         ? theme.fg(done ? "success" : "dim", ` ${c.tasksDone}/${c.tasksTotal}`)
         : "";
 
-      // Stage with semantic coloring
       const stageColor = c.stage === "verifying" ? "warning"
         : c.stage === "implementing" ? "accent"
         : c.stage === "ready" ? "success"
         : "dim";
-      const stage = c.stage ? theme.fg(stageColor, ` [${c.stage}]`) : "";
-
-      // Artifact badges — show which lifecycle files exist
-      const artifacts = c.artifacts && c.artifacts.length > 0
-        ? " " + c.artifacts
-          .filter((a): a is "proposal" | "design" | "tasks" => a === "proposal" || a === "design" || a === "tasks")
-          .map((a) => linkOpenSpecArtifact(theme.fg("dim", a[0]), c.path, a))
-          .join("")
-        : "";
+      const stageLabel = c.stage === "implementing" ? "impl"
+        : c.stage === "verifying" ? "verify"
+        : c.stage === "specified" ? "spec"
+        : c.stage === "planned" ? "plan"
+        : c.stage;
+      const stage = stageLabel ? theme.fg(stageColor, ` · ${stageLabel}`) : "";
 
       const linkedName = linkOpenSpecChange(c.name, c.path);
-      lines.push(`  ${icon} ${linkedName}${progress}${stage}${artifacts}`);
-    }
-
-    // Hint for actionable next steps
-    if (allComplete && os.changes.some(c => c.stage === "verifying")) {
-      lines.push(theme.fg("dim", "  → /opsx:verify → /opsx:archive"));
+      lines.push(`  ${icon} ${linkedName}${progress}${stage}`);
     }
 
     return lines;

@@ -25,10 +25,10 @@ export function formatMemoryAuditSummary(
 
   return [
     `Memory ${metrics.mode}`,
-    `f:${metrics.projectFactCount}`,
+    `facts:${metrics.projectFactCount}`,
     `wm:${metrics.workingMemoryFactCount}`,
     `ep:${metrics.episodeCount}`,
-    `g:${metrics.globalFactCount}`,
-    `~${metrics.estimatedTokens}`,
+    `global:${metrics.globalFactCount}`,
+    `~${metrics.estimatedTokens} tok`,
   ].join(" · ");
 }
