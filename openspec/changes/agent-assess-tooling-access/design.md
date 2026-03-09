@@ -49,18 +49,22 @@ A bridged slash command returns a normalized envelope:
   summary: string;
   humanText: string;
   data?: unknown;
-  effects?: {
+  effects: {
     filesChanged?: string[];
     branchesCreated?: string[];
     lifecycleTouched?: string[];
-    sideEffectClass?: "read" | "workspace-write" | "git-write" | "external-side-effect";
+    sideEffectClass: "read" | "workspace-write" | "git-write" | "external-side-effect";
   };
-  nextSteps?: string[];
+  nextSteps?: Array<{
+    label: string;
+    command?: string;
+    rationale?: string;
+  }>;
   confirmationRequired?: boolean;
 }
 ```
 
-`data` holds command-specific structured output. For assessment commands, this should include findings, severity counts, reviewed target, pass/reopen state, and lifecycle reconciliation hints such as whether `openspec_manage.reconcile_after_assess` is warranted.
+`data` holds command-specific structured output. For assessment commands this should include findings, severity counts, reviewed target, pass/reopen state, and lifecycle reconciliation hints such as whether `openspec_manage.reconcile_after_assess` is warranted.
 
 ### Safety model
 
@@ -68,14 +72,25 @@ The bridge does not execute arbitrary slash commands by name. Commands opt in th
 
 - `agentCallable: boolean`
 - `sideEffectClass: read | workspace-write | git-write | external-side-effect`
-- `requiresConfirmation: boolean`
-- `resultSchema` or typed data contract
+- `requiresConfirmation?: boolean`
+- `resultContract?: string`
+- `summary?: string`
 
 The bridge refuses commands that are not allowlisted as agent-callable. If a command requires confirmation for destructive or external side effects, the bridge returns a structured refusal/confirmation-needed result instead of executing silently.
 
 ### Shared implementation path
 
 The cleanest architecture is to factor slash-command bodies into shared handlers that return structured results. Existing interactive command registrations become thin renderers over those handlers, while a harness-facing tool invokes the same handlers by command id. This avoids parsing terminal text, keeps command behavior consistent across human and agent entrypoints, and lets commands gradually opt into bridge support.
+
+### Validation strategy
+
+Regression coverage should explicitly check:
+
+- allowlisted execution succeeds and preserves structured data
+- blocked commands fail closed
+- confirmation-required commands refuse execution until confirmed
+- interactive and bridged paths observe the same structured executor output
+- structured assess results are sufficient to drive lifecycle reconciliation without prose parsing
 
 ### V1 rollout
 
@@ -89,12 +104,14 @@ The bridge remains generic, but these commands close the current autonomy gap im
 
 ## File Changes
 
-- `extensions/lib/slash-command-bridge.ts` (new) — Shared bridge primitives for allowlisted slash-command execution, metadata lookup, normalization, and safety checks
-- `extensions/types.d.ts` (modified) — Command metadata/result typing support for bridged commands if required by the extension API layer
-- `extensions/cleave/index.ts` (modified) — Refactor `/assess` behind structured shared executors and register v1 bridge metadata/tooling
-- `extensions/openspec/index.ts` (modified) — Consume structured assessment outcomes where lifecycle reconciliation is needed
-- `extensions/design-tree/index.ts` (modified) — Consume structured reopen/update signals only where necessary
-- `docs/agent-assess-tooling-access.md` (modified) — Record architecture, safety boundaries, result envelope, and v1 allowlist
+- `extensions/lib/slash-command-bridge.ts` (new) — shared bridge primitives for allowlisted slash-command execution, metadata lookup, normalization, and safety checks
+- `extensions/types.d.ts` (modified) — command metadata/result typing support for bridged commands
+- `extensions/cleave/assessment.ts` (modified) — structured assessment result types and lifecycle hints
+- `extensions/cleave/index.ts` (modified) — shared `/assess` structured executors used by human and bridged flows
+- `extensions/openspec/index.ts` (modified) — consumes structured assessment outcomes where lifecycle reconciliation is needed
+- `extensions/design-tree/index.ts` (modified) — consumes structured reopen/update signals where needed
+- `extensions/lib/slash-command-bridge.test.ts` (new) — regression tests for allowlisting, confirmation handling, and shared executor parity
+- `docs/agent-assess-tooling-access.md` (modified) — records architecture, safety boundaries, result envelope, and v1 allowlist
 
 ## Constraints
 
@@ -103,3 +120,4 @@ The bridge remains generic, but these commands close the current autonomy gap im
 - The bridge must refuse commands that are not explicitly allowlisted as agent-callable.
 - Commands with destructive or external side effects must surface confirmation requirements through structured metadata rather than silently executing.
 - V1 must cover the current OpenSpec lifecycle gap first by making `/assess spec`, `/assess diff`, and `/assess cleave` invokable through the bridge.
+- Arbitrary slash-command execution remains out of scope for v1 even though the bridge primitive itself is generic.
