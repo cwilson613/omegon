@@ -25,8 +25,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { shouldRefreshDesignTreeForPath } from "../dashboard/file-watch.ts";
+import { sharedState } from "../shared-state.ts";
 
 import { emitDesignTreeState } from "./dashboard-state.ts";
+import { emitConstraintCandidates, emitDecisionCandidates } from "./lifecycle-emitter.ts";
 
 import type { DesignNode, DesignTree, NodeStatus } from "./types.ts";
 import { VALID_STATUSES, STATUS_ICONS, STATUS_COLORS } from "./types.ts";
@@ -608,9 +610,17 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						status: dStatus,
 						rationale: params.rationale || "",
 					});
+					const decisionCandidates = emitDecisionCandidates(node, params.decision_title, dStatus);
+					if (decisionCandidates.length > 0) {
+						(sharedState.lifecycleCandidateQueue ??= []).push({
+							source: "design-tree",
+							context: `Decided design decision in '${node.id}'`,
+							candidates: decisionCandidates,
+						});
+					}
 					return {
 						content: [{ type: "text", text: `Added decision '${params.decision_title}' (${dStatus}) to '${node.title}'` }],
-						details: { id: node.id, decision: params.decision_title, status: dStatus },
+						details: { id: node.id, decision: params.decision_title, status: dStatus, emittedCandidates: decisionCandidates.length },
 					};
 				}
 
@@ -674,9 +684,17 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					const added: string[] = [];
 					if (params.file_scope) added.push(`${params.file_scope.length} file scope entries`);
 					if (params.constraints) added.push(`${params.constraints.length} constraints`);
+					const constraintCandidates = emitConstraintCandidates(node, params.constraints);
+					if (constraintCandidates.length > 0) {
+						(sharedState.lifecycleCandidateQueue ??= []).push({
+							source: "design-tree",
+							context: `Implementation constraints recorded for '${node.id}'`,
+							candidates: constraintCandidates,
+						});
+					}
 					return {
 						content: [{ type: "text", text: `Added implementation notes to '${node.title}': ${added.join(", ")}` }],
-						details: { id: node.id },
+						details: { id: node.id, emittedCandidates: constraintCandidates.length },
 					};
 				}
 

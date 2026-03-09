@@ -16,6 +16,7 @@ import type {
 import type { EffortState } from "./effort/types.ts";
 import type { ProviderRoutingPolicy } from "./lib/model-routing.ts";
 import type { MemoryInjectionMetrics } from "./project-memory/injection-metrics.ts";
+import type { LifecycleMemoryMessage } from "./project-memory/types.ts";
 import { getDefaultPolicy } from "./lib/model-routing.ts";
 
 // Re-export dashboard types for consumer convenience
@@ -71,6 +72,9 @@ interface SharedState {
 
   /** Session routing policy. Written by operator/preflight, read by cleave and model-budget. */
   routingPolicy?: ProviderRoutingPolicy;
+
+  /** Pending structured lifecycle candidates waiting for project-memory ingestion. */
+  lifecycleCandidateQueue?: LifecycleMemoryMessage[];
 }
 
 // Initialize once on first import, reuse thereafter via global symbol.

@@ -23,6 +23,7 @@ import { debug } from "../debug.ts";
 import { emitOpenSpecState } from "../openspec/dashboard-state.ts";
 import { assessDirective, PATTERNS } from "./assessment.ts";
 import { detectConflicts, parseTaskResult } from "./conflicts.ts";
+import { emitResolvedBugCandidate } from "./lifecycle-emitter.ts";
 import { dispatchChildren, resolveExecuteModel } from "./dispatcher.ts";
 import { DEFAULT_REVIEW_CONFIG, type ReviewConfig } from "./review.ts";
 import {
@@ -1283,6 +1284,11 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 				parseTaskResult(content, `${id}-task.md`),
 			);
 			const conflicts = detectConflicts(taskResults);
+			const cleaveCandidates = taskResults.flatMap((result) =>
+				result.summary
+					? emitResolvedBugCandidate(result.summary, result.path)
+					: [],
+			);
 
 			// ── MERGE ──────────────────────────────────────────────────
 			state.phase = "reunify";
@@ -1351,6 +1357,14 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 						}
 					}
 				} catch { /* non-fatal */ }
+			}
+
+			if (cleaveCandidates.length > 0) {
+				(sharedState.lifecycleCandidateQueue ??= []).push({
+					source: "cleave",
+					context: `cleave run ${state.runId} final outcomes`,
+					candidates: cleaveCandidates,
+				});
 			}
 
 			if (mergeResults.length > 0 && mergeFailures.length === 0) {

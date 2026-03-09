@@ -49,7 +49,7 @@ import { Type } from "@sinclair/typebox";
 import { Container, type SelectItem, SelectList, Text } from "@mariozechner/pi-tui";
 import { FactStore, parseExtractionOutput, GLOBAL_DECAY, type MindRecord, type Fact } from "./factstore.ts";
 import { embed, isEmbeddingAvailable, MODEL_DIMS } from "./embeddings.ts";
-import { DEFAULT_CONFIG, type MemoryConfig } from "./types.ts";
+import { DEFAULT_CONFIG, type MemoryConfig, type LifecycleMemoryCandidate } from "./types.ts";
 import {
   createMemoryInjectionMetrics,
   estimateTokensFromChars,
@@ -484,6 +484,7 @@ export default function (pi: ExtensionAPI) {
   // --- Lifecycle ---
 
   pi.on("session_start", async (_event, ctx) => {
+    drainLifecycleCandidateQueue(ctx);
     memoryDir = path.join(ctx.cwd, ".pi", "memory");
 
     // Initialize project store
@@ -1119,6 +1120,7 @@ export default function (pi: ExtensionAPI) {
   // --- Context Injection ---
 
   pi.on("before_agent_start", async (event, ctx) => {
+    drainLifecycleCandidateQueue(ctx);
     if (!store) return;
     if (!firstTurn && !postCompaction) return;
 
@@ -1476,6 +1478,40 @@ export default function (pi: ExtensionAPI) {
     
     const mind = activeMind();
     return ingestLifecycleCandidatesBatch(store, mind, candidates);
+  }
+
+  // --- Lifecycle Candidate Queue Ingestion ---
+
+  function drainLifecycleCandidateQueue(ctx: ExtensionContext): void {
+    if (!store) return;
+    const queue = sharedState.lifecycleCandidateQueue ?? [];
+    if (queue.length === 0) return;
+
+    sharedState.lifecycleCandidateQueue = [];
+
+    for (const payload of queue) {
+      try {
+        if (!Array.isArray(payload.candidates) || payload.candidates.length === 0) continue;
+
+        const mind = activeMind();
+        const result = ingestLifecycleCandidatesBatch(store, mind, payload.candidates as LifecycleMemoryCandidate[]);
+
+        for (const factId of result.factIds) {
+          addToWorkingMemory(factId);
+        }
+
+        if (ctx.hasUI && (result.autoStored > 0 || result.reinforced > 0)) {
+          const parts: string[] = [];
+          if (result.autoStored > 0) parts.push(`+${result.autoStored} stored`);
+          if (result.reinforced > 0) parts.push(`${result.reinforced} reinforced`);
+          ctx.ui.notify(`Lifecycle memory (${payload.source}): ${parts.join(", ")}`, "info");
+        }
+      } catch (error) {
+        console.error("[project-memory] Failed to ingest lifecycle candidates:", error);
+      }
+    }
+
+    updateStatus(ctx);
   }
 
   // --- Tools ---

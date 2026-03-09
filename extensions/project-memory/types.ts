@@ -2,6 +2,26 @@
  * Project Memory — Types
  */
 
+export interface LifecycleMemoryMessage {
+  source: "design-tree" | "openspec" | "cleave";
+  context: string;
+  candidates: LifecycleMemoryCandidate[];
+}
+
+export interface LifecycleMemoryCandidate {
+  sourceKind: "design-decision" | "design-constraint" | "openspec-archive" | "openspec-assess" | "cleave-outcome" | "cleave-bug-fix";
+  authority: "explicit" | "inferred";
+  section: "Architecture" | "Decisions" | "Constraints" | "Known Issues" | "Patterns & Conventions" | "Specs";
+  content: string;
+  artifactRef?: {
+    type: "design-node" | "openspec-spec" | "openspec-baseline" | "cleave-review";
+    path: string;
+    subRef?: string;
+  };
+  supersedes?: string;
+  session?: string;
+}
+
 export interface MemoryConfig {
   /** Max lines in active memory before extraction prunes */
   maxLines: number;

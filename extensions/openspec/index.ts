@@ -49,6 +49,8 @@ import {
 } from "./reconcile.ts";
 import { scanDesignDocs } from "../design-tree/tree.ts";
 import { emitDesignTreeState } from "../design-tree/dashboard-state.ts";
+import { emitArchiveCandidates, emitReconcileCandidates } from "./lifecycle-emitter.ts";
+import { sharedState } from "../shared-state.ts";
 
 // ─── Extension ───────────────────────────────────────────────────────────────
 
@@ -490,6 +492,15 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 						constraints: params.constraints,
 					});
 
+					const reconcileCandidates = emitReconcileCandidates(params.change_name, params.summary, params.constraints);
+					if (reconcileCandidates.length > 0) {
+						(sharedState.lifecycleCandidateQueue ??= []).push({
+							source: "openspec",
+							context: `reconcile_after_assess for '${params.change_name}'`,
+							candidates: reconcileCandidates,
+						});
+					}
+
 					emitOpenSpecState(cwd, pi);
 					const tree = scanDesignDocs(path.join(cwd, "docs"));
 					emitDesignTreeState(pi, tree, null);
@@ -542,6 +553,7 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 						};
 					}
 
+					const changeInfo = getChange(cwd, params.change_name);
 					const result = archiveChange(cwd, params.change_name);
 					if (!result.archived) {
 						return {
@@ -549,6 +561,18 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 							details: {},
 							isError: true,
 						};
+					}
+
+					if (changeInfo) {
+						const archiveCandidates = emitArchiveCandidates({ ...changeInfo, stage: "archived" });
+						if (archiveCandidates.length > 0) {
+							(sharedState.lifecycleCandidateQueue ??= []).push({
+								source: "openspec",
+								context: `archive for '${params.change_name}'`,
+								candidates: archiveCandidates,
+							});
+							result.operations.push(`Emitted ${archiveCandidates.length} lifecycle memory candidate(s)`);
+						}
 					}
 
 					// Archive gate: transition implementing → implemented in design tree

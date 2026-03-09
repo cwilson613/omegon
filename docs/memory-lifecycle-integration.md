@@ -1,7 +1,7 @@
 ---
 id: memory-lifecycle-integration
 title: Memory integration with Cleave, Design Tree, and OpenSpec
-status: implementing
+status: implemented
 tags: [memory, cleave, design-tree, openspec, workflow]
 open_questions: []
 branches: ["feature/memory-lifecycle-integration"]
@@ -50,6 +50,20 @@ Use a hybrid memory-write model tied to lifecycle checkpoints instead of free-ru
 - `extensions/design-tree/` (modified) — Emit decision and constraint payloads suitable for memory ingestion
 - `extensions/cleave/` (modified) — Emit verified execution outcomes and post-review durable findings, not raw child chatter
 - `extensions/shared-state.ts` (modified) — If needed, add lightweight lifecycle event summaries for cross-extension coordination without duplicating source-of-truth ownership
+- `extensions/project-memory/index.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/project-memory/types.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/project-memory/lifecycle-integration-e2e.test.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/design-tree/index.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/design-tree/lifecycle-emitter.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/design-tree/lifecycle-emitter.test.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/openspec/index.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/openspec/lifecycle-emitter.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/openspec/lifecycle-emitter.test.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/cleave/index.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/cleave/lifecycle-emitter.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/cleave/lifecycle-emitter.test.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/shared-state.test.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `openspec/changes/memory-lifecycle-integration/tasks.md` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
 
 ### Constraints
 
