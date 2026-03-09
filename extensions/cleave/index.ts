@@ -17,11 +17,21 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { truncateTail, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import { createHash } from "node:crypto";
 
 import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
 import { debug } from "../debug.ts";
 import { emitOpenSpecState } from "../openspec/dashboard-state.ts";
-import { assessDirective, PATTERNS } from "./assessment.ts";
+import { createSlashCommandBridge, buildSlashCommandResult } from "../lib/slash-command-bridge.ts";
+import {
+	assessDirective,
+	PATTERNS,
+	type AssessEffect,
+	type AssessLifecycleHint,
+	type AssessLifecycleOutcome,
+	type AssessLifecycleRecord,
+	type AssessStructuredResult,
+} from "./assessment.ts";
 import { detectConflicts, parseTaskResult } from "./conflicts.ts";
 import { emitResolvedBugCandidate } from "./lifecycle-emitter.ts";
 import { dispatchChildren, resolveExecuteModel } from "./dispatcher.ts";
@@ -173,6 +183,618 @@ function formatSpecVerification(ctx: OpenSpecContext): string {
 	return lines.join("\n");
 }
 
+interface AssessExecutionContext {
+	cwd: string;
+}
+
+interface AssessDiffContext {
+	ref: string;
+	diffStat: string;
+	diffContent: string;
+	recentLog: string;
+}
+
+function makeAssessResult<TData>(input: {
+	subcommand: AssessStructuredResult<TData>["subcommand"];
+	args: string;
+	ok: boolean;
+	summary: string;
+	humanText: string;
+	data: TData;
+	effects?: AssessEffect[];
+	nextSteps?: string[];
+	lifecycle?: AssessLifecycleHint;
+	lifecycleRecord?: AssessLifecycleRecord;
+}): AssessStructuredResult<TData> {
+	return {
+		command: "assess",
+		subcommand: input.subcommand,
+		args: input.args,
+		ok: input.ok,
+		summary: input.summary,
+		humanText: input.humanText,
+		data: input.data,
+		effects: input.effects ?? [],
+		nextSteps: input.nextSteps ?? [],
+		lifecycle: input.lifecycle,
+		lifecycleRecord: input.lifecycleRecord,
+	};
+}
+
+async function collectAssessmentSnapshot(pi: ExtensionAPI, cwd: string): Promise<{ gitHead: string | null; fingerprint: string }> {
+	let gitHead: string | null = null;
+	let status = "";
+
+	try {
+		const head = await pi.exec("git", ["rev-parse", "--short", "HEAD"], { cwd, timeout: 5_000 });
+		if (head.code === 0) gitHead = head.stdout.trim() || null;
+	} catch {
+		/* proceed with null gitHead */
+	}
+
+	try {
+		const diff = await pi.exec("git", ["status", "--short", "--untracked-files=all"], { cwd, timeout: 5_000 });
+		if (diff.code === 0) status = diff.stdout.trim();
+	} catch {
+		/* proceed with empty status */
+	}
+
+	const fingerprint = createHash("sha256")
+		.update(gitHead ?? "nogit")
+		.update("\n")
+		.update(status)
+		.digest("hex");
+
+	return { gitHead, fingerprint };
+}
+
+async function buildLifecycleRecord(
+	pi: ExtensionAPI,
+	cwd: string,
+	options: {
+		changeName: string;
+		assessmentKind: "spec" | "cleave";
+		outcome: AssessLifecycleOutcome;
+		recommendedAction: string | null;
+		changedFiles?: string[];
+		constraints?: string[];
+	},
+): Promise<AssessLifecycleRecord> {
+	const snapshot = await collectAssessmentSnapshot(pi, cwd);
+	return {
+		changeName: options.changeName,
+		assessmentKind: options.assessmentKind,
+		outcome: options.outcome,
+		timestamp: new Date().toISOString(),
+		snapshot,
+		reconciliation: {
+			reopen: options.outcome === "reopen",
+			changedFiles: [...new Set((options.changedFiles ?? []).map((file) => file.trim()).filter(Boolean))],
+			constraints: [...new Set((options.constraints ?? []).map((constraint) => constraint.trim()).filter(Boolean))],
+			recommendedAction: options.recommendedAction,
+		},
+	};
+}
+
+function applyAssessEffects(pi: ExtensionAPI, result: AssessStructuredResult): void {
+	for (const effect of result.effects) {
+		if (effect.type === "view") {
+			pi.sendMessage({
+				customType: "view",
+				content: effect.content,
+				display: effect.display ?? true,
+			});
+			continue;
+		}
+		if (effect.type === "follow_up") {
+			pi.sendUserMessage(effect.content, { deliverAs: "followUp" });
+		}
+	}
+}
+
+async function collectAssessDiffContext(
+	pi: ExtensionAPI,
+	cwd: string,
+	ref: string,
+	fallbackToUnstaged: boolean,
+): Promise<AssessDiffContext | null> {
+	let effectiveRef = ref;
+	let diffStat = "";
+	let diffContent = "";
+	let recentLog = "";
+
+	if (!effectiveRef && fallbackToUnstaged) {
+		for (const candidate of ["HEAD~3", "HEAD~2", "HEAD~1"]) {
+			try {
+				const test = await pi.exec("git", ["rev-parse", "--verify", candidate], { cwd, timeout: 3_000 });
+				if (test.code === 0) {
+					effectiveRef = candidate;
+					break;
+				}
+			} catch {
+				/* try next */
+			}
+		}
+	}
+
+	if (effectiveRef) {
+		try {
+			const stat = await pi.exec("git", ["diff", "--stat", effectiveRef], { cwd, timeout: 5_000 });
+			diffStat = stat.stdout.trim();
+			const diff = await pi.exec("git", ["diff", effectiveRef], { cwd, timeout: 10_000 });
+			diffContent = diff.stdout.slice(0, 40_000);
+			const log = await pi.exec("git", ["log", "--oneline", "-10"], { cwd, timeout: 5_000 });
+			recentLog = log.stdout.trim();
+		} catch {
+			/* fall through */
+		}
+	}
+
+	if (!diffStat && !diffContent && fallbackToUnstaged) {
+		try {
+			const stat = await pi.exec("git", ["diff", "--stat"], { cwd, timeout: 5_000 });
+			diffStat = stat.stdout.trim();
+			const diff = await pi.exec("git", ["diff"], { cwd, timeout: 10_000 });
+			diffContent = diff.stdout.slice(0, 40_000);
+			effectiveRef = "unstaged";
+		} catch {
+			/* proceed without git diff */
+		}
+	}
+
+	if (!diffStat && !diffContent) return null;
+	return { ref: effectiveRef, diffStat, diffContent, recentLog };
+}
+
+function buildGuardrailPreamble(cwd: string): string {
+	try {
+		const checks = discoverGuardrails(cwd);
+		if (checks.length === 0) return "";
+		const suite = runGuardrails(cwd, checks);
+		return formatGuardrailResults(suite);
+	} catch {
+		return "";
+	}
+}
+
+async function executeAssessCleave(
+	pi: ExtensionAPI,
+	ctx: AssessExecutionContext,
+	args: string,
+): Promise<AssessStructuredResult> {
+	const diffContext = await collectAssessDiffContext(pi, ctx.cwd, args.trim(), true);
+	if (!diffContext) {
+		return makeAssessResult({
+			subcommand: "cleave",
+			args,
+			ok: false,
+			summary: "No recent changes found",
+			humanText: "No recent changes found. Nothing to assess.",
+			data: { reason: "no_changes" },
+			effects: [{ type: "view", content: "No recent changes found. Nothing to assess." }],
+		});
+	}
+
+	const activeOpenSpec = getActiveChangesStatus(ctx.cwd)
+		.filter((status) => status.totalTasks > 0)
+		.sort((a, b) => b.lastModifiedMs - a.lastModifiedMs);
+	const targetChange = activeOpenSpec[0]?.name;
+	const lifecycle = targetChange
+		? { changeName: targetChange, assessmentKind: "cleave" as const, outcomes: ["pass", "reopen", "ambiguous"] as const }
+		: undefined;
+	const postAssessInstruction = targetChange
+		? [
+			"",
+			`After review/fixes/tests, call \`openspec_manage\` with action \`reconcile_after_assess\`, change_name \`${targetChange}\`, assessment_kind \`cleave\`, and outcome:`,
+			"- `pass` if all Critical/Warning work is resolved cleanly",
+			"- `reopen` if remaining work or follow-up fixes reopen implementation",
+			"- `ambiguous` if you cannot safely map reviewer findings back to task state",
+			"Include `changed_files` for any follow-up fix files and `constraints` for new implementation constraints discovered during review.",
+		]
+		: [];
+	const guardrailPreamble = buildGuardrailPreamble(ctx.cwd);
+	const prompt = [
+		"## Adversarial Review → Auto-Fix Pipeline",
+		"",
+		"You are doing an adversarial code review of recent changes.",
+		"Your job is to find real issues, then fix them automatically.",
+		"",
+		...(guardrailPreamble ? [
+			"### Deterministic Analysis",
+			"",
+			guardrailPreamble,
+			"",
+			"The above are compiler/linter findings — treat failures as Critical issues.",
+			"",
+		] : []),
+		"### Step 1: Review",
+		"",
+		"Analyze these recent changes for:",
+		"- **Critical bugs**: logic errors, race conditions, missing error handling",
+		"- **Warnings**: misleading names, missing edge cases, fragile patterns",
+		"- **Nits**: dead code, style inconsistencies (low priority)",
+		"",
+		"Recent commits:",
+		"```",
+		diffContext.recentLog,
+		"```",
+		"",
+		"Diff stat:",
+		"```",
+		diffContext.diffStat,
+		"```",
+		"",
+		"Full diff (truncated to 40KB):",
+		"```diff",
+		diffContext.diffContent,
+		"```",
+		"",
+		"### Step 2: Categorize",
+		"",
+		"Present findings as a numbered list grouped by severity:",
+		"- **C1, C2...** for critical issues",
+		"- **W1, W2...** for warnings",
+		"- **N1, N2...** for nits",
+		"",
+		"### Step 3: Fix",
+		"",
+		"After presenting the list, **immediately fix all Critical and Warning issues**.",
+		"Do NOT wait for confirmation — the user invoked `/assess cleave` which means",
+		'"assess and fix in one shot". Work through C and W items systematically.',
+		"Nits are optional — fix them if trivial, skip if not.",
+		"",
+		"After all fixes, run the test suite to verify nothing broke.",
+		"Then commit with a conventional commit message summarizing all fixes.",
+		...postAssessInstruction,
+	].join("\n");
+	const lifecycleRecord = targetChange
+		? await buildLifecycleRecord(pi, ctx.cwd, {
+			changeName: targetChange,
+			assessmentKind: "cleave",
+			outcome: "ambiguous",
+			recommendedAction: `Run openspec_manage reconcile_after_assess ${targetChange} with outcome pass, reopen, or ambiguous after review completes.`,
+		})
+		: undefined;
+	const humanText = [
+		"**Assess → Cleave pipeline starting...**",
+		"",
+		`Reviewing changes since \`${diffContext.ref}\`:`,
+		"```",
+		diffContext.diffStat,
+		"```",
+	].join("\n");
+	const nextSteps = ["Review findings", "Apply all Critical and Warning fixes", "Run verification and reconcile lifecycle state if needed"];
+	return makeAssessResult({
+		subcommand: "cleave",
+		args,
+		ok: true,
+		summary: `Prepared adversarial review for ${diffContext.ref}`,
+		humanText,
+		data: {
+			ref: diffContext.ref,
+			diffStat: diffContext.diffStat,
+			recentLog: diffContext.recentLog,
+			hasGuardrails: Boolean(guardrailPreamble),
+			reconcileChange: targetChange ?? null,
+			snapshot: lifecycleRecord?.snapshot ?? null,
+		},
+		effects: [
+			{ type: "view", content: humanText },
+			{ type: "follow_up", content: prompt },
+			...(lifecycle ? [{ type: "reconcile_hint" as const, ...lifecycle }] : []),
+		],
+		nextSteps,
+		lifecycle,
+		lifecycleRecord,
+	});
+}
+
+async function executeAssessDiff(
+	pi: ExtensionAPI,
+	ctx: AssessExecutionContext,
+	args: string,
+): Promise<AssessStructuredResult> {
+	const requestedRef = args.trim() || "HEAD~1";
+	const diffContext = await collectAssessDiffContext(pi, ctx.cwd, requestedRef, false);
+	if (!diffContext) {
+		const humanText = `No changes found relative to \`${requestedRef}\`.`;
+		return makeAssessResult({
+			subcommand: "diff",
+			args,
+			ok: false,
+			summary: `No diff found for ${requestedRef}`,
+			humanText,
+			data: { ref: requestedRef, reason: "no_changes" },
+			effects: [{ type: "view", content: humanText }],
+		});
+	}
+
+	const guardrailPreamble = buildGuardrailPreamble(ctx.cwd);
+	const humanText = [
+		`**Assessing diff since \`${diffContext.ref}\`...**`,
+		"```",
+		diffContext.diffStat,
+		"```",
+	].join("\n");
+	const prompt = [
+		`## Code Review: diff since \`${diffContext.ref}\``,
+		"",
+		"Do an adversarial code review of these changes.",
+		"Find bugs, fragile patterns, missing edge cases, and style issues.",
+		"",
+		...(guardrailPreamble ? [
+			"### Deterministic Analysis",
+			"",
+			guardrailPreamble,
+			"",
+			"The above are compiler/linter findings — treat failures as Critical issues.",
+			"",
+		] : []),
+		"Categorize findings as:",
+		"- **C1, C2...** Critical (logic errors, security, data loss)",
+		"- **W1, W2...** Warning (fragile, misleading, missing cases)",
+		"- **N1, N2...** Nit (style, dead code, minor)",
+		"",
+		"Diff stat:",
+		"```",
+		diffContext.diffStat,
+		"```",
+		"",
+		"```diff",
+		diffContext.diffContent,
+		"```",
+		"",
+		"Present findings only — do NOT fix anything unless I ask.",
+	].join("\n");
+	return makeAssessResult({
+		subcommand: "diff",
+		args,
+		ok: true,
+		summary: `Prepared review for ${diffContext.ref}`,
+		humanText,
+		data: {
+			ref: diffContext.ref,
+			diffStat: diffContext.diffStat,
+			hasGuardrails: Boolean(guardrailPreamble),
+		},
+		effects: [
+			{ type: "view", content: humanText },
+			{ type: "follow_up", content: prompt },
+		],
+		nextSteps: ["Read the review findings", "Decide whether to fix issues or continue implementation"],
+	});
+}
+
+async function executeAssessSpec(
+	pi: ExtensionAPI,
+	ctx: AssessExecutionContext,
+	args: string,
+): Promise<AssessStructuredResult> {
+	const repoPath = ctx.cwd;
+	const openspecDir = detectOpenSpec(repoPath);
+	if (!openspecDir) {
+		const humanText = "No `openspec/` directory found. Nothing to assess against.";
+		return makeAssessResult({
+			subcommand: "spec",
+			args,
+			ok: false,
+			summary: "OpenSpec directory not found",
+			humanText,
+			data: { reason: "openspec_missing" },
+			effects: [{ type: "view", content: humanText }],
+		});
+	}
+
+	const changes = findExecutableChanges(openspecDir);
+	if (changes.length === 0) {
+		const humanText = "No OpenSpec changes with tasks.md found.";
+		return makeAssessResult({
+			subcommand: "spec",
+			args,
+			ok: false,
+			summary: "No executable OpenSpec changes found",
+			humanText,
+			data: { reason: "no_executable_changes" },
+			effects: [{ type: "view", content: humanText }],
+		});
+	}
+
+	const requestedChange = args.trim();
+	let target = requestedChange
+		? changes.find((change) => change.name === requestedChange || change.name.includes(requestedChange))
+		: null;
+	if (!target) {
+		const status = getActiveChangesStatus(repoPath);
+		const withTasks = status.filter((entry) => entry.totalTasks > 0);
+		if (withTasks.length > 0) {
+			const byRecency = [...withTasks].sort((a, b) => b.lastModifiedMs - a.lastModifiedMs);
+			target = changes.find((change) => change.name === byRecency[0].name) ?? changes[0];
+		} else {
+			target = changes[0];
+		}
+	}
+
+	const specCtx = buildOpenSpecContext(target.path);
+	if (specCtx.specScenarios.length === 0) {
+		const humanText = `Change \`${target.name}\` has no delta spec scenarios to assess against.\n\nUse \`/assess diff\` for general code review instead.`;
+		return makeAssessResult({
+			subcommand: "spec",
+			args,
+			ok: false,
+			summary: `No delta scenarios found for ${target.name}`,
+			humanText,
+			data: { changeName: target.name, reason: "no_scenarios" },
+			effects: [{ type: "view", content: humanText }],
+		});
+	}
+
+	const scenarioText = specCtx.specScenarios.map((scenarioSet) => {
+		const renderedScenarios = scenarioSet.scenarios.map((scenario) => {
+			const lines = scenario.split("\n").map((line) => `    ${line}`).join("\n");
+			return lines;
+		}).join("\n");
+		return `**${scenarioSet.domain} → ${scenarioSet.requirement}**\n${renderedScenarios}`;
+	}).join("\n\n");
+
+	let diffContent = "";
+	try {
+		const diff = await pi.exec("git", ["diff", "HEAD~5", "--", "."], { cwd: repoPath, timeout: 10_000 });
+		diffContent = diff.stdout.slice(0, 30_000);
+	} catch {
+		try {
+			const diff = await pi.exec("git", ["diff", "--", "."], { cwd: repoPath, timeout: 10_000 });
+			diffContent = diff.stdout.slice(0, 30_000);
+		} catch {
+			/* proceed without diff */
+		}
+	}
+
+	const designContext = specCtx.decisions.length > 0
+		? [
+			"### Design Decisions",
+			"",
+			"The implementation should also reflect these decisions from design.md:",
+			"",
+			...specCtx.decisions.map((decision) => `- ${decision}`),
+			"",
+		]
+		: [];
+	const apiContractContext = specCtx.apiContract
+		? [
+			"### API Contract",
+			"",
+			"The implementation must conform to this OpenAPI/AsyncAPI contract (`api.yaml`).",
+			"Verify that:",
+			"- All paths/methods defined in the contract are implemented",
+			"- Request/response schemas match the contract exactly",
+			"- Status codes and error responses match the contract",
+			"- Security schemes are applied as specified",
+			"- Any endpoint in the code but NOT in the contract is flagged as undocumented",
+			"",
+			"```yaml",
+			specCtx.apiContract.length > 15_000
+				? specCtx.apiContract.slice(0, 15_000) + "\n# ... (truncated)"
+				: specCtx.apiContract,
+			"```",
+			"",
+		]
+		: [];
+	const lifecycle: AssessLifecycleHint = {
+		changeName: target.name,
+		assessmentKind: "spec",
+		outcomes: ["pass", "reopen", "ambiguous"],
+	};
+	const lifecycleRecord = await buildLifecycleRecord(pi, ctx.cwd, {
+		changeName: target.name,
+		assessmentKind: "spec",
+		outcome: "ambiguous",
+		recommendedAction: `Run openspec_manage reconcile_after_assess ${target.name} with outcome pass, reopen, or ambiguous after scenario evaluation completes.`,
+	});
+	const humanText = [
+		`**Spec Assessment: \`${target.name}\`**`,
+		"",
+		`Evaluating implementation against ${specCtx.specScenarios.length} spec scenarios`
+			+ (specCtx.decisions.length > 0 ? ` and ${specCtx.decisions.length} design decisions` : "")
+			+ (specCtx.apiContract ? " and API contract (`api.yaml`)" : "")
+			+ "...",
+	].join("\n");
+	const prompt = [
+		`## Spec-Driven Assessment: \`${target.name}\``,
+		"",
+		"Assess whether the current implementation satisfies these OpenSpec scenarios.",
+		"For each scenario, determine: **PASS**, **FAIL**, or **UNCLEAR**.",
+		...(specCtx.apiContract ? ["", "Also verify implementation conformance to the API contract."] : []),
+		"",
+		"### Acceptance Criteria",
+		"",
+		scenarioText,
+		"",
+		...designContext,
+		...apiContractContext,
+		"### Instructions",
+		"",
+		"1. Read the relevant source files to check each scenario",
+		...(specCtx.apiContract ? ["   - Also check route definitions, schemas, and status codes against the API contract"] : []),
+		"2. For each scenario, report:",
+		"   - **PASS** — implementation clearly satisfies the Given/When/Then",
+		"   - **FAIL** — implementation contradicts or is missing",
+		"   - **UNCLEAR** — can't determine without running tests",
+		"3. Summarize with a count: N/M scenarios passing",
+		"4. For any FAIL items, explain what's wrong and suggest fixes",
+		"5. Do NOT auto-fix — this is assessment only",
+		`6. After the assessment, if the result reopens work or reveals new constraints/file-scope drift, call \`openspec_manage\` with action \`reconcile_after_assess\`, change_name \`${target.name}\`, assessment_kind \`spec\`, and outcome \`reopen\` or \`ambiguous\` as appropriate. If all scenarios pass cleanly, call it with outcome \`pass\` to refresh lifecycle state.`,
+		...(diffContent ? ["", "### Recent Changes (for context)", "", "```diff", diffContent, "```"] : []),
+	].join("\n");
+	return makeAssessResult({
+		subcommand: "spec",
+		args,
+		ok: true,
+		summary: `Prepared spec assessment for ${target.name}`,
+		humanText,
+		data: {
+			changeName: target.name,
+			scenarioCount: specCtx.specScenarios.length,
+			decisionCount: specCtx.decisions.length,
+			hasApiContract: Boolean(specCtx.apiContract),
+			snapshot: lifecycleRecord.snapshot,
+		},
+		effects: [
+			{ type: "view", content: humanText },
+			{ type: "follow_up", content: prompt },
+			{ type: "reconcile_hint" as const, ...lifecycle },
+		],
+		nextSteps: ["Assess each scenario", "Reconcile lifecycle state based on the assessment outcome"],
+		lifecycle,
+		lifecycleRecord,
+	});
+}
+
+async function executeAssessComplexity(args: string): Promise<AssessStructuredResult> {
+	const directive = args.trim();
+	if (!directive) {
+		const humanText = "Usage: `/assess complexity <directive>`\n\nAssess whether a task should be decomposed or executed directly.";
+		return makeAssessResult({
+			subcommand: "complexity",
+			args,
+			ok: false,
+			summary: "Missing directive for complexity assessment",
+			humanText,
+			data: { reason: "missing_directive" },
+			effects: [{ type: "view", content: humanText }],
+		});
+	}
+
+	const assessment = assessDirective(directive);
+	const humanText = [
+		formatAssessment(assessment),
+		"",
+		assessment.decision === "cleave"
+			? `**→ Decomposition recommended.** Use \`/cleave ${directive}\` to proceed.`
+			: assessment.decision === "execute"
+				? "**→ Execute directly.** Task is below complexity threshold."
+				: "**→ Manual assessment needed.** No pattern matched.",
+	].join("\n");
+	return makeAssessResult({
+		subcommand: "complexity",
+		args,
+		ok: true,
+		summary: `Complexity decision: ${assessment.decision}`,
+		humanText,
+		data: assessment,
+		effects: [{ type: "view", content: humanText }],
+		nextSteps: assessment.decision === "cleave" ? [`Run /cleave ${directive}`] : ["Execute directly"],
+	});
+}
+
+export function createAssessStructuredExecutors(pi: ExtensionAPI) {
+	return {
+		cleave: (args: string, ctx: AssessExecutionContext) => executeAssessCleave(pi, ctx, args),
+		diff: (args: string, ctx: AssessExecutionContext) => executeAssessDiff(pi, ctx, args),
+		spec: (args: string, ctx: AssessExecutionContext) => executeAssessSpec(pi, ctx, args),
+		complexity: (args: string) => executeAssessComplexity(args),
+	} as const;
+}
+
 // ─── Extension ──────────────────────────────────────────────────────────────
 
 export default function cleaveExtension(pi: ExtensionAPI) {
@@ -277,65 +899,94 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 		{ value: "spec", label: "spec", description: "Assess implementation against OpenSpec scenarios" },
 		{ value: "complexity", label: "complexity", description: "Assess directive complexity (cleave_assess)" },
 	];
+	const assessExecutors = createAssessStructuredExecutors(pi);
+	const slashCommandBridge = createSlashCommandBridge();
+	const toBridgeAssessResult = (result: AssessStructuredResult): ReturnType<typeof buildSlashCommandResult> =>
+		buildSlashCommandResult(result.command, result.args.split(/\s+/).filter(Boolean), {
+			ok: result.ok,
+			summary: result.summary,
+			humanText: result.humanText,
+			data: {
+				subcommand: result.subcommand,
+				data: result.data,
+				lifecycleHint: result.lifecycle,
+			},
+			lifecycle: result.lifecycleRecord,
+			effects: {
+				sideEffectClass: result.subcommand === "cleave" ? "workspace-write" : "read",
+				lifecycleTouched: result.lifecycleRecord ? [result.lifecycleRecord.changeName] : undefined,
+			},
+			nextSteps: result.nextSteps.map((step) => ({ label: step })),
+		});
 
-	pi.registerCommand("assess", {
+	slashCommandBridge.register(pi, {
+		name: "assess",
 		description: "Adversarial review + auto-fix (default), or: /assess <diff|spec|complexity> [args]",
+		bridge: {
+			agentCallable: true,
+			sideEffectClass: "workspace-write",
+			resultContract: "cleave.assess.v1",
+			summary: "Lifecycle-safe assessment commands for spec, diff, cleave, and complexity",
+		},
 		getArgumentCompletions: (prefix: string) => {
 			const parts = prefix.split(" ");
 			if (parts.length <= 1) {
-				// First argument: complete subcommand names
 				const partial = parts[0] || "";
 				const filtered = ASSESS_SUBS.filter((s) => s.value.startsWith(partial));
 				return filtered.length > 0 ? filtered : null;
 			}
-			// After subcommand, no further completions
 			return null;
 		},
-		handler: async (args, ctx) => {
+		structuredExecutor: async (args, ctx) => {
 			const trimmed = (args || "").trim();
-
-			// Bare /assess → adversarial session review (no auto-fix)
 			if (!trimmed) {
+				return buildSlashCommandResult("assess", [], {
+					ok: false,
+					summary: "/assess requires an explicit bridged subcommand",
+					humanText: "Bare /assess remains interactive-only in v1. Use one of: /assess spec, /assess diff, /assess cleave, or /assess complexity.",
+					data: { supportedSubcommands: ASSESS_SUBS.map((sub) => sub.value) },
+					effects: { sideEffectClass: "workspace-write" },
+					nextSteps: ASSESS_SUBS.map((sub) => ({ label: `Run /assess ${sub.value}` })),
+				});
+			}
+
+			const parts = trimmed.split(/\s+/);
+			const sub = parts[0] || "";
+			const rest = parts.slice(1).join(" ");
+			switch (sub) {
+				case "cleave":
+					return toBridgeAssessResult(await assessExecutors.cleave(rest, { cwd: ctx.cwd }));
+				case "diff":
+					return toBridgeAssessResult(await assessExecutors.diff(rest, { cwd: ctx.cwd }));
+				case "spec":
+					return toBridgeAssessResult(await assessExecutors.spec(rest, { cwd: ctx.cwd }));
+				case "complexity":
+					return toBridgeAssessResult(await assessExecutors.complexity(rest));
+				default:
+					return buildSlashCommandResult("assess", parts, {
+						ok: false,
+						summary: `Unsupported bridged /assess target: ${sub}`,
+						humanText: `Bridged /assess currently supports only: ${ASSESS_SUBS.map((item) => item.value).join(", ")}. Freeform adversarial review remains interactive-only in v1.`,
+						data: { supportedSubcommands: ASSESS_SUBS.map((item) => item.value) },
+						effects: { sideEffectClass: "workspace-write" },
+						nextSteps: ASSESS_SUBS.map((item) => ({ label: `Run /assess ${item.value}` })),
+					});
+			}
+		},
+		interactiveHandler: async (result, args) => {
+			const trimmed = (args || "").trim();
+			const sub = trimmed.split(/\s+/)[0] || "";
+			if (!trimmed || !ASSESS_SUBS.some((item) => item.value === sub)) {
 				pi.sendUserMessage([
 					"# Adversarial Assessment",
 					"",
-					"You are now operating as a hostile reviewer. Your job is to find everything wrong with the work completed in this session. Do not be polite. Do not hedge. If something is broken, say it's broken.",
+					trimmed
+						? "You are now operating as a hostile reviewer. Your job is to find everything wrong with the work completed in this session."
+						: "You are now operating as a hostile reviewer. Your job is to find everything wrong with the work completed in this session. Do not be polite. Do not hedge. If something is broken, say it's broken.",
+					...(trimmed ? ["", "**User instructions:** " + trimmed] : []),
 					"",
-					"## Procedure",
-					"",
-					"1. **Reconstruct scope** — Review the full conversation to identify every change made: files created, files edited, commands run, architectural decisions taken. Build a complete manifest.",
-					"",
-					"2. **Static analysis** — For every file touched, read the current state and check for:",
-					"   - Syntax errors, type mismatches, undefined references",
-					"   - Logic errors: off-by-ones, wrong operators, inverted conditions, unreachable branches",
-					"   - Unhandled edge cases: nil/null/empty inputs, boundary values, concurrent access",
-					"   - Resource leaks: unclosed handles, missing cleanup, unbounded growth",
-					"   - Security: injection vectors, hardcoded secrets, insecure defaults, path traversal",
-					"   - Dependency issues: missing imports, version conflicts, circular dependencies",
-					"",
-					"3. **Behavioral analysis** — Trace actual execution paths:",
-					"   - Does the happy path work end-to-end?",
-					"   - What happens on every error path? Are errors swallowed, misclassified, or leaked?",
-					"   - Race conditions, deadlocks, TOCTOU bugs?",
-					"   - State consistency across all paths?",
-					"",
-					"4. **Design critique** — Evaluate structural decisions:",
-					"   - Does the solution solve the *actual* problem or a simplified version?",
-					"   - Unnecessary abstractions, premature generalizations, gold-plating?",
-					"   - Does it violate existing codebase conventions?",
-					"   - Will it be maintainable by someone who didn't write it?",
-					"",
-					"5. **Test coverage** — If tests were written or modified:",
-					"   - Do tests assert the right things or just exercise code?",
-					"   - Missing negative tests, boundary tests, integration tests?",
-					"   - Could tests pass with a broken implementation (tautological)?",
-					"   - If no tests were written, should there have been?",
-					"",
-					"6. **Omission audit** — What was *not* done that should have been:",
-					"   - Missing error handling, logging, observability",
-					"   - Missing migrations, config changes, documentation",
-					"   - Missing cleanup of dead code, stale references",
-					"   - Incomplete implementation that was hand-waved",
+					"Follow the user's instructions above for tone and scope, but still perform a thorough review.",
+					"Read every file that was changed. Be specific. Cite line numbers.",
 					"",
 					"## Output Format",
 					"",
@@ -343,497 +994,30 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 					"One of: `PASS` | `PASS WITH CONCERNS` | `NEEDS REWORK` | `REJECT`",
 					"",
 					"### Critical Issues",
-					"Problems that will cause failures, data loss, or security vulnerabilities. Each with file path, line number, and concrete description.",
-					"",
 					"### Warnings",
-					"Problems that won't immediately break but indicate fragility or future risk.",
-					"",
 					"### Nitpicks",
-					"Style, naming, or structural issues that are suboptimal but functional.",
-					"",
 					"### Omissions",
-					"Things that should exist but don't.",
-					"",
 					"### What Actually Worked",
-					"Brief acknowledgment of what was done correctly.",
-					"",
-					"---",
-					"",
-					"Do NOT ask clarifying questions. Do NOT skip files because they're \"probably fine.\" Read everything that was changed. Be thorough. Be specific. Cite line numbers.",
 				].join("\n"));
 				return;
 			}
-
-			const parts = trimmed.split(/\s+/);
-			const sub = parts[0] || "";
-			const rest = parts.slice(1).join(" ");
-
-			switch (sub) {
-				// ── /assess cleave ──────────────────────────────────────
-				// Adversarial review of recent work → produce categorized
-				// issue list → immediately dispatch cleave to fix everything.
-				case "cleave": {
-					// Gather context: recent git changes
-					// Use user-provided ref or auto-detect a sensible range
-					const ref = rest || "";
-					let diffStat = "";
-					let diffContent = "";
-					let recentLog = "";
-					let effectiveRef = ref;
-
-					if (!effectiveRef) {
-						// Auto-detect: try HEAD~3 first, fall back to lower counts
-						// or unstaged diff if the repo is too shallow
-						for (const candidate of ["HEAD~3", "HEAD~2", "HEAD~1"]) {
-							try {
-								const test = await pi.exec("git", ["rev-parse", "--verify", candidate], { cwd: ctx.cwd, timeout: 3_000 });
-								if (test.code === 0) { effectiveRef = candidate; break; }
-							} catch { /* try next */ }
-						}
-					}
-
-					if (effectiveRef) {
-						try {
-							const stat = await pi.exec("git", ["diff", "--stat", effectiveRef], { cwd: ctx.cwd, timeout: 5_000 });
-							diffStat = stat.stdout.trim();
-							const diff = await pi.exec("git", ["diff", effectiveRef], { cwd: ctx.cwd, timeout: 10_000 });
-							diffContent = diff.stdout.slice(0, 30_000); // Cap to avoid blowing context
-							const log = await pi.exec("git", ["log", "--oneline", "-10"], { cwd: ctx.cwd, timeout: 5_000 });
-							recentLog = log.stdout.trim();
-						} catch { /* fall through to unstaged */ }
-					}
-
-					// Fall back to unstaged diff
-					if (!diffStat && !diffContent) {
-						try {
-							const stat = await pi.exec("git", ["diff", "--stat"], { cwd: ctx.cwd, timeout: 5_000 });
-							diffStat = stat.stdout.trim();
-							const diff = await pi.exec("git", ["diff"], { cwd: ctx.cwd, timeout: 10_000 });
-							diffContent = diff.stdout.slice(0, 30_000);
-							effectiveRef = "unstaged";
-						} catch { /* non-git or error — proceed anyway */ }
-					}
-
-					if (!diffStat && !diffContent) {
-						pi.sendMessage({
-							customType: "view",
-							content: "No recent changes found. Nothing to assess.",
-							display: true,
-						});
-						return;
-					}
-
-					let postAssessInstruction: string[] = [];
-					const activeOpenSpec = getActiveChangesStatus(ctx.cwd)
-						.filter((s) => s.totalTasks > 0)
-						.sort((a, b) => b.lastModifiedMs - a.lastModifiedMs);
-					if (activeOpenSpec.length > 0) {
-						const targetChange = activeOpenSpec[0].name;
-						postAssessInstruction = [
-							"",
-							`After review/fixes/tests, call \`openspec_manage\` with action \`reconcile_after_assess\`, change_name \`${targetChange}\`, assessment_kind \`cleave\`, and outcome:`,
-							"- `pass` if all Critical/Warning work is resolved cleanly",
-							"- `reopen` if remaining work or follow-up fixes reopen implementation",
-							"- `ambiguous` if you cannot safely map reviewer findings back to task state",
-							"Include `changed_files` for any follow-up fix files and `constraints` for new implementation constraints discovered during review.",
-						];
-					}
-
-					pi.sendMessage({
-						customType: "view",
-						content: [
-							"**Assess → Cleave pipeline starting...**",
-							"",
-							`Reviewing changes since \`${effectiveRef}\`:`,
-							"```",
-							diffStat,
-							"```",
-						].join("\n"),
-						display: true,
-					});
-
-					// Run guardrails before building the review prompt
-					let guardrailPreamble = "";
-					try {
-						const checks = discoverGuardrails(ctx.cwd);
-						if (checks.length > 0) {
-							const suite = runGuardrails(ctx.cwd, checks);
-							guardrailPreamble = formatGuardrailResults(suite);
-						}
-					} catch { /* non-fatal */ }
-
-					pi.sendUserMessage(
-						[
-							"## Adversarial Review → Auto-Fix Pipeline",
-							"",
-							"You are doing an adversarial code review of recent changes.",
-							"Your job is to find real issues, then fix them automatically.",
-							"",
-							...(guardrailPreamble ? [
-								"### Deterministic Analysis",
-								"",
-								guardrailPreamble,
-								"",
-								"The above are compiler/linter findings — treat failures as Critical issues.",
-								"",
-							] : []),
-							"### Step 1: Review",
-							"",
-							"Analyze these recent changes for:",
-							"- **Critical bugs**: logic errors, race conditions, missing error handling",
-							"- **Warnings**: misleading names, missing edge cases, fragile patterns",
-							"- **Nits**: dead code, style inconsistencies (low priority)",
-							"",
-							"Recent commits:",
-							"```",
-							recentLog,
-							"```",
-							"",
-							"Diff stat:",
-							"```",
-							diffStat,
-							"```",
-							"",
-							"Full diff (truncated to 30KB):",
-							"```diff",
-							diffContent,
-							"```",
-							"",
-							"### Step 2: Categorize",
-							"",
-							"Present findings as a numbered list grouped by severity:",
-							"- **C1, C2...** for critical issues",
-							"- **W1, W2...** for warnings",
-							"- **N1, N2...** for nits",
-							"",
-							"### Step 3: Fix",
-							"",
-							"After presenting the list, **immediately fix all Critical and Warning issues**.",
-							"Do NOT wait for confirmation — the user invoked `/assess cleave` which means",
-							'"assess and fix in one shot". Work through C and W items systematically.',
-							"Nits are optional — fix them if trivial, skip if not.",
-							"",
-							"After all fixes, run the test suite to verify nothing broke.",
-							"Then commit with a conventional commit message summarizing all fixes.",
-							...postAssessInstruction,
-						].join("\n"),
-						{ deliverAs: "followUp" },
-					);
-					return;
-				}
-
-				// ── /assess diff [ref] ─────────────────────────────────
-				// Assess a specific diff range for issues (review only, no auto-fix)
-				case "diff": {
-					const ref = rest || "HEAD~1";
-					let diffContent = "";
-					let diffStat = "";
-					try {
-						const stat = await pi.exec("git", ["diff", "--stat", ref], { cwd: ctx.cwd, timeout: 5_000 });
-						diffStat = stat.stdout.trim();
-						const diff = await pi.exec("git", ["diff", ref], { cwd: ctx.cwd, timeout: 10_000 });
-						diffContent = diff.stdout.slice(0, 40_000);
-					} catch (e: any) {
-						pi.sendMessage({
-							customType: "view",
-							content: `Failed to get diff for \`${ref}\`: ${e.message}`,
-							display: true,
-						});
-						return;
-					}
-
-					if (!diffContent) {
-						pi.sendMessage({
-							customType: "view",
-							content: `No changes found relative to \`${ref}\`.`,
-							display: true,
-						});
-						return;
-					}
-
-					pi.sendMessage({
-						customType: "view",
-						content: [
-							`**Assessing diff since \`${ref}\`...**`,
-							"```",
-							diffStat,
-							"```",
-						].join("\n"),
-						display: true,
-					});
-
-					// Run guardrails before building the review prompt
-					let diffGuardrailPreamble = "";
-					try {
-						const diffChecks = discoverGuardrails(ctx.cwd);
-						if (diffChecks.length > 0) {
-							const diffSuite = runGuardrails(ctx.cwd, diffChecks);
-							diffGuardrailPreamble = formatGuardrailResults(diffSuite);
-						}
-					} catch { /* non-fatal */ }
-
-					pi.sendUserMessage(
-						[
-							`## Code Review: diff since \`${ref}\``,
-							"",
-							"Do an adversarial code review of these changes.",
-							"Find bugs, fragile patterns, missing edge cases, and style issues.",
-							"",
-							...(diffGuardrailPreamble ? [
-								"### Deterministic Analysis",
-								"",
-								diffGuardrailPreamble,
-								"",
-								"The above are compiler/linter findings — treat failures as Critical issues.",
-								"",
-							] : []),
-							"Categorize findings as:",
-							"- **C1, C2...** Critical (logic errors, security, data loss)",
-							"- **W1, W2...** Warning (fragile, misleading, missing cases)",
-							"- **N1, N2...** Nit (style, dead code, minor)",
-							"",
-							"Diff stat:",
-							"```",
-							diffStat,
-							"```",
-							"",
-							"```diff",
-							diffContent,
-							"```",
-							"",
-							"Present findings only — do NOT fix anything unless I ask.",
-						].join("\n"),
-						{ deliverAs: "followUp" },
-					);
-					return;
-				}
-
-				// ── /assess spec [change] ──────────────────────────────
-				// Review implementation against OpenSpec spec scenarios.
-				// Uses Given/When/Then as the assessment criteria.
-				case "spec": {
-					const repoPath = ctx.cwd;
-					const openspecDir = detectOpenSpec(repoPath);
-					if (!openspecDir) {
-						pi.sendMessage({
-							customType: "view",
-							content: "No `openspec/` directory found. Nothing to assess against.",
-							display: true,
-						});
-						return;
-					}
-
-					const changes = findExecutableChanges(openspecDir);
-					if (changes.length === 0) {
-						pi.sendMessage({
-							customType: "view",
-							content: "No OpenSpec changes with tasks.md found.",
-							display: true,
-						});
-						return;
-					}
-
-					// If a change name was provided, use it; otherwise pick the
-					// one with the most incomplete tasks
-					let target = rest
-						? changes.find((c) => c.name === rest || c.name.includes(rest))
-						: null;
-
-					if (!target) {
-						// Auto-select: prefer the most recently modified change
-						// (filesystem mtime is a better proxy for "what I'm working on"
-						// than task count)
-						const status = getActiveChangesStatus(repoPath);
-						const withTasks = status.filter((s) => s.totalTasks > 0);
-
-						if (withTasks.length > 0) {
-							const byRecency = [...withTasks].sort((a, b) => b.lastModifiedMs - a.lastModifiedMs);
-							target = changes.find((c) => c.name === byRecency[0].name) ?? changes[0];
-						} else {
-							target = changes[0];
-						}
-					}
-
-					const specCtx = buildOpenSpecContext(target.path);
-					if (specCtx.specScenarios.length === 0) {
-						pi.sendMessage({
-							customType: "view",
-							content: `Change \`${target.name}\` has no delta spec scenarios to assess against.\n\nUse \`/assess diff\` for general code review instead.`,
-							display: true,
-						});
-						return;
-					}
-					const scenarios = specCtx.specScenarios;
-
-					// Build the scenario criteria for the LLM
-					const scenarioText = scenarios.map((s) => {
-						const scenList = s.scenarios.map((sc) => {
-							const lines = sc.split("\n").map((l) => `    ${l}`).join("\n");
-							return lines;
-						}).join("\n");
-						return `**${s.domain} → ${s.requirement}**\n${scenList}`;
-					}).join("\n\n");
-
-					// Get recent diff for context
-					let diffContent = "";
-					try {
-						const diff = await pi.exec("git", ["diff", "HEAD~5", "--", "."], { cwd: repoPath, timeout: 10_000 });
-						diffContent = diff.stdout.slice(0, 30_000);
-					} catch {
-						try {
-							const diff = await pi.exec("git", ["diff", "--", "."], { cwd: repoPath, timeout: 10_000 });
-							diffContent = diff.stdout.slice(0, 30_000);
-						} catch { /* proceed without diff */ }
-					}
-
-					// Include design decisions if available
-					const designContext = specCtx.decisions.length > 0
-						? [
-							"### Design Decisions",
-							"",
-							"The implementation should also reflect these decisions from design.md:",
-							"",
-							...specCtx.decisions.map((d) => `- ${d}`),
-							"",
-						]
-						: [];
-
-					// Include API contract if available
-					const apiContractContext = specCtx.apiContract
-						? [
-							"### API Contract",
-							"",
-							"The implementation must conform to this OpenAPI/AsyncAPI contract (`api.yaml`).",
-							"Verify that:",
-							"- All paths/methods defined in the contract are implemented",
-							"- Request/response schemas match the contract exactly",
-							"- Status codes and error responses match the contract",
-							"- Security schemes are applied as specified",
-							"- Any endpoint in the code but NOT in the contract is flagged as undocumented",
-							"",
-							"```yaml",
-							specCtx.apiContract.length > 15_000
-								? specCtx.apiContract.slice(0, 15_000) + "\n# ... (truncated)"
-								: specCtx.apiContract,
-							"```",
-							"",
-						]
-						: [];
-
-					pi.sendMessage({
-						customType: "view",
-						content: [
-							`**Spec Assessment: \`${target.name}\`**`,
-							"",
-							`Evaluating implementation against ${scenarios.length} spec scenarios` +
-								(specCtx.decisions.length > 0 ? ` and ${specCtx.decisions.length} design decisions` : "") +
-								(specCtx.apiContract ? " and API contract (`api.yaml`)" : "") +
-								"...",
-						].join("\n"),
-						display: true,
-					});
-
-					pi.sendUserMessage(
-						[
-							`## Spec-Driven Assessment: \`${target.name}\``,
-							"",
-							"Assess whether the current implementation satisfies these OpenSpec scenarios.",
-							"For each scenario, determine: **PASS**, **FAIL**, or **UNCLEAR**.",
-							...(specCtx.apiContract ? [
-								"",
-								"Also verify implementation conformance to the API contract.",
-							] : []),
-							"",
-							"### Acceptance Criteria",
-							"",
-							scenarioText,
-							"",
-							...designContext,
-							...apiContractContext,
-							"### Instructions",
-							"",
-							"1. Read the relevant source files to check each scenario",
-							...(specCtx.apiContract ? [
-								"   - Also check route definitions, schemas, and status codes against the API contract",
-							] : []),
-							"2. For each scenario, report:",
-							"   - **PASS** — implementation clearly satisfies the Given/When/Then",
-							"   - **FAIL** — implementation contradicts or is missing",
-							"   - **UNCLEAR** — can't determine without running tests",
-							"3. Summarize with a count: N/M scenarios passing",
-							"4. For any FAIL items, explain what's wrong and suggest fixes",
-							"5. Do NOT auto-fix — this is assessment only",
-							`6. After the assessment, if the result reopens work or reveals new constraints/file-scope drift, call \`openspec_manage\` with action \`reconcile_after_assess\`, change_name \`${target.name}\`, assessment_kind \`spec\`, and outcome \`reopen\` or \`ambiguous\` as appropriate. If all scenarios pass cleanly, call it with outcome \`pass\` to refresh lifecycle state.`,
-							...(diffContent ? [
-								"",
-								"### Recent Changes (for context)",
-								"",
-								"```diff",
-								diffContent,
-								"```",
-							] : []),
-						].join("\n"),
-						{ deliverAs: "followUp" },
-					);
-					return;
-				}
-
-				// ── /assess complexity <directive> ─────────────────────
-				case "complexity": {
-					if (!rest) {
-						pi.sendMessage({
-							customType: "view",
-							content: "Usage: `/assess complexity <directive>`\n\nAssess whether a task should be decomposed or executed directly.",
-							display: true,
-						});
-						return;
-					}
-
-					const assessment = assessDirective(rest);
-					pi.sendMessage({
-						customType: "view",
-						content: [
-							formatAssessment(assessment),
-							"",
-							assessment.decision === "cleave"
-								? "**→ Decomposition recommended.** Use `/cleave " + rest + "` to proceed."
-								: assessment.decision === "execute"
-									? "**→ Execute directly.** Task is below complexity threshold."
-									: "**→ Manual assessment needed.** No pattern matched.",
-						].join("\n"),
-						display: true,
-					});
-					return;
-				}
-
-				// ── /assess <freeform> — adversarial review with custom instructions
-				default: {
-					pi.sendUserMessage([
-						"# Adversarial Assessment",
-						"",
-						"You are now operating as a hostile reviewer. Your job is to find everything wrong with the work completed in this session.",
-						"",
-						"**User instructions:** " + trimmed,
-						"",
-						"Follow the user's instructions above for tone and scope, but still perform a thorough review.",
-						"Read every file that was changed. Be specific. Cite line numbers.",
-						"",
-						"## Output Format",
-						"",
-						"### Verdict",
-						"One of: `PASS` | `PASS WITH CONCERNS` | `NEEDS REWORK` | `REJECT`",
-						"",
-						"### Critical Issues",
-						"### Warnings",
-						"### Nitpicks",
-						"### Omissions",
-						"### What Actually Worked",
-					].join("\n"));
-					return;
-				}
-			}
+			const assessResult: AssessStructuredResult = {
+				command: "assess",
+				subcommand: (result.data as any)?.subcommand ?? "diff",
+				args: trimmed,
+				ok: result.ok,
+				summary: result.summary,
+				humanText: result.humanText,
+				data: (result.data as any)?.data,
+				effects: [],
+				nextSteps: (result.nextSteps ?? []).map((step) => step.label),
+				lifecycle: (result.data as any)?.lifecycleHint,
+				lifecycleRecord: result.lifecycle as AssessLifecycleRecord | undefined,
+			};
+			applyAssessEffects(pi, assessResult);
 		},
 	});
+	pi.registerTool(slashCommandBridge.createToolDefinition());
 
 	// ── /cleave command ──────────────────────────────────────────────────
 	pi.registerCommand("cleave", {

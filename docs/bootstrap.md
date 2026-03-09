@@ -2,6 +2,7 @@
 id: bootstrap
 title: Pi-kit Bootstrap — First-time setup and dependency management
 status: implemented
+related: [operator-capability-profile]
 tags: [bootstrap, ux, onboarding, dependencies]
 open_questions: []
 ---

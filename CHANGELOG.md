@@ -3,6 +3,33 @@
 All notable changes to pi-kit are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-03-09
+
+### Added
+
+- **Operator capability profiles** — `.pi/config.json` can now persist operator-visible capability intent and fallback policy, with public roles (`archmagos`, `magos`, `adept`, `servitor`, `servoskull`), explicit thinking ceilings, and runtime cooldown state kept separate from durable preferences.
+- **Allowlisted slash-command bridge** — the harness can now invoke approved slash commands through a structured, machine-readable bridge.
+  - Added generic bridge primitives in `extensions/lib/slash-command-bridge.ts`.
+  - Bridged `/assess spec`, `/assess diff`, `/assess cleave`, and `/assess complexity` while keeping bare `/assess` interactive-only in v1.
+- **OpenSpec assessment lifecycle authority** — each active change now persists its latest structured lifecycle assessment in `openspec/changes/<change>/assessment.json`.
+  - `/opsx:verify` now reuses current persisted assessments or prompts refresh when the implementation snapshot has drifted.
+  - `/opsx:archive` now fails closed on missing, stale, ambiguous, or reopened assessment state.
+  - Post-assess reconciliation now persists structured lifecycle assessment results for later gates.
+
+### Changed
+
+- OpenSpec, Cleave, and Assess now compose around structured assessment records instead of relying on operator memory or prose-only review output.
+- Operator profile schema was finalized around canonical candidate fields:
+  - `source: "upstream" | "local"`
+  - `weight: "light" | "normal" | "heavy"`
+- Dashboard compact/raised views now truncate more cleanly and use a wider deep view layout.
+
+### Fixed
+
+- Dashboard footer layout no longer wastes horizontal space in deep view.
+- Operator profile parsing now normalizes legacy `frontier` source values and numeric weight inputs.
+- Structured lifecycle assessment metadata now survives the `/assess` bridge path consistently.
+
 ## [0.3.2] - 2026-03-09
 
 ### Changed

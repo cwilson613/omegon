@@ -2,6 +2,7 @@
 id: guardrail-capability-probe
 title: Guardrails as Capability Probes — pi-kit runtime dependency checks
 status: decided
+related: [operator-capability-profile]
 tags: [guardrails, dx, ux, capabilities]
 open_questions: []
 ---
