@@ -48,8 +48,8 @@ describe("operator profile parsing", () => {
           {
             id: "claude-sonnet-4-6",
             provider: "anthropic",
-            source: "frontier",
-            weight: 42,
+            source: "upstream",
+            weight: "normal",
             maxThinking: "low",
           },
         ],
@@ -59,8 +59,8 @@ describe("operator profile parsing", () => {
     assert.equal(profile.roles.magos.length, 1);
     assert.equal(profile.roles.magos[0]?.id, "claude-sonnet-4-6");
     assert.equal(profile.roles.magos[0]?.provider, "anthropic");
-    assert.equal(profile.roles.magos[0]?.source, "frontier");
-    assert.equal(profile.roles.magos[0]?.weight, 42);
+    assert.equal(profile.roles.magos[0]?.source, "upstream");
+    assert.equal(profile.roles.magos[0]?.weight, "normal");
     assert.equal(profile.roles.magos[0]?.maxThinking, "low");
   });
 
@@ -87,6 +87,25 @@ describe("operator profile parsing", () => {
     assert.equal(resolveRoleAlias("local"), "servoskull");
     assert.equal(resolveRoleAlias("servo-skull"), "servoskull");
   });
+
+  it("normalizes legacy frontier source and numeric weight values", () => {
+    const profile = parseOperatorProfile({
+      roles: {
+        servitor: [
+          {
+            id: "legacy-model",
+            provider: "openai",
+            source: "frontier",
+            weight: 80,
+            maxThinking: "minimal",
+          },
+        ],
+      },
+    });
+
+    assert.equal(profile.roles.servitor[0]?.source, "upstream");
+    assert.equal(profile.roles.servitor[0]?.weight, "normal");
+  });
 });
 
 describe("operator profile persistence", () => {
@@ -96,11 +115,11 @@ describe("operator profile persistence", () => {
       writeLastUsedModel(tmp, { provider: "openai", modelId: "gpt-5.4" });
       writeOperatorProfile(tmp, {
         roles: {
-          archmagos: [{ id: "gpt-5.4", provider: "openai", source: "frontier", weight: 10, maxThinking: "high" }],
-          magos: [{ id: "claude-sonnet-4-6", provider: "anthropic", source: "frontier", weight: 9, maxThinking: "medium" }],
-          adept: [{ id: "claude-haiku-3-5", provider: "anthropic", source: "frontier", weight: 8, maxThinking: "low" }],
-          servitor: [{ id: "gpt-4o-mini", provider: "openai", source: "frontier", weight: 7, maxThinking: "minimal" }],
-          servoskull: [{ id: "qwen3:8b", provider: "local", source: "local", weight: 6, maxThinking: "off" }],
+          archmagos: [{ id: "gpt-5.4", provider: "openai", source: "upstream", weight: "heavy", maxThinking: "high" }],
+          magos: [{ id: "claude-sonnet-4-6", provider: "anthropic", source: "upstream", weight: "normal", maxThinking: "medium" }],
+          adept: [{ id: "claude-haiku-3-5", provider: "anthropic", source: "upstream", weight: "light", maxThinking: "low" }],
+          servitor: [{ id: "gpt-4o-mini", provider: "openai", source: "upstream", weight: "light", maxThinking: "minimal" }],
+          servoskull: [{ id: "qwen3:8b", provider: "local", source: "local", weight: "light", maxThinking: "off" }],
         },
         fallback: {
           sameRoleCrossProvider: "allow",

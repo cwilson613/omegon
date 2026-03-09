@@ -10,22 +10,22 @@
 ### Decision: Schema should map semantic roles to ordered concrete candidates
 
 **Status:** decided
-**Rationale:** The operator should configure intent at the role level (`frontier.archmagos`, `frontier.magos`, `local.leaf`) rather than binding every feature directly to a specific model string. Ordered candidate lists preserve current provider-neutral routing while making preferences explicit and inspectable.
+**Rationale:** The operator should configure intent at the role level (`archmagos`, `magos`, `servitor`, `servoskull`) rather than binding every feature directly to a specific model string. Ordered candidate lists preserve current provider-neutral routing while making preferences explicit and inspectable.
 
-### Decision: Cross-class fallback from frontier to local must be explicit
-
-**Status:** decided
-**Rationale:** Switching from a frontier role to a local role changes latency and quality characteristics enough that it should not be treated as an ordinary fallback. The profile should default this transition to ask-or-deny, preventing harmful silent fallbacks like automatic Qwen 30B selection on slower machines.
-
-### Decision: V1 should expose a small public role set with internal aliases
+### Decision: Cross-source fallback must be explicit when it materially changes UX
 
 **Status:** decided
-**Rationale:** A small role set is easier to explain during setup and enough to formalize current provider-class semantics. Internal features like review, compaction, extraction, and cleave leaf execution can initially resolve through aliases to public roles instead of expanding the operator-facing schema prematurely.
+**Rationale:** Switching from upstream candidates to local candidates changes latency and quality characteristics enough that it should not be treated as an ordinary fallback. The profile should default this transition to ask-or-deny, preventing harmful silent fallbacks like automatic Qwen 30B selection on slower machines.
+
+### Decision: All capability roles are public and operator-visible
+
+**Status:** decided
+**Rationale:** pi-kit should not intentionally hide internal capability levels. Abstractions may exist for technical or conceptual clarity, but every supported role should remain visible and configurable to the operator. This means the full ladder archmagos, magos, adept, servitor, and servoskull is public in v1.
 
 ### Decision: Default profile must be safe without setup
 
 **Status:** decided
-**Rationale:** Skipping setup should not leave routing undefined or permissive. Pi-kit should synthesize a conservative default profile that prefers frontier providers, permits same-role cross-provider fallback, and blocks silent frontier-to-heavy-local fallback until the operator opts in.
+**Rationale:** Skipping setup should not leave routing undefined or permissive. Pi-kit should synthesize a conservative default profile that prefers upstream candidates, permits same-role cross-provider fallback, and blocks silent upstream-to-heavy-local fallback until the operator opts in.
 
 ### Decision: Transient upstream availability failures should enter the fallback policy path
 
@@ -42,17 +42,17 @@
 **Status:** decided
 **Rationale:** First-run and new-machine setup should stay fast and reliable. Capturing policies like allow/avoid/confirm for local inference is enough to prevent harmful fallbacks immediately; benchmarking can remain an optional later enhancement.
 
-### Decision: Use servitor as the low-cost frontier role name
+### Decision: Use servoskull as the canonical lowest-tier key
 
 **Status:** decided
-**Rationale:** `servitor` preserves the existing Warhammer-flavored operator vocabulary while remaining simpler and more recognizable than `lexmechanic`. The v1 public frontier roles should be `frontier.archmagos`, `frontier.magos`, and `frontier.servitor`.
+**Rationale:** The operator prefers `servoskull` as a single-token config/key name to avoid punctuation and character handling issues while preserving the intended semantic identity of the lowest capability role.
 
 ### Decision: Provider/source and role/tier must be separate axes
 
 **Status:** decided
-**Rationale:** The schema should not use `frontier` as shorthand for 'upstream'. Operator-facing roles express capability intent (`archmagos`, `magos`, `servitor`, `leaf`, `summary`), while candidate metadata expresses source/provider (`anthropic`, `openai`, `ollama`) and runtime behavior. This avoids conflating Opus-class reasoning with mere cloud location.
+**Rationale:** The schema should not use `frontier` as shorthand for 'upstream'. Operator-facing roles express capability intent (`archmagos`, `magos`, `adept`, `servitor`, `servoskull`), while candidate metadata expresses source/provider (`anthropic`, `openai`, `ollama`) and runtime behavior. This avoids conflating Opus-class reasoning with mere cloud location.
 
-### Decision: Capability roles follow the ladder archmagos → magos → adept → servitor → servo-skull
+### Decision: Capability roles follow the ladder archmagos → magos → adept → servitor → servoskull
 
 **Status:** decided
 **Rationale:** This preserves the intended semantic gradient in operator vocabulary and avoids the earlier confusion around `frontier` as a namespace. These names describe capability/intent only; provider/source remains a separate axis.
@@ -60,7 +60,7 @@
 ### Decision: All capability roles are public and operator-visible
 
 **Status:** decided
-**Rationale:** pi-kit should not intentionally hide internal capability levels. Abstractions may exist for technical or conceptual clarity, but every supported role should remain visible and configurable to the operator. This means the full ladder archmagos, magos, adept, servitor, and servo-skull is public in v1.
+**Rationale:** pi-kit should not intentionally hide internal capability levels. Abstractions may exist for technical or conceptual clarity, but every supported role should remain visible and configurable to the operator. This means the full ladder archmagos, magos, adept, servitor, and servoskull is public in v1.
 
 ### Decision: Use servoskull as the canonical lowest-tier key
 
@@ -85,13 +85,13 @@
 ### Decision: Cross-source fallback must be explicit when it materially changes UX
 
 **Status:** decided
-**Rationale:** The important boundary is not 'frontier versus local' as a role namespace but transitions between upstream and local sources, especially when they imply very different latency or quality. The resolver should therefore reason about cross-source fallback and ask before crossing into heavy or uncertain local execution when policy requires it.
+**Rationale:** The important boundary is not role naming but transitions between upstream and local sources, especially when they imply very different latency or quality. The resolver should therefore reason about cross-source fallback and ask before crossing into heavy or uncertain local execution when policy requires it.
 
 ## Research Context
 
 ### Assessment summary
 
-A profile layer would solve two distinct problems that are currently conflated: (1) environment capability discovery and (2) routing policy preferences. Bootstrap already knows how to detect runtime dependencies, provider-neutral controls already persist concrete driver choices, and capability probes already define the scope of startup checks. What is missing is a durable operator-scoped profile that answers: which frontier providers are configured and authorized, which local inference paths are actually acceptable on this hardware, and what fallback rules preserve UX rather than merely maximizing availability.
+A profile layer would solve two distinct problems that are currently conflated: (1) environment capability discovery and (2) routing policy preferences. Bootstrap already knows how to detect runtime dependencies, provider-neutral controls already persist concrete driver choices, and capability probes already define the scope of startup checks. What is missing is a durable operator-scoped profile that answers: which upstream providers are configured and authorized, which local inference paths are actually acceptable on this hardware, and what fallback rules preserve UX rather than merely maximizing availability.
 
 ### Why this is worth doing now
 
@@ -107,31 +107,31 @@ Phase 1 should stay conservative: add profile capture during bootstrap/new-machi
 
 ### Profile schema proposal
 
-Proposed schema has three layers. (1) Intent layer: operator-facing aliases such as `frontier.archmagos`, `frontier.magos`, `frontier.lexmechanic`, `local.leaf`, `local.summary`. These are stable semantic roles, not concrete models. (2) Resolution layer: per-role ordered candidates and provider preferences, e.g. `frontier.archmagos -> [anthropic/claude-opus-4-6, openai/gpt-5.3]`, `frontier.magos -> [anthropic/claude-sonnet-4-6, openai/gpt-5.3-mini]`, `local.leaf -> [devstral-small-2:24b, qwen2.5-coder:32b]`. (3) Policy layer: fallback rules such as `require_confirmation_for_heavy_local`, `allow_cloud_fallback`, `allow_local_fallback`, `max_interactive_startup_ms`, and `no_silent_cross_frontier_to_local`. Runtime capability checks then prune unavailable candidates from the ordered resolution list rather than inventing new behavior.
+Proposed schema has three layers. (1) Intent layer: operator-facing aliases such as `archmagos`, `magos`, `adept`, `servitor`, `servoskull`. These are stable semantic roles, not concrete models. (2) Resolution layer: per-role ordered candidates and provider preferences, e.g. `archmagos -> [anthropic/claude-opus-4-6, openai/gpt-5.4]`, `magos -> [anthropic/claude-sonnet-4-6, openai/gpt-5.3]`, `servoskull -> [openai/gpt-5.3-nano, ollama/qwen3:8b]`. (3) Policy layer: fallback rules such as `allow | ask | deny` fallback rules for cross-provider, cross-source, heavy-local, and unknown-local-performance decisions. Runtime capability checks then prune unavailable candidates from the ordered resolution list rather than inventing new behavior.
 
 ### Concrete mapping model
 
-A practical v1 shape is: `profiles.roles`, `profiles.providers`, `profiles.local`, and `runtime.machine`. Example roles block: `{ "frontier.archmagos": { "candidates": ["anthropic/claude-opus-4-6", "openai/gpt-5.3"], "fallback": "ask" }, "frontier.magos": { "candidates": ["anthropic/claude-sonnet-4-6", "openai/gpt-5.3-mini"], "fallback": "ask" }, "frontier.lexmechanic": { "candidates": ["anthropic/claude-haiku-4-5", "openai/gpt-5.3-nano"], "fallback": "allow" }, "local.leaf": { "candidates": ["ollama/devstral-small-2:24b", "ollama/qwen2.5-coder:32b"], "fallback": "deny" }, "local.summary": { "candidates": ["ollama/nemotron-3-nano:30b", "ollama/qwen3:30b"], "fallback": "allow" } }`. Provider entries declare whether a provider is enabled, preferred, and requires login. Runtime state records which candidates are currently usable.
+A practical v1 shape is: `operatorProfile.roles` plus `operatorProfile.fallback` in `.pi/config.json`, with runtime cooldown/machine state stored separately. Each role holds ordered candidate objects like `{ id, provider, source, weight, maxThinking }`, e.g. `archmagos: [{ id: "claude-opus-4-6", provider: "anthropic", source: "upstream", weight: "heavy", maxThinking: "high" }]`. Provider entries declare whether a provider is enabled, preferred, and requires login. Runtime state records which candidates are currently usable.
 
 ### Recommended semantics for fallback
 
-The role mapping should distinguish three transitions: same-frontier fallback, cross-provider fallback, and cross-class fallback. Same-frontier fallback means e.g. `frontier.magos` from Anthropic Sonnet to OpenAI GPT-5.3-mini. Cross-provider fallback is acceptable if the role remains the same. Cross-class fallback means moving from `frontier.*` to `local.*`; this is the dangerous transition and should default to `ask` or `deny`, never silent `allow`, because the UX cost can exceed the value of availability. Local roles can independently allow intra-local fallback among models of similar cost.
+The role mapping should distinguish three transitions: same-role fallback, cross-provider fallback, and cross-source fallback. Same-role fallback means e.g. `magos` from Anthropic Sonnet to OpenAI GPT-5.3. Cross-provider fallback is acceptable if the role remains the same. Cross-source fallback means moving from upstream candidates to local candidates; this is the dangerous transition and should default to `ask` or `deny`, never silent `allow`, because the UX cost can exceed the value of availability. Local roles can independently allow intra-local fallback among models of similar cost.
 
 ### Canonical role options for v1
 
-Options for the initial role set: (A) Minimal tier-only roles: `frontier.archmagos`, `frontier.magos`, `frontier.lexmechanic`, `local.leaf`, `local.summary`. Easiest to explain and maps directly to current operator vocabulary. (B) Tier roles plus one execution role: add `frontier.review` and `local.background` for cases where review and background summarization need different defaults without exposing too many knobs. (C) Fully task-scoped roles: separate `review`, `compaction`, `extraction`, `cleave.leaf`, `dashboard`, etc. Most expressive but too granular for v1 and likely to confuse first-run setup. Recommendation: choose A for the public schema, but allow internal task aliases to map onto those public roles so future specialization does not break the config shape.
+Options for the initial role set: (A) Minimal tier-only roles: `archmagos`, `magos`, `adept`, `servitor`, `servoskull`. Easiest to explain and maps directly to current operator vocabulary. (B) Tier roles plus one execution role: add task aliases like `review` and `background` for cases where review and background summarization need different defaults without exposing too many knobs. (C) Fully task-scoped roles: separate `review`, `compaction`, `extraction`, `cleave.leaf`, `dashboard`, etc. Most expressive but too granular for v1 and likely to confuse first-run setup. Recommendation: choose A for the public schema, but allow internal task aliases to map onto those public roles so future specialization does not break the config shape.
 
 ### Graceful degradation model
 
-If the user skips setup, pi-kit should still produce a safe default profile rather than an empty state. Default profile should prefer frontier roles, allow same-role cross-provider fallback, and deny silent frontier-to-heavy-local fallback. Local usage should be conservative by default: light local tasks may be allowed when explicitly requested or when mapped to background roles, but heavy local models should require confirmation until the operator opts in. This gives good out-of-box behavior without forcing setup completion.
+If the user skips setup, pi-kit should still produce a safe default profile rather than an empty state. Default profile should prefer upstream candidates, allow same-role cross-provider fallback, and deny silent upstream-to-heavy-local fallback. Local usage should be conservative by default: light local tasks may be allowed when explicitly requested or when mapped to background roles, but heavy local models should require confirmation until the operator opts in. This gives good out-of-box behavior without forcing setup completion.
 
 ### Dynamic upstream failure handling
 
-Unexpected provider failures during execution need a different path than startup capability checks. Errors such as Anthropic 429/rate limiting or OpenAI session-limit exhaustion are evidence that the originally selected frontier path has become temporarily unavailable. The resolver should treat these as transient capability failures, record them in runtime state with a cooldown window, and then either (1) ask the operator how to proceed if the next candidate changes provider class or materially changes latency/quality, or (2) automatically retry with the next same-class candidate if the profile allows it. This keeps recovery graceful while avoiding silent degradations.
+Unexpected provider failures during execution need a different path than startup capability checks. Errors such as Anthropic 429/rate limiting or OpenAI session-limit exhaustion are evidence that the originally selected upstream path has become temporarily unavailable. The resolver should treat these as transient capability failures, record them in runtime state with a cooldown window, and then either (1) ask the operator how to proceed if the next candidate changes provider or source or materially changes latency/quality, or (2) automatically retry with the next same-role candidate if the profile allows it. This keeps recovery graceful while avoiding silent degradations.
 
 ### Resolver algorithm sketch
 
-Proposed resolution algorithm: (1) accept an internal requested role, e.g. `planning` or `cleave.leaf`; (2) map through `internalAliases` to a canonical public role; (3) load the ordered candidate list for that role; (4) filter out candidates whose provider is disabled, unauthenticated, missing locally, or in a runtime cooldown window; (5) choose the first surviving candidate; (6) if no candidate survives, compute whether the next possible move is same-role/same-class, cross-provider, or cross-class and apply policy (`allow`, `ask`, `deny`); (7) when a provider fails mid-run with a transient error such as 429 or session-limit exhaustion, mark that candidate or provider unavailable for a cooldown period and retry resolution from step 4; (8) emit an operator-facing explanation whenever policy blocks or asks. The resolver should never invent a candidate outside the profile/default-profile list.
+Proposed resolution algorithm: (1) accept an internal requested role, e.g. `planning` or `cleave.leaf`; (2) map through `internalAliases` to a canonical public role; (3) load the ordered candidate list for that role; (4) filter out candidates whose provider is disabled, unauthenticated, missing locally, or in a runtime cooldown window; (5) choose the first surviving candidate; (6) if no candidate survives, compute whether the next possible move is same-role, cross-provider, or cross-source and apply policy (`allow`, `ask`, `deny`); (7) when a provider fails mid-run with a transient error such as 429 or session-limit exhaustion, mark that candidate or provider unavailable for a cooldown period and retry resolution from step 4; (8) emit an operator-facing explanation whenever policy blocks or asks. The resolver should never invent a candidate outside the profile/default-profile list.
 
 ### Config storage options
 
@@ -139,19 +139,19 @@ There are two plausible storage layouts. Option 1: keep operator profile in `.pi
 
 ### Fallback vocabulary
 
-V1 fallback policy should use a small enum: `allow`, `ask`, `deny`. This is sufficient for same-role, cross-provider, cross-class, heavy-local, and unknown-performance decisions. Leave an explicit extension seam in the schema comments/docs for future values such as `allow_once` or `background_only`, but do not expose them in v1 because they complicate both setup UX and resolver behavior.
+V1 fallback policy should use a small enum: `allow`, `ask`, `deny`. This is sufficient for same-role, cross-provider, cross-source, heavy-local, and unknown-local-performance decisions. Leave an explicit extension seam in the schema comments/docs for future values such as `allow_once` or `background_only`, but do not expose them in v1 because they complicate both setup UX and resolver behavior.
 
 ### Updated canonical v1 role set
 
-The public v1 role set should be `frontier.archmagos`, `frontier.magos`, `frontier.servitor`, `local.leaf`, and `local.summary`. `servitor` is the low-cost / lightweight frontier role. Internal task aliases like `review`, `planning`, `compaction`, `extraction`, and `cleave.leaf` should resolve through these public roles rather than expanding the operator-facing schema in v1.
+The public v1 role set is the full ladder `archmagos`, `magos`, `adept`, `servitor`, and `servoskull`. Internal task aliases like `review`, `planning`, `compaction`, and `extraction` should resolve through these public roles rather than creating hidden tiers.
 
 ### Terminology correction: frontier is a capability tier, not a provider location
 
-Clarification: `frontier` should mean the high-capability cloud/upstream class anchored by `archmagos` (Opus/GPT-5.3-class), not merely 'anything upstream'. In other words, provider location (`anthropic`, `openai`, `ollama`) is orthogonal to role/tier (`archmagos`, `magos`, `servitor`, `leaf`, `summary`). The schema should not overload `frontier` to mean all cloud models. Better mental model: role names describe capability/intent; provider names describe where the candidate comes from.
+Clarification: `frontier` was an overloaded term and should no longer appear in the schema. Provider location (`anthropic`, `openai`, `ollama`) is orthogonal to role/tier (`archmagos`, `magos`, `adept`, `servitor`, `servoskull`). The schema should not overload `frontier` to mean all cloud models. Better mental model: role names describe capability/intent; provider names describe where the candidate comes from.
 
 ### Expanded canonical role ladder
 
-Updated operator-facing capability ladder, in descending order: `archmagos -> magos -> adept -> servitor -> servo-skull` (with `cherub` as an alternate low-end label if hyphenation or readability becomes an issue). This is a pure role/tier axis and remains separate from provider/source. A small v1 public set can expose all five roles if we want a complete ladder, or collapse the lowest one or two into internal aliases if setup UX feels too granular.
+Updated operator-facing capability ladder, in descending order: `archmagos -> magos -> adept -> servitor -> servoskull` (with `cherub` as an alternate low-end label if hyphenation or readability becomes an issue). This is a pure role/tier axis and remains separate from provider/source. A small v1 public set can expose all five roles if we want a complete ladder, or collapse the lowest one or two into internal aliases if setup UX feels too granular.
 
 ### Public exposure principle
 
@@ -167,8 +167,8 @@ Adjacent tiers may overlap in practical capability, and that is acceptable. For 
 
 ### Stale assumptions to supersede
 
-Earlier exploration used `frontier.*` and `local.*` namespaces and suggested a reduced public role set. Those assumptions are now superseded. The corrected model uses a fully public capability ladder (`archmagos`, `magos`, `adept`, `servitor`, `servoskull`) with provider/source modeled separately. Fallback policy should talk about cross-source transitions rather than cross-class frontier/local transitions.
+Earlier exploration used `frontier.*` and `local.*` namespaces and suggested a reduced public role set. Those assumptions are now superseded. The corrected model uses a fully public capability ladder (`archmagos`, `magos`, `adept`, `servitor`, `servoskull`) with provider/source modeled separately. Fallback policy should talk about cross-source transitions rather than overloaded frontier/local namespaces.
 
 ### Candidate object shape v1
 
-Recommended v1 candidate shape: `{ id, provider, source, weight, maxThinking }`, where `provider` is the concrete backend family (`anthropic`, `openai`, `ollama`, etc.), `source` is `upstream` or `local`, `weight` is a coarse latency/cost bucket such as `light|normal|heavy`, and `maxThinking` is `high|medium|low|off`. Additional fields can be added later (e.g. context window hints, interactive safety, latency budgets, allow-once/background-only semantics) without changing the core resolution model.
+Recommended v1 candidate shape: `{ id, provider, source, weight, maxThinking }`, where `provider` is the concrete backend family (`anthropic`, `openai`, `ollama`, etc.), `source` is `upstream` or `local`, `weight` is a coarse latency/cost bucket `light|normal|heavy`, and `maxThinking` is `high|medium|low|off`. Additional fields can be added later (e.g. context window hints, interactive safety, latency budgets, allow-once/background-only semantics) without changing the core resolution model.

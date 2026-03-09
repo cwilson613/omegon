@@ -237,12 +237,12 @@ export default function (pi: ExtensionAPI) {
     // If none is persisted (or it is no longer available), fall back to the
     // current effort tier's resolved driver.
     const restoredModel = await restoreLastUsedModel(pi, ctx);
-    const driverModel = restoredModel ?? await switchDriverModel(pi, ctx, state.driver);
+    const switchedDriver = restoredModel ? null : await switchDriverModel(pi, ctx, state.driver);
 
     // Set thinking level, respecting candidate ceilings when the effort-driven
     // model switch produced a structured resolver result.
-    const effectiveThinking = driverModel?.maxThinking
-      ? clampThinkingLevel(state.thinking, driverModel.maxThinking)
+    const effectiveThinking: ThinkingLevel = switchedDriver?.maxThinking
+      ? clampThinkingLevel(state.thinking, switchedDriver.maxThinking)
       : state.thinking;
     pi.setThinkingLevel(effectiveThinking as any);
 
@@ -250,12 +250,12 @@ export default function (pi: ExtensionAPI) {
     const icon = TIER_ICONS[state.level];
     const modelNote = restoredModel
       ? ` → restored ${restoredModel.provider}/${restoredModel.id}`
-      : driverModel
-        ? ` → ${driverModel.model.provider}/${driverModel.model.id}`
+      : switchedDriver
+        ? ` → ${switchedDriver.model.provider}/${switchedDriver.model.id}`
         : " (driver model unavailable)";
     ctx.ui.notify(
       `${icon} Effort: ${state.name} (${state.driver}/${effectiveThinking})${modelNote}`,
-      driverModel ? "info" : "warning",
+      restoredModel || switchedDriver ? "info" : "warning",
     );
   });
 
@@ -362,7 +362,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       // Set thinking level
-      const effectiveThinking = driverModel?.maxThinking
+      const effectiveThinking: ThinkingLevel = driverModel?.maxThinking
         ? clampThinkingLevel(state.thinking, driverModel.maxThinking)
         : state.thinking;
       pi.setThinkingLevel(effectiveThinking as any);

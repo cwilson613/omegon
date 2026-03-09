@@ -7,7 +7,8 @@ export const CAPABILITY_ROLES = ["archmagos", "magos", "adept", "servitor", "ser
 
 export type CapabilityRole = typeof CAPABILITY_ROLES[number];
 export type CapabilityRoleAlias = "opus" | "sonnet" | "haiku" | "local" | "servo-skull";
-export type CandidateSource = "frontier" | "local";
+export type CandidateSource = "upstream" | "local";
+export type CandidateWeight = "light" | "normal" | "heavy";
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
 export type FallbackPolicyValue = "allow" | "ask" | "deny";
 
@@ -15,7 +16,7 @@ export interface OperatorProfileCandidate {
   id?: string;
   provider?: string;
   source?: CandidateSource;
-  weight?: number;
+  weight?: CandidateWeight;
   maxThinking?: ThinkingLevel;
 }
 
@@ -57,23 +58,23 @@ const DEFAULT_FALLBACK_POLICY: OperatorFallbackPolicy = {
 const DEFAULT_PROFILE: OperatorCapabilityProfile = {
   roles: {
     archmagos: [
-      { id: "claude-opus-4-6", provider: "anthropic", source: "frontier", weight: 100, maxThinking: "high" },
-      { id: "gpt-5.4", provider: "openai", source: "frontier", weight: 90, maxThinking: "high" },
+      { id: "claude-opus-4-6", provider: "anthropic", source: "upstream", weight: "heavy", maxThinking: "high" },
+      { id: "gpt-5.4", provider: "openai", source: "upstream", weight: "heavy", maxThinking: "high" },
     ],
     magos: [
-      { id: "claude-sonnet-4-6", provider: "anthropic", source: "frontier", weight: 100, maxThinking: "medium" },
-      { id: "gpt-5.3-codex-spark", provider: "openai", source: "frontier", weight: 90, maxThinking: "medium" },
+      { id: "claude-sonnet-4-6", provider: "anthropic", source: "upstream", weight: "normal", maxThinking: "medium" },
+      { id: "gpt-5.3-codex-spark", provider: "openai", source: "upstream", weight: "normal", maxThinking: "medium" },
     ],
     adept: [
-      { id: "claude-haiku-3-5", provider: "anthropic", source: "frontier", weight: 100, maxThinking: "low" },
-      { id: "gpt-5.1-codex", provider: "openai", source: "frontier", weight: 90, maxThinking: "low" },
+      { id: "claude-haiku-3-5", provider: "anthropic", source: "upstream", weight: "light", maxThinking: "low" },
+      { id: "gpt-5.1-codex", provider: "openai", source: "upstream", weight: "light", maxThinking: "low" },
     ],
     servitor: [
-      { id: "gpt-4o-mini", provider: "openai", source: "frontier", weight: 100, maxThinking: "minimal" },
-      { id: "claude-haiku-3-5", provider: "anthropic", source: "frontier", weight: 80, maxThinking: "minimal" },
+      { id: "gpt-4o-mini", provider: "openai", source: "upstream", weight: "light", maxThinking: "minimal" },
+      { id: "claude-haiku-3-5", provider: "anthropic", source: "upstream", weight: "light", maxThinking: "minimal" },
     ],
     servoskull: [
-      { id: "qwen3:8b", provider: "local", source: "local", weight: 100, maxThinking: "off" },
+      { id: "qwen3:8b", provider: "local", source: "local", weight: "light", maxThinking: "off" },
     ],
   },
   fallback: DEFAULT_FALLBACK_POLICY,
@@ -97,8 +98,16 @@ function parseCandidate(value: unknown): OperatorProfileCandidate | undefined {
   const candidate: OperatorProfileCandidate = {};
   if (typeof value.id === "string") candidate.id = value.id;
   if (typeof value.provider === "string") candidate.provider = value.provider;
-  if (value.source === "frontier" || value.source === "local") candidate.source = value.source;
-  if (typeof value.weight === "number" && Number.isFinite(value.weight)) candidate.weight = value.weight;
+  if (value.source === "upstream" || value.source === "local") {
+    candidate.source = value.source;
+  } else if (value.source === "frontier") {
+    candidate.source = "upstream";
+  }
+  if (value.weight === "light" || value.weight === "normal" || value.weight === "heavy") {
+    candidate.weight = value.weight;
+  } else if (typeof value.weight === "number" && Number.isFinite(value.weight)) {
+    candidate.weight = value.weight >= 90 ? "heavy" : value.weight >= 50 ? "normal" : "light";
+  }
   if (["off", "minimal", "low", "medium", "high"].includes(String(value.maxThinking))) {
     candidate.maxThinking = value.maxThinking as ThinkingLevel;
   }
