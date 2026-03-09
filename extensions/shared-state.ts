@@ -15,6 +15,7 @@ import type {
 
 import type { EffortState } from "./effort/types.ts";
 import type { ProviderRoutingPolicy } from "./lib/model-routing.ts";
+import type { MemoryInjectionMetrics } from "./project-memory/injection-metrics.ts";
 import { getDefaultPolicy } from "./lib/model-routing.ts";
 
 // Re-export dashboard types for consumer convenience
@@ -52,6 +53,9 @@ interface SharedState {
   /** Approximate token count of the last memory injection into context.
    *  Written by project-memory, read by dashboard for the context gauge. */
   memoryTokenEstimate: number;
+
+  /** Structured snapshot of the last memory injection payload. */
+  lastMemoryInjection?: MemoryInjectionMetrics;
 
   /** Design tree summary state. Written by design-tree extension. */
   designTree?: DesignTreeDashboardState;

@@ -51,6 +51,13 @@ import { FactStore, parseExtractionOutput, GLOBAL_DECAY, type MindRecord, type F
 import { embed, isEmbeddingAvailable, MODEL_DIMS } from "./embeddings.ts";
 import { DEFAULT_CONFIG, type MemoryConfig } from "./types.ts";
 import {
+  createMemoryInjectionMetrics,
+  estimateTokensFromChars,
+  formatMemoryInjectionMetrics,
+  type MemoryInjectionMode,
+  type MemoryInjectionMetrics,
+} from "./injection-metrics.ts";
+import {
   type ExtractionTriggerState,
   createTriggerState,
   shouldExtract,
@@ -358,6 +365,12 @@ export default function (pi: ExtensionAPI) {
   /** Fact IDs the agent has explicitly recalled or stored this session */
   const workingMemory = new Set<string>();
   const WORKING_MEMORY_CAP = 25;
+
+  // --- Injection Calibration State ---
+  let pendingInjectionCalibration: {
+    baselineContextTokens: number | null;
+    userPromptTokensEstimate: number;
+  } | null = null;
 
   /** Get the active mind name (null = default) */
   /**
@@ -1110,15 +1123,30 @@ export default function (pi: ExtensionAPI) {
     const mindLabel = mind !== "default" ? ` (mind: ${mind})` : "";
 
     if (factCount <= 3) {
+      const content = [
+        `Project memory initialized${mindLabel} (${factCount} facts stored).`,
+        "Use **memory_store** to persist important discoveries as you work",
+        "(architecture decisions, constraints, patterns, known issues).",
+        "Facts persist across sessions and will be available next time.",
+      ].join(" ");
+      const usage = ctx.getContextUsage();
+      const metrics = createMemoryInjectionMetrics({
+        mode: "tiny",
+        projectFactCount: factCount,
+        payloadChars: content.length,
+        baselineContextTokens: usage?.tokens ?? null,
+        userPromptTokensEstimate: estimateTokensFromChars((event as any).prompt ?? ""),
+      });
+      sharedState.memoryTokenEstimate = metrics.estimatedTokens;
+      sharedState.lastMemoryInjection = metrics;
+      pendingInjectionCalibration = {
+        baselineContextTokens: metrics.baselineContextTokens ?? null,
+        userPromptTokensEstimate: metrics.userPromptTokensEstimate ?? 0,
+      };
       return {
         message: {
           customType: "project-memory",
-          content: [
-            `Project memory initialized${mindLabel} (${factCount} facts stored).`,
-            "Use **memory_store** to persist important discoveries as you work",
-            "(architecture decisions, constraints, patterns, known issues).",
-            "Facts persist across sessions and will be available next time.",
-          ].join(" "),
+          content,
           display: false,
         },
       };
@@ -1128,7 +1156,11 @@ export default function (pi: ExtensionAPI) {
     // If embeddings are available and we have a user message, inject only
     // relevant facts + core sections. Otherwise fall back to full dump.
     let rendered: string;
-    let injectionMode = "full";
+    let injectionMode: MemoryInjectionMode = "full";
+    let injectedProjectFactCount = 0;
+    let injectedEdgeCount = 0;
+    let injectedWorkingMemoryFactCount = 0;
+    let injectedSemanticHitCount = 0;
 
     const userText = (event as any).prompt ?? "";
 
@@ -1175,20 +1207,30 @@ export default function (pi: ExtensionAPI) {
           }
         }
 
+        injectedProjectFactCount = injectedFacts.length;
+        injectedWorkingMemoryFactCount = wmFacts.filter(f => injectedIds.has(f.id)).length;
+        injectedSemanticHitCount = relevantFacts.filter(f => injectedIds.has(f.id)).length;
+        injectedEdgeCount = 0;
         rendered = store.renderFactList(injectedFacts, { showIds: false });
       } else {
+        injectedProjectFactCount = Math.min(factCount, 50);
+        injectedEdgeCount = Math.min(store.getEdgesForFacts(store.getActiveFacts(mind).map(f => f.id), 20).length, 20);
         rendered = store.renderForInjection(mind);
       }
     } else {
+      injectedProjectFactCount = Math.min(factCount, 50);
+      injectedEdgeCount = Math.min(store.getEdgesForFacts(store.getActiveFacts(mind).map(f => f.id), 20).length, 20);
       rendered = store.renderForInjection(mind);
     }
 
     // Include global knowledge if available
     let globalSection = "";
+    let injectedGlobalFactCount = 0;
     if (globalStore) {
       const globalMind = globalStore.getActiveMind() ?? "default";
       const globalFactCount = globalStore.countActiveFacts(globalMind);
       if (globalFactCount > 0) {
+        injectedGlobalFactCount = Math.min(globalFactCount, 15);
         const globalRendered = globalStore.renderForInjection(globalMind, { maxFacts: 15, maxEdges: 0 });
         globalSection = `\n\n<!-- Global Knowledge — cross-project facts and connections -->\n${globalRendered}`;
       }
@@ -1196,10 +1238,12 @@ export default function (pi: ExtensionAPI) {
 
     // Include recent episodes if available
     let episodeSection = "";
+    let injectedEpisodeCount = 0;
     const episodeCount = store.countEpisodes(mind);
     if (episodeCount > 0) {
       const recentEpisodes = store.getEpisodes(mind, 3);
       if (recentEpisodes.length > 0) {
+        injectedEpisodeCount = recentEpisodes.length;
         const episodeLines = recentEpisodes.map(e =>
           `### ${e.date}: ${e.title}\n${e.narrative}`
         );
@@ -1249,8 +1293,27 @@ export default function (pi: ExtensionAPI) {
       pressureWarning,
     ].join(" ");
 
+    const usage = ctx.getContextUsage();
+    const metrics = createMemoryInjectionMetrics({
+      mode: injectionMode,
+      projectFactCount: injectedProjectFactCount,
+      edgeCount: injectedEdgeCount,
+      workingMemoryFactCount: injectedWorkingMemoryFactCount,
+      semanticHitCount: injectedSemanticHitCount,
+      episodeCount: injectedEpisodeCount,
+      globalFactCount: injectedGlobalFactCount,
+      payloadChars: injectionContent.length,
+      baselineContextTokens: usage?.tokens ?? null,
+      userPromptTokensEstimate: estimateTokensFromChars(userText),
+    });
+
     // Estimate token count (~4 chars per token) and publish for status-bar
-    sharedState.memoryTokenEstimate = Math.round(injectionContent.length / 4);
+    sharedState.memoryTokenEstimate = metrics.estimatedTokens;
+    sharedState.lastMemoryInjection = metrics;
+    pendingInjectionCalibration = {
+      baselineContextTokens: metrics.baselineContextTokens ?? null,
+      userPromptTokensEstimate: metrics.userPromptTokensEstimate ?? 0,
+    };
 
     return {
       message: {
@@ -1259,6 +1322,33 @@ export default function (pi: ExtensionAPI) {
         display: false,
       },
     };
+  });
+
+  pi.on("agent_end", async (event, _ctx) => {
+    if (!pendingInjectionCalibration) return;
+    const lastAssistant = [...event.messages].reverse().find((msg: any) =>
+      msg.role === "assistant" && msg.stopReason !== "aborted" && msg.stopReason !== "error" && msg.usage,
+    ) as any;
+    if (!lastAssistant?.usage || !sharedState.lastMemoryInjection) return;
+
+    const observedInputTokens = lastAssistant.usage.input ?? 0;
+    const baselineContextTokens = pendingInjectionCalibration.baselineContextTokens;
+    const userPromptTokensEstimate = pendingInjectionCalibration.userPromptTokensEstimate;
+    const inferredAdditionalPromptTokens = baselineContextTokens !== null
+      ? Math.max(0, observedInputTokens - baselineContextTokens - userPromptTokensEstimate)
+      : null;
+    const estimatedVsObservedDelta = inferredAdditionalPromptTokens !== null
+      ? sharedState.lastMemoryInjection.estimatedTokens - inferredAdditionalPromptTokens
+      : null;
+
+    sharedState.lastMemoryInjection = {
+      ...sharedState.lastMemoryInjection,
+      observedInputTokens,
+      inferredAdditionalPromptTokens,
+      estimatedVsObservedDelta,
+    } satisfies MemoryInjectionMetrics;
+
+    pendingInjectionCalibration = null;
   });
 
   // --- Background Extraction Triggers ---
@@ -2276,6 +2366,8 @@ export default function (pi: ExtensionAPI) {
             `Embedding model: ${embeddingAvailable ? embeddingModel : "unavailable"}`,
             `Avg confidence: ${(avgConfidence * 100).toFixed(1)}%`,
             `Avg reinforcements: ${(totalReinforcements / Math.max(total, 1)).toFixed(1)}`,
+            "",
+            ...formatMemoryInjectionMetrics(sharedState.lastMemoryInjection),
             "",
             "By section:",
             ...SECTIONS.map(s => `  ${s}: ${bySection.get(s) ?? 0}`),

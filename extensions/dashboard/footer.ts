@@ -20,6 +20,8 @@ import type { DashboardState } from "./types.ts";
 import { sharedState } from "../shared-state.ts";
 import { debug } from "../debug.ts";
 import { linkDashboardFile, linkOpenSpecArtifact, linkOpenSpecChange } from "./uri-helper.ts";
+import { formatMemoryAuditSummary } from "./memory-audit.ts";
+import { buildContextGaugeModel } from "./context-gauge.ts";
 
 /**
  * Format token counts to compact display (e.g. 1.2k, 45k, 1.3M)
@@ -247,6 +249,11 @@ export class DashboardFooter implements Component {
       lines.push(raisedMeta);
     }
 
+    const memoryAuditLine = this.buildMemoryAuditLine(width);
+    if (memoryAuditLine) {
+      lines.push(memoryAuditLine);
+    }
+
     // Separator — thin rule matching section header style
     if (lines.length > 0) {
       const rule = "╶" + "─".repeat(Math.min(width - 2, 58)) + "╴";
@@ -295,6 +302,11 @@ export class DashboardFooter implements Component {
     const raisedMeta = this.buildRaisedMetaLine(width);
     if (raisedMeta) {
       merged.push(raisedMeta);
+    }
+
+    const memoryAuditLine = this.buildMemoryAuditLine(width);
+    if (memoryAuditLine) {
+      merged.push(memoryAuditLine);
     }
 
     // Separator — thin rule matching section header style
@@ -467,6 +479,12 @@ export class DashboardFooter implements Component {
     return truncateToWidth(theme.fg("dim", "Context ") + gauge, width, "…");
   }
 
+  private buildMemoryAuditLine(width: number): string {
+    const theme = this.theme;
+    const summary = formatMemoryAuditSummary(sharedState.lastMemoryInjection, { wide: width >= 140 });
+    return truncateToWidth(theme.fg("dim", summary), width, "…");
+  }
+
   // ── Context Gauge (from status-bar) ───────────────────────────
 
   private buildContextGauge(barWidth: number): string {
@@ -475,37 +493,37 @@ export class DashboardFooter implements Component {
     if (!ctx) return "";
 
     const usage = ctx.getContextUsage();
-    const pct = usage?.percent ?? 0;
     const contextWindow = usage?.contextWindow ?? 0;
+    const model = buildContextGaugeModel({
+      percent: usage?.percent,
+      contextWindow,
+      memoryTokenEstimate: sharedState.memoryTokenEstimate,
+      turns: this.dashState.turns,
+    }, barWidth);
 
-    // Calculate memory's share
-    const memTokens = sharedState.memoryTokenEstimate;
-    const memPct = contextWindow > 0 ? (memTokens / contextWindow) * 100 : 0;
-    const convPct = Math.max(0, pct - memPct);
+    if (model.state === "unknown") {
+      const unknownBar = theme.fg("dim", "?".repeat(barWidth));
+      const windowStr = contextWindow > 0 ? theme.fg("dim", `/${formatTokens(contextWindow)}`) : "";
+      return `${theme.fg("dim", `T${model.turns}`)} ${unknownBar} ${theme.fg("dim", "?")}${windowStr}`;
+    }
 
-    // Convert to block counts (ceil ensures tiny values don't round to 0,
-    // but the floor on totalFilled prevents overcount)
-    const memBlocks = memPct > 0 ? Math.ceil((memPct / 100) * barWidth) : 0;
-    const convBlocks = convPct > 0 ? Math.ceil((convPct / 100) * barWidth) : 0;
-    const totalFilled = Math.min(memBlocks + convBlocks, barWidth);
-    const freeBlocks = barWidth - totalFilled;
+    const percent = model.percent ?? 0;
 
-    // Severity color
-    const convColor: ThemeColor = pct > 70 ? "error" : pct > 45 ? "warning" : "muted";
+    // Severity color for non-memory context pressure
+    const otherColor: ThemeColor = percent > 70 ? "error" : percent > 45 ? "warning" : "muted";
 
     let bar = "";
-    if (memBlocks > 0) bar += theme.fg("accent", "▓".repeat(memBlocks));
-    if (convBlocks > 0) bar += theme.fg(convColor, "█".repeat(convBlocks));
-    if (freeBlocks > 0) bar += theme.fg("dim", "░".repeat(freeBlocks));
+    if (model.memoryBlocks > 0) bar += theme.fg("accent", "▓".repeat(model.memoryBlocks));
+    if (model.otherBlocks > 0) bar += theme.fg(otherColor, "█".repeat(model.otherBlocks));
+    if (model.freeBlocks > 0) bar += theme.fg("dim", "░".repeat(model.freeBlocks));
 
-    const turns = this.dashState.turns;
-    const pctStr = `${Math.round(pct)}%`;
-    const pctColored = pct > 70 ? theme.fg("error", pctStr)
-      : pct > 45 ? theme.fg("warning", pctStr)
+    const pctStr = `${Math.round(percent)}%`;
+    const pctColored = percent > 70 ? theme.fg("error", pctStr)
+      : percent > 45 ? theme.fg("warning", pctStr)
       : theme.fg("dim", pctStr);
     const windowStr = contextWindow > 0 ? theme.fg("dim", `/${formatTokens(contextWindow)}`) : "";
 
-    return `${theme.fg("dim", `T${turns}`)} ${bar} ${pctColored}${windowStr}`;
+    return `${theme.fg("dim", `T${model.turns}`)} ${bar} ${pctColored}${windowStr}`;
   }
 
   // ── Original Footer Data ──────────────────────────────────────

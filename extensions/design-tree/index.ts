@@ -24,6 +24,7 @@ import { Text } from "@mariozechner/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
+import { shouldRefreshDesignTreeForPath } from "../dashboard/file-watch.ts";
 
 import { emitDesignTreeState } from "./dashboard-state.ts";
 
@@ -60,6 +61,8 @@ import {
 export default function designTreeExtension(pi: ExtensionAPI): void {
 	let tree: DesignTree = { nodes: new Map(), docsDir: "" };
 	let focusedNode: string | null = null;
+	let docsWatcher: fs.FSWatcher | null = null;
+	let docsRefreshTimer: NodeJS.Timeout | null = null;
 
 	function reload(cwd: string): void {
 		const docsDir = path.join(cwd, "docs");
@@ -68,6 +71,41 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 
 	function docsDir(cwd: string): string {
 		return path.join(cwd, "docs");
+	}
+
+	function emitCurrentState(): void {
+		if (tree.nodes.size === 0) return;
+		emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+	}
+
+	function scheduleDocsRefresh(filePath?: string): void {
+		if (filePath && !shouldRefreshDesignTreeForPath(filePath, tree.docsDir || docsDir(process.cwd()))) {
+			return;
+		}
+		if (docsRefreshTimer) clearTimeout(docsRefreshTimer);
+		docsRefreshTimer = setTimeout(() => {
+			docsRefreshTimer = null;
+			if (!tree.docsDir) return;
+			tree = scanDesignDocs(tree.docsDir);
+			emitCurrentState();
+		}, 75);
+	}
+
+	function startDocsWatcher(cwd: string): void {
+		const dir = docsDir(cwd);
+		if (!fs.existsSync(dir)) return;
+		docsWatcher?.close();
+		docsWatcher = null;
+		try {
+			docsWatcher = fs.watch(dir, { recursive: true }, (_eventType, filename) => {
+				const filePath = typeof filename === "string" && filename.length > 0
+					? path.join(dir, filename)
+					: undefined;
+				scheduleDocsRefresh(filePath);
+			});
+		} catch {
+			// Best effort only — unsupported platforms simply fall back to command/tool-driven emits.
+		}
 	}
 
 	// ─── Implement Logic (shared between tool and command) ───────────────
@@ -1267,9 +1305,8 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 			focusedNode = focusEntry.data.focusedNode;
 		}
 
-		if (tree.nodes.size > 0) {
-			emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
-		}
+		emitCurrentState();
+		startDocsWatcher(ctx.cwd);
 
 		// Auto-associate current branch on session start
 		tryAssociateBranch(ctx);

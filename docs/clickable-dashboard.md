@@ -1,9 +1,10 @@
 ---
 id: clickable-dashboard
 title: Clickable Dashboard Items — URI Routing Integration
-status: decided
+status: implemented
 tags: [dashboard, ux, uri, osc8, integration]
 open_questions: []
+openspec_change: clickable-dashboard-items
 ---
 
 # Clickable Dashboard Items — URI Routing Integration

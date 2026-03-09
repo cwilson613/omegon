@@ -24,6 +24,7 @@ import { StringEnum } from "../lib/typebox-helpers.ts";
 import { Text } from "@mariozechner/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { shouldRefreshOpenSpecForPath } from "../dashboard/file-watch.ts";
 
 import type { ChangeInfo } from "./types.ts";
 import {
@@ -52,11 +53,42 @@ import { emitDesignTreeState } from "../design-tree/dashboard-state.ts";
 // ─── Extension ───────────────────────────────────────────────────────────────
 
 export default function openspecExtension(pi: ExtensionAPI): void {
+	let openspecWatcher: fs.FSWatcher | null = null;
+	let openspecRefreshTimer: NodeJS.Timeout | null = null;
+
+	function scheduleOpenSpecRefresh(cwd: string, filePath?: string): void {
+		if (filePath && !shouldRefreshOpenSpecForPath(filePath, cwd)) {
+			return;
+		}
+		if (openspecRefreshTimer) clearTimeout(openspecRefreshTimer);
+		openspecRefreshTimer = setTimeout(() => {
+			openspecRefreshTimer = null;
+			emitOpenSpecState(cwd, pi);
+		}, 75);
+	}
+
+	function startOpenSpecWatcher(cwd: string): void {
+		const dir = path.join(cwd, "openspec");
+		if (!fs.existsSync(dir)) return;
+		openspecWatcher?.close();
+		openspecWatcher = null;
+		try {
+			openspecWatcher = fs.watch(dir, { recursive: true }, (_eventType, filename) => {
+				const filePath = typeof filename === "string" && filename.length > 0
+					? path.join(dir, filename)
+					: undefined;
+				scheduleOpenSpecRefresh(cwd, filePath);
+			});
+		} catch {
+			// Best effort only — unsupported platforms fall back to command/tool-driven emits.
+		}
+	}
 
 	// ─── Dashboard: emit on session start so dashboard has data immediately ───
 
 	pi.on("session_start", async (_event, ctx) => {
 		emitOpenSpecState(ctx.cwd, pi);
+		startOpenSpecWatcher(ctx.cwd);
 	});
 
 	// ─── Helpers ─────────────────────────────────────────────────────
