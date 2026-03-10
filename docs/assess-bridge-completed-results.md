@@ -1,7 +1,7 @@
 ---
 id: assess-bridge-completed-results
 title: Assess bridge returns completed structured results
-status: implementing
+status: implemented
 parent: lifecycle-hygiene-verification-substates
 tags: [cleave, assess, openspec, lifecycle, bridge]
 open_questions: []
@@ -47,3 +47,6 @@ Close the contract gap where bridged `/assess spec` returns only a kickoff banne
 - Bridged `/assess spec` must not claim a completed lifecycle outcome until the review logic has actually finished.
 - Interactive `/assess` can remain follow-up driven, but tool/agent invocation must return the completed structured envelope in the initial result.
 - `result.args` must continue to preserve the full original tokenized invocation.
+- Bridged vs interactive /assess behavior depends on isInteractiveAssessContext(): only contexts with bridgeInvocation !== true, hasUI === true, and waitForIdle() are treated as follow-up-driven interactive flows (extensions/cleave/index.ts:319).
+- Bridged spec assessment completion currently depends on a child `pi --mode json --plan -p --no-session` subprocess returning parseable JSON within 120 seconds; invalid JSON or timeout fails the assessment run instead of producing a partial result (extensions/cleave/index.ts:419-539).
+- The bridged spec-assessment contract is strict about shape: normalizeSpecAssessment() rejects results unless both summary.total and scenarios.length exactly match the expected OpenSpec scenario count (extensions/cleave/index.ts:333-352).

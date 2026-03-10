@@ -12,8 +12,14 @@ export function buildAssessBridgeResult(
 		data: {
 			subcommand: result.subcommand,
 			data: result.data,
+			completion: result.completion,
 			lifecycleHint: result.lifecycle,
 			assessEffects: result.effects,
+			bridge: {
+				completionSemantics: result.completion?.completedInBand ? "synchronous" : "follow-up-driven",
+				completionState: result.completion?.completed ? "completed" : "pending",
+				originalArgs: [...bridgedArgs],
+			},
 		},
 		lifecycle: result.lifecycleRecord,
 		effects: {

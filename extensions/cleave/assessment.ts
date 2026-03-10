@@ -47,6 +47,29 @@ export interface AssessLifecycleRecord {
 	reconciliation: AssessReconciliationHints;
 }
 
+export interface AssessCompletion {
+	completed: boolean;
+	completedInBand: boolean;
+	requiresFollowUp: boolean;
+	outcome?: AssessLifecycleOutcome;
+}
+
+export interface AssessSpecScenarioResult {
+	domain: string;
+	requirement: string;
+	scenario: string;
+	status: "PASS" | "FAIL" | "UNCLEAR";
+	evidence: string[];
+	notes?: string;
+}
+
+export interface AssessSpecSummary {
+	total: number;
+	pass: number;
+	fail: number;
+	unclear: number;
+}
+
 export interface AssessStructuredResult<TData = unknown> {
 	command: "assess";
 	subcommand: AssessStructuredSubcommand;
@@ -57,6 +80,7 @@ export interface AssessStructuredResult<TData = unknown> {
 	data: TData;
 	effects: AssessEffect[];
 	nextSteps: string[];
+	completion?: AssessCompletion;
 	lifecycle?: AssessLifecycleHint;
 	lifecycleRecord?: AssessLifecycleRecord;
 }

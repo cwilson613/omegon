@@ -14,9 +14,10 @@
  * The Claude Code SDK calls are replaced with pi's extension API.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { truncateTail, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 
 import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
@@ -27,10 +28,13 @@ import { buildAssessBridgeResult } from "./bridge.ts";
 import {
 	assessDirective,
 	PATTERNS,
+	type AssessCompletion,
 	type AssessEffect,
 	type AssessLifecycleHint,
 	type AssessLifecycleOutcome,
 	type AssessLifecycleRecord,
+	type AssessSpecScenarioResult,
+	type AssessSpecSummary,
 	type AssessStructuredResult,
 } from "./assessment.ts";
 import { detectConflicts, parseTaskResult } from "./conflicts.ts";
@@ -186,6 +190,10 @@ function formatSpecVerification(ctx: OpenSpecContext): string {
 
 interface AssessExecutionContext {
 	cwd: string;
+	bridgeInvocation?: boolean;
+	hasUI?: boolean;
+	model?: { id?: string };
+	waitForIdle?: (() => Promise<void>) | undefined;
 }
 
 interface AssessDiffContext {
@@ -204,6 +212,7 @@ function makeAssessResult<TData>(input: {
 	data: TData;
 	effects?: AssessEffect[];
 	nextSteps?: string[];
+	completion?: AssessCompletion;
 	lifecycle?: AssessLifecycleHint;
 	lifecycleRecord?: AssessLifecycleRecord;
 }): AssessStructuredResult<TData> {
@@ -217,6 +226,7 @@ function makeAssessResult<TData>(input: {
 		data: input.data,
 		effects: input.effects ?? [],
 		nextSteps: input.nextSteps ?? [],
+		completion: input.completion,
 		lifecycle: input.lifecycle,
 		lifecycleRecord: input.lifecycleRecord,
 	};
@@ -259,9 +269,10 @@ async function buildLifecycleRecord(
 		recommendedAction: string | null;
 		changedFiles?: string[];
 		constraints?: string[];
+		snapshot?: { gitHead: string | null; fingerprint: string };
 	},
 ): Promise<AssessLifecycleRecord> {
-	const snapshot = await collectAssessmentSnapshot(pi, cwd);
+	const snapshot = options.snapshot ?? await collectAssessmentSnapshot(pi, cwd);
 	return {
 		changeName: options.changeName,
 		assessmentKind: options.assessmentKind,
@@ -275,6 +286,266 @@ async function buildLifecycleRecord(
 			recommendedAction: options.recommendedAction,
 		},
 	};
+}
+
+interface AssessSpecAgentResult {
+	summary: AssessSpecSummary;
+	scenarios: AssessSpecScenarioResult[];
+	changedFiles?: string[];
+	constraints?: string[];
+	overallNotes?: string;
+}
+
+interface SpecAssessmentRunnerInput {
+	repoPath: string;
+	changeName: string;
+	scenarioText: string;
+	designContext: string[];
+	apiContractContext: string[];
+	diffContent: string;
+	expectedScenarioCount: number;
+	modelId?: string;
+}
+
+interface SpecAssessmentRunnerOutput {
+	assessed: AssessSpecAgentResult;
+	snapshot?: { gitHead: string | null; fingerprint: string };
+}
+
+interface AssessExecutorOverrides {
+	runSpecAssessment?: (input: SpecAssessmentRunnerInput) => Promise<SpecAssessmentRunnerOutput>;
+}
+
+function isInteractiveAssessContext(ctx: AssessExecutionContext): ctx is AssessExecutionContext & ExtensionCommandContext {
+	return ctx.bridgeInvocation !== true && ctx.hasUI === true && typeof ctx.waitForIdle === "function";
+}
+
+function countSpecScenarios(specCtx: OpenSpecContext): number {
+	return specCtx.specScenarios.reduce((total, scenarioSet) => total + scenarioSet.scenarios.length, 0);
+}
+
+function determineSpecOutcome(summary: AssessSpecSummary): AssessLifecycleOutcome {
+	if (summary.fail > 0) return "reopen";
+	if (summary.unclear > 0) return "ambiguous";
+	return "pass";
+}
+
+function normalizeSpecAssessment(payload: AssessSpecAgentResult, expectedTotal: number): AssessSpecAgentResult {
+	const scenarios = payload.scenarios.map((scenario) => ({
+		...scenario,
+		evidence: [...new Set((scenario.evidence ?? []).map((entry) => entry.trim()).filter(Boolean))],
+		notes: scenario.notes?.trim() || undefined,
+	}));
+	const summary: AssessSpecSummary = {
+		total: payload.summary.total,
+		pass: payload.summary.pass,
+		fail: payload.summary.fail,
+		unclear: payload.summary.unclear,
+	};
+	if (summary.total !== expectedTotal || scenarios.length !== expectedTotal) {
+		throw new Error(`Assessment returned ${scenarios.length}/${expectedTotal} scenarios.`);
+	}
+	return {
+		summary,
+		scenarios,
+		changedFiles: [...new Set((payload.changedFiles ?? []).map((entry) => entry.trim()).filter(Boolean))],
+		constraints: [...new Set((payload.constraints ?? []).map((entry) => entry.trim()).filter(Boolean))],
+		overallNotes: payload.overallNotes?.trim() || undefined,
+	};
+}
+
+function extractJsonObject(text: string): string | null {
+	const fenced = text.match(/```json\s*([\s\S]*?)```/i);
+	if (fenced?.[1]) return fenced[1].trim();
+	const firstBrace = text.indexOf("{");
+	const lastBrace = text.lastIndexOf("}");
+	if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return null;
+	return text.slice(firstBrace, lastBrace + 1).trim();
+}
+
+function extractAssistantText(content: unknown): string {
+	if (typeof content === "string") return content.trim();
+	if (!Array.isArray(content)) return "";
+	return content
+		.map((item) => {
+			if (typeof item === "string") return item;
+			if (!item || typeof item !== "object") return "";
+			return typeof (item as { text?: unknown }).text === "string"
+				? (item as { text: string }).text
+				: "";
+		})
+		.join("\n")
+		.trim();
+}
+
+function formatSpecOutcomeLabel(outcome: AssessLifecycleOutcome): string {
+	switch (outcome) {
+		case "pass":
+			return "PASS";
+		case "reopen":
+			return "REOPEN";
+		case "ambiguous":
+			return "AMBIGUOUS";
+	}
+}
+
+function buildSpecAssessmentHumanText(changeName: string, assessed: AssessSpecAgentResult, outcome: AssessLifecycleOutcome): string {
+	const lines = [
+		`**Spec Assessment Complete: \`${changeName}\`**`,
+		"",
+		`Outcome: **${formatSpecOutcomeLabel(outcome)}**`,
+		`Scenarios: ${assessed.summary.pass}/${assessed.summary.total} pass` +
+			(assessed.summary.fail > 0 ? `, ${assessed.summary.fail} fail` : "") +
+			(assessed.summary.unclear > 0 ? `, ${assessed.summary.unclear} unclear` : ""),
+	];
+
+	for (const scenario of assessed.scenarios) {
+		lines.push(
+			"",
+			`- [${scenario.status}] ${scenario.domain} → ${scenario.requirement}`,
+			`  ${scenario.scenario.replace(/\n/g, " ")}`,
+			...scenario.evidence.map((entry) => `  Evidence: ${entry}`),
+			...(scenario.notes ? [`  Notes: ${scenario.notes}`] : []),
+		);
+	}
+
+	if (assessed.overallNotes) {
+		lines.push("", `Overall notes: ${assessed.overallNotes}`);
+	}
+
+	return lines.join("\n");
+}
+
+async function runSpecAssessmentSubprocess(
+	input: SpecAssessmentRunnerInput,
+): Promise<SpecAssessmentRunnerOutput> {
+	const prompt = [
+		"You are performing a read-only OpenSpec compliance assessment.",
+		"Operate in read-only plan mode. Never call edit, write, or any workspace-mutating command.",
+		"Inspect the repository and determine whether the implementation satisfies every OpenSpec scenario below.",
+		"Return ONLY a JSON object with this exact shape:",
+		"{",
+		'  "summary": { "total": number, "pass": number, "fail": number, "unclear": number },',
+		'  "scenarios": [',
+		'    { "domain": string, "requirement": string, "scenario": string, "status": "PASS"|"FAIL"|"UNCLEAR", "evidence": string[], "notes"?: string }',
+		"  ],",
+		'  "changedFiles": string[],',
+		'  "constraints": string[],',
+		'  "overallNotes"?: string',
+		"}",
+		"Rules:",
+		`- Emit exactly ${input.expectedScenarioCount} scenario entries.`,
+		"- Use FAIL when the code clearly contradicts or omits the scenario.",
+		"- Use UNCLEAR only when code inspection cannot safely prove PASS or FAIL.",
+		"- Evidence must cite concrete files, symbols, or line references when possible.",
+		"- changedFiles should list files that would need modification if the result reopens work.",
+		"- constraints should list newly discovered implementation constraints.",
+		"- Do not wrap the JSON in explanatory prose.",
+		"",
+		`Change: ${input.changeName}`,
+		"",
+		"## Acceptance Criteria",
+		"",
+		input.scenarioText,
+		"",
+		...input.designContext,
+		...input.apiContractContext,
+		...(input.diffContent ? ["### Recent Changes", "", "```diff", input.diffContent, "```", ""] : []),
+	].join("\n");
+
+	const args = ["--mode", "json", "--plan", "-p", "--no-session"];
+	if (input.modelId) args.push("--model", input.modelId);
+
+	return await new Promise<SpecAssessmentRunnerOutput>((resolve, reject) => {
+		const proc = spawn("pi", args, {
+			cwd: input.repoPath,
+			shell: false,
+			stdio: ["pipe", "pipe", "pipe"],
+			env: {
+				...process.env,
+				PI_CHILD: "1",
+				TERM: process.env.TERM ?? "dumb",
+			},
+		});
+		let stdout = "";
+		let stderr = "";
+		let buffer = "";
+		let assistantText = "";
+		let settled = false;
+		const settleReject = (error: Error) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			reject(error);
+		};
+		const settleResolve = (value: SpecAssessmentRunnerOutput) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolve(value);
+		};
+		const timer = setTimeout(() => {
+			proc.kill("SIGTERM");
+			setTimeout(() => {
+				if (!proc.killed) proc.kill("SIGKILL");
+			}, 5_000);
+			settleReject(new Error(`Timed out after 120s while assessing ${input.changeName}.`));
+		}, 120_000);
+
+		const processLine = (line: string) => {
+			if (!line.trim()) return;
+			stdout += line + "\n";
+			let event: unknown;
+			try {
+				event = JSON.parse(line);
+			} catch {
+				return;
+			}
+			if (!event || typeof event !== "object") return;
+			const typed = event as { type?: string; message?: { role?: string; content?: unknown } };
+			if (typed.type === "message_end" && typed.message?.role === "assistant") {
+				assistantText = extractAssistantText(typed.message.content);
+			}
+		};
+
+		proc.stdout.on("data", (data) => {
+			buffer += data.toString();
+			const lines = buffer.split("\n");
+			buffer = lines.pop() || "";
+			for (const line of lines) processLine(line);
+		});
+		proc.stderr.on("data", (data) => {
+			stderr += data.toString();
+		});
+		proc.on("error", (error) => {
+			settleReject(error);
+		});
+		proc.on("close", (code) => {
+			if (buffer.trim()) processLine(buffer.trim());
+			if ((code ?? 1) !== 0) {
+				settleReject(new Error(stderr.trim() || `Assessment subprocess exited with code ${code ?? 1}.`));
+				return;
+			}
+			const sourceText = assistantText || stdout;
+			const jsonText = extractJsonObject(sourceText);
+			if (!jsonText) {
+				settleReject(new Error(`Assessment subprocess did not return parseable JSON.\n${stderr || stdout}`));
+				return;
+			}
+			try {
+				const parsed = JSON.parse(jsonText) as AssessSpecAgentResult;
+				settleResolve({
+					assessed: normalizeSpecAssessment(parsed, input.expectedScenarioCount),
+				});
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				settleReject(new Error(`Assessment JSON was invalid: ${message}`));
+			}
+		});
+
+		proc.stdin.write(prompt);
+		proc.stdin.end();
+	});
 }
 
 function applyAssessEffects(pi: ExtensionAPI, result: AssessStructuredResult): void {
@@ -570,6 +841,7 @@ async function executeAssessSpec(
 	pi: ExtensionAPI,
 	ctx: AssessExecutionContext,
 	args: string,
+	overrides?: AssessExecutorOverrides,
 ): Promise<AssessStructuredResult> {
 	const repoPath = ctx.cwd;
 	const openspecDir = detectOpenSpec(repoPath);
@@ -685,16 +957,11 @@ async function executeAssessSpec(
 		assessmentKind: "spec",
 		outcomes: ["pass", "reopen", "ambiguous"],
 	};
-	const lifecycleRecord = await buildLifecycleRecord(pi, ctx.cwd, {
-		changeName: target.name,
-		assessmentKind: "spec",
-		outcome: "ambiguous",
-		recommendedAction: `Run openspec_manage reconcile_after_assess ${target.name} with outcome pass, reopen, or ambiguous after scenario evaluation completes.`,
-	});
-	const humanText = [
+	const totalScenarioCount = countSpecScenarios(specCtx);
+	const introText = [
 		`**Spec Assessment: \`${target.name}\`**`,
 		"",
-		`Evaluating implementation against ${specCtx.specScenarios.length} spec scenarios`
+		`Evaluating implementation against ${totalScenarioCount} spec scenarios`
 			+ (specCtx.decisions.length > 0 ? ` and ${specCtx.decisions.length} design decisions` : "")
 			+ (specCtx.apiContract ? " and API contract (`api.yaml`)" : "")
 			+ "...",
@@ -726,25 +993,89 @@ async function executeAssessSpec(
 		`6. After the assessment, if the result reopens work or reveals new constraints/file-scope drift, call \`openspec_manage\` with action \`reconcile_after_assess\`, change_name \`${target.name}\`, assessment_kind \`spec\`, and outcome \`reopen\` or \`ambiguous\` as appropriate. If all scenarios pass cleanly, call it with outcome \`pass\` to refresh lifecycle state.`,
 		...(diffContent ? ["", "### Recent Changes (for context)", "", "```diff", diffContent, "```"] : []),
 	].join("\n");
+
+	if (isInteractiveAssessContext(ctx)) {
+		const lifecycleRecord = await buildLifecycleRecord(pi, ctx.cwd, {
+			changeName: target.name,
+			assessmentKind: "spec",
+			outcome: "ambiguous",
+			recommendedAction: `Run openspec_manage reconcile_after_assess ${target.name} with outcome pass, reopen, or ambiguous after scenario evaluation completes.`,
+		});
+		return makeAssessResult({
+			subcommand: "spec",
+			args,
+			ok: true,
+			summary: `Prepared spec assessment for ${target.name}`,
+			humanText: introText,
+			data: {
+				changeName: target.name,
+				scenarioCount: totalScenarioCount,
+				decisionCount: specCtx.decisions.length,
+				hasApiContract: Boolean(specCtx.apiContract),
+				snapshot: lifecycleRecord.snapshot,
+			},
+			effects: [
+				{ type: "view", content: introText },
+				{ type: "follow_up", content: prompt },
+				{ type: "reconcile_hint" as const, ...lifecycle },
+			],
+			nextSteps: ["Assess each scenario", "Reconcile lifecycle state based on the assessment outcome"],
+			completion: { completed: false, completedInBand: false, requiresFollowUp: true },
+			lifecycle,
+			lifecycleRecord,
+		});
+	}
+
+	const runSpecAssessment = overrides?.runSpecAssessment ?? runSpecAssessmentSubprocess;
+	const completed = await runSpecAssessment({
+		repoPath,
+		changeName: target.name,
+		scenarioText,
+		designContext,
+		apiContractContext,
+		diffContent,
+		expectedScenarioCount: totalScenarioCount,
+		modelId: ctx.model?.id,
+	});
+	const assessed = normalizeSpecAssessment(completed.assessed, totalScenarioCount);
+	const outcome = determineSpecOutcome(assessed.summary);
+	const snapshot = completed.snapshot ?? await collectAssessmentSnapshot(pi, ctx.cwd);
+	const recommendedAction = `Call openspec_manage reconcile_after_assess for ${target.name} with assessment_kind spec and outcome ${outcome}.`;
+	const lifecycleRecord = await buildLifecycleRecord(pi, ctx.cwd, {
+		changeName: target.name,
+		assessmentKind: "spec",
+		outcome,
+		recommendedAction,
+		changedFiles: assessed.changedFiles,
+		constraints: assessed.constraints,
+		snapshot,
+	});
+	const humanText = buildSpecAssessmentHumanText(target.name, assessed, outcome);
+	const summary = `Completed spec assessment for ${target.name}: ${assessed.summary.pass}/${assessed.summary.total} pass, ${assessed.summary.fail} fail, ${assessed.summary.unclear} unclear`;
+	const nextSteps = [
+		`Call openspec_manage reconcile_after_assess for ${target.name} with outcome ${outcome}`,
+		...(outcome === "pass" ? [`If archive gates clear, run /opsx:archive ${target.name}`] : ["Address findings before archive"]),
+	];
 	return makeAssessResult({
 		subcommand: "spec",
 		args,
 		ok: true,
-		summary: `Prepared spec assessment for ${target.name}`,
+		summary,
 		humanText,
 		data: {
 			changeName: target.name,
-			scenarioCount: specCtx.specScenarios.length,
-			decisionCount: specCtx.decisions.length,
-			hasApiContract: Boolean(specCtx.apiContract),
-			snapshot: lifecycleRecord.snapshot,
+			outcome,
+			scenarioSummary: assessed.summary,
+			scenarios: assessed.scenarios,
+			changedFiles: assessed.changedFiles ?? [],
+			constraints: assessed.constraints ?? [],
+			overallNotes: assessed.overallNotes ?? null,
+			snapshot,
+			recommendedReconcileOutcome: outcome,
 		},
-		effects: [
-			{ type: "view", content: humanText },
-			{ type: "follow_up", content: prompt },
-			{ type: "reconcile_hint" as const, ...lifecycle },
-		],
-		nextSteps: ["Assess each scenario", "Reconcile lifecycle state based on the assessment outcome"],
+		effects: [{ type: "reconcile_hint" as const, ...lifecycle }],
+		nextSteps,
+		completion: { completed: true, completedInBand: true, requiresFollowUp: false, outcome },
 		lifecycle,
 		lifecycleRecord,
 	});
@@ -787,11 +1118,11 @@ async function executeAssessComplexity(args: string): Promise<AssessStructuredRe
 	});
 }
 
-export function createAssessStructuredExecutors(pi: ExtensionAPI) {
+export function createAssessStructuredExecutors(pi: ExtensionAPI, overrides?: AssessExecutorOverrides) {
 	return {
 		cleave: (args: string, ctx: AssessExecutionContext) => executeAssessCleave(pi, ctx, args),
 		diff: (args: string, ctx: AssessExecutionContext) => executeAssessDiff(pi, ctx, args),
-		spec: (args: string, ctx: AssessExecutionContext) => executeAssessSpec(pi, ctx, args),
+		spec: (args: string, ctx: AssessExecutionContext) => executeAssessSpec(pi, ctx, args, overrides),
 		complexity: (args: string) => executeAssessComplexity(args),
 	} as const;
 }
@@ -941,13 +1272,22 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			const parts = trimmed.split(/\s+/);
 			const sub = parts[0] || "";
 			const rest = parts.slice(1).join(" ");
+			const assessCtx: AssessExecutionContext = {
+				cwd: ctx.cwd,
+				bridgeInvocation: (ctx as { bridgeInvocation?: boolean }).bridgeInvocation,
+				hasUI: ctx.hasUI,
+				model: ctx.model ? { id: ctx.model.id } : undefined,
+				waitForIdle: "waitForIdle" in ctx && typeof ctx.waitForIdle === "function"
+					? ctx.waitForIdle.bind(ctx)
+					: undefined,
+			};
 			switch (sub) {
 				case "cleave":
-					return toBridgeAssessResult(parts, await assessExecutors.cleave(rest, { cwd: ctx.cwd }));
+					return toBridgeAssessResult(parts, await assessExecutors.cleave(rest, assessCtx));
 				case "diff":
-					return toBridgeAssessResult(parts, await assessExecutors.diff(rest, { cwd: ctx.cwd }));
+					return toBridgeAssessResult(parts, await assessExecutors.diff(rest, assessCtx));
 				case "spec":
-					return toBridgeAssessResult(parts, await assessExecutors.spec(rest, { cwd: ctx.cwd }));
+					return toBridgeAssessResult(parts, await assessExecutors.spec(rest, assessCtx));
 				case "complexity":
 					return toBridgeAssessResult(parts, await assessExecutors.complexity(rest));
 				default:
@@ -999,6 +1339,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 				data: (result.data as any)?.data,
 				effects: (result.data as any)?.assessEffects ?? [],
 				nextSteps: (result.nextSteps ?? []).map((step) => step.label),
+				completion: (result.data as any)?.completion,
 				lifecycle: (result.data as any)?.lifecycleHint,
 				lifecycleRecord: result.lifecycle as AssessLifecycleRecord | undefined,
 			};
@@ -1016,6 +1357,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 				data: (result.data as any)?.data,
 				effects: (result.data as any)?.assessEffects ?? [],
 				nextSteps: (result.nextSteps ?? []).map((step) => step.label),
+				completion: (result.data as any)?.completion,
 				lifecycle: (result.data as any)?.lifecycleHint,
 				lifecycleRecord: result.lifecycle as AssessLifecycleRecord | undefined,
 			};

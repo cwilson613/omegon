@@ -1,7 +1,7 @@
 ---
 id: lifecycle-hygiene-verification-substates
 title: Lifecycle hygiene — verification substates and binding normalization
-status: implementing
+status: implemented
 parent: openspec-assess-lifecycle-integration
 tags: [openspec, design-tree, lifecycle, verification, status]
 open_questions: []

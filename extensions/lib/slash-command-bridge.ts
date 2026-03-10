@@ -45,9 +45,16 @@ export interface SlashCommandBridgeResult<TData = unknown, TLifecycle = unknown>
   confirmationRequired?: boolean;
 }
 
-export type SlashCommandExecutionContext = ExtensionContext | ExtensionCommandContext;
+export type SlashCommandExecutionContext = (ExtensionContext | ExtensionCommandContext) & {
+  bridgeInvocation?: boolean;
+};
 
 export interface SlashCommandStructuredExecutor<TData = unknown, TLifecycle = unknown> {
+  /**
+   * Structured executors should return the authoritative result for the bridged operation.
+   * If a command intentionally prepares later follow-up work instead of finishing in-band,
+   * the returned data should say so explicitly rather than implying completion.
+   */
   (args: string, ctx: SlashCommandExecutionContext): Promise<SlashCommandBridgeResult<TData, TLifecycle>>;
 }
 
@@ -163,7 +170,10 @@ export class SlashCommandBridge {
       );
     }
 
-    const result = await command.structuredExecutor(toArgString(request.args), ctx);
+    const result = await command.structuredExecutor(toArgString(request.args), {
+      ...ctx,
+      bridgeInvocation: true,
+    });
     return {
       ...result,
       command: result.command || command.name,
@@ -184,10 +194,14 @@ export class SlashCommandBridge {
       promptSnippet: "Execute an allowlisted slash command and return its structured result envelope.",
       parameters: EXECUTE_PARAMS,
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-        const result = await bridge.execute(params, ctx);
+        const bridgedCtx = {
+          ...ctx,
+          bridgeInvocation: true,
+        };
+        const result = await bridge.execute(params, bridgedCtx);
         const command = bridge.get(params.command);
         if (command?.agentHandler) {
-          await command.agentHandler(result, toArgString(params.args), ctx);
+          await command.agentHandler(result, toArgString(params.args), bridgedCtx);
         }
         return {
           content: [{ type: "text", text: result.humanText || result.summary || summarize(result.command, result.args) }],
