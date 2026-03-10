@@ -80,7 +80,9 @@ const EXECUTE_PARAMS = Type.Object({
 export type SlashCommandBridgeExecuteParams = Static<typeof EXECUTE_PARAMS>;
 
 function toArgString(args: readonly string[] | undefined): string {
-  return (args ?? []).join(" ").trim();
+  // Use JSON encoding to preserve argument boundaries for parsing
+  // This allows arguments with spaces to be reconstructed properly
+  return JSON.stringify(args ?? []);
 }
 
 function summarize(command: string, args: readonly string[] | undefined): string {
@@ -218,6 +220,20 @@ export class SlashCommandBridge {
 
 export function createSlashCommandBridge(): SlashCommandBridge {
   return new SlashCommandBridge();
+}
+
+const SHARED_BRIDGE_SYMBOL = Symbol.for("pi-kit-shared-slash-command-bridge");
+
+/**
+ * Get the shared SlashCommandBridge instance across all extensions.
+ * Creates one if it doesn't exist yet.
+ */
+export function getSharedBridge(): SlashCommandBridge {
+  const global = globalThis as any;
+  if (!global[SHARED_BRIDGE_SYMBOL]) {
+    global[SHARED_BRIDGE_SYMBOL] = new SlashCommandBridge();
+  }
+  return global[SHARED_BRIDGE_SYMBOL] as SlashCommandBridge;
 }
 
 export function buildSlashCommandResult<TData = unknown, TLifecycle = unknown>(

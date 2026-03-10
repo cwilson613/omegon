@@ -24,6 +24,7 @@ import { StringEnum } from "../lib/typebox-helpers.ts";
 import { Text } from "@mariozechner/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { getSharedBridge, buildSlashCommandResult, type BridgedSlashCommand, type SlashCommandExecutionContext } from "../lib/slash-command-bridge.ts";
 import { shouldRefreshOpenSpecForPath } from "../dashboard/file-watch.ts";
 
 import type { ChangeInfo } from "./types.ts";
@@ -848,124 +849,507 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 		},
 	});
 
-	// ─── Commands ────────────────────────────────────────────────────
+	// ─── Bridged Commands ────────────────────────────────────────────────────
 
-	pi.registerCommand("opsx:propose", {
+	const bridge = getSharedBridge();
+
+	bridge.register(pi, {
+		name: "opsx:propose",
 		description: "Create a new OpenSpec change: /opsx:propose <name> <title>",
-		handler: async (args, ctx) => {
-			const parts = (args || "").trim().split(/\s+/);
-			const name = parts[0];
-			const title = parts.slice(1).join(" ");
+		bridge: {
+			agentCallable: true,
+			sideEffectClass: "workspace-write",
+		},
+		structuredExecutor: async (args: string, ctx: SlashCommandExecutionContext) => {
+			const trimmedArgs = (args || "").trim();
+			
+			if (ctx.bridgeInvocation) {
+				// When called via bridge, args are JSON-encoded to preserve boundaries
+				let parsedArgs: string[];
+				try {
+					parsedArgs = JSON.parse(trimmedArgs);
+				} catch (e) {
+					return buildSlashCommandResult("opsx:propose", [], {
+						ok: false,
+						summary: "Bridge argument parsing error",
+						humanText: "Error: Invalid argument format from bridge",
+						effects: { sideEffectClass: "workspace-write" },
+					});
+				}
+				
+				const [name, title, intent] = parsedArgs;
+				
+				if (!name) {
+					return buildSlashCommandResult("opsx:propose", parsedArgs, {
+						ok: false,
+						summary: "Usage: /opsx:propose <name> <title> <intent>",
+						humanText: "Error: name required for propose",
+						effects: { sideEffectClass: "workspace-write" },
+					});
+				}
+				
+				const finalTitle = title || name;
+				const finalIntent = intent || "";
+				
+				try {
+					const result = createChange(ctx.cwd, name, finalTitle, finalIntent);
+					emitOpenSpecState(ctx.cwd, pi);
+					
+					return buildSlashCommandResult("opsx:propose", [name, finalTitle, finalIntent], {
+						ok: true,
+						summary: `Created OpenSpec change: ${path.basename(result.changePath)}`,
+						humanText: `Created: ${result.changePath}\n\nNext: Add specs with \`/opsx:spec ${path.basename(result.changePath)}\` ` +
+							`or use \`openspec_manage\` with action \`generate_spec\``,
+						data: { changePath: result.changePath, files: result.files },
+						effects: {
+							sideEffectClass: "workspace-write",
+							filesChanged: result.files.map(f => path.join(result.changePath, f)),
+							lifecycleTouched: ["openspec"],
+						},
+						nextSteps: [
+							{ label: "Add specs", command: `/opsx:spec ${path.basename(result.changePath)}` },
+							{ label: "Generate specs", rationale: "Use openspec_manage with action generate_spec" },
+						],
+					});
+				} catch (e) {
+					return buildSlashCommandResult("opsx:propose", [name, finalTitle, finalIntent], {
+						ok: false,
+						summary: `Error: ${(e as Error).message}`,
+						humanText: `Error: ${(e as Error).message}`,
+						effects: { sideEffectClass: "workspace-write" },
+					});
+				}
+			} else {
+				// Interactive path - parse name and title, then prompt for intent if needed
+				const parts = trimmedArgs.split(/\s+/);
+				const name = parts[0];
+				const title = parts.slice(1).join(" ");
+				
+				if (!name) {
+					return buildSlashCommandResult("opsx:propose", [name, title].filter(Boolean), {
+						ok: false,
+						summary: "Usage: /opsx:propose <name> <title>",
+						humanText: "Error: name required for propose",
+						effects: { sideEffectClass: "workspace-write" },
+					});
+				}
+				
+				const finalTitle = title || name;
+				// Interactive prompting for intent will be handled in interactiveHandler
+				// For now, use empty string and let handler prompt if needed
+				const intent = "";
+				
+				try {
+					const result = createChange(ctx.cwd, name, finalTitle, intent);
+					emitOpenSpecState(ctx.cwd, pi);
 
-			if (!name) {
-				ctx.ui.notify("Usage: /opsx:propose <name> <title>", "warning");
-				return;
-			}
+					pi.sendMessage({
+						customType: "openspec-created",
+						content: `Created OpenSpec change \`${path.basename(result.changePath)}\`.\n\n` +
+							`Next step: Define specs with \`/opsx:spec ${path.basename(result.changePath)}\` ` +
+							`or use \`openspec_manage\` with action \`generate_spec\` to scaffold Given/When/Then scenarios.`,
+						display: true,
+					}, { triggerTurn: false });
 
-			const finalTitle = title || name;
-			const intent = await ctx.ui.input("Intent (what this change accomplishes):");
-			if (!intent) return;
-
-			try {
-				const result = createChange(ctx.cwd, name, finalTitle, intent);
-				ctx.ui.notify(`Created: ${result.changePath}`, "info");
-
-				pi.sendMessage({
-					customType: "openspec-created",
-					content: `Created OpenSpec change \`${path.basename(result.changePath)}\`.\n\n` +
-						`Next step: Define specs with \`/opsx:spec ${path.basename(result.changePath)}\` ` +
-						`or use \`openspec_manage\` with action \`generate_spec\` to scaffold Given/When/Then scenarios.`,
-					display: true,
-				}, { triggerTurn: false });
-			} catch (e) {
-				ctx.ui.notify(`Error: ${(e as Error).message}`, "error");
+					return buildSlashCommandResult("opsx:propose", [name, finalTitle, intent], {
+						ok: true,
+						summary: `Created OpenSpec change: ${path.basename(result.changePath)}`,
+						humanText: `Created: ${result.changePath}\n\nNext: Add specs with \`/opsx:spec ${path.basename(result.changePath)}\` ` +
+							`or use \`openspec_manage\` with action \`generate_spec\``,
+						data: { changePath: result.changePath, files: result.files },
+						effects: {
+							sideEffectClass: "workspace-write",
+							filesChanged: result.files.map(f => path.join(result.changePath, f)),
+							lifecycleTouched: ["openspec"],
+						},
+						nextSteps: [
+							{ label: "Add specs", command: `/opsx:spec ${path.basename(result.changePath)}` },
+							{ label: "Generate specs", rationale: "Use openspec_manage with action generate_spec" },
+						],
+					});
+				} catch (e) {
+					return buildSlashCommandResult("opsx:propose", [name, finalTitle, intent], {
+						ok: false,
+						summary: `Error: ${(e as Error).message}`,
+						humanText: `Error: ${(e as Error).message}`,
+						effects: { sideEffectClass: "workspace-write" },
+					});
+				}
 			}
 		},
-	});
-
-	pi.registerCommand("opsx:spec", {
-		description: "Generate or add specs for a change: /opsx:spec <change>",
-		handler: async (args, ctx) => {
-			const changeName = (args || "").trim();
-			if (!changeName) {
-				ctx.ui.notify("Usage: /opsx:spec <change-name>", "warning");
+		interactiveHandler: async (result, args, ctx) => {
+			if (!result.ok) {
+				ctx.ui.notify(result.humanText, "error");
 				return;
+			}
+
+			// Check if we need to prompt for intent 
+			const trimmedArgs = (args || "").trim();
+			const parts = trimmedArgs.split(/\s+/);
+			const name = parts[0];
+			const title = parts.slice(1).join(" ");
+			
+			if (name && !title) {
+				// Only name provided, prompt for title and intent
+				const titleInput = await ctx.ui.input("Enter change title:");
+				if (!titleInput) {
+					ctx.ui.notify("Change creation cancelled", "warning");
+					return;
+				}
+				
+				const intentInput = await ctx.ui.input("Enter change intent (what this change accomplishes):");
+				if (!intentInput) {
+					ctx.ui.notify("Change creation cancelled", "warning");
+					return;
+				}
+
+				try {
+					const newResult = createChange(ctx.cwd, name, titleInput, intentInput);
+					emitOpenSpecState(ctx.cwd, pi);
+					ctx.ui.notify(`Created OpenSpec change: ${path.basename(newResult.changePath)}`, "info");
+				} catch (e) {
+					ctx.ui.notify(`Error: ${(e as Error).message}`, "error");
+				}
+			} else if (name && title) {
+				// Name and title provided, prompt for intent only
+				const intentInput = await ctx.ui.input("Enter change intent (what this change accomplishes):");
+				if (intentInput) {
+					try {
+						const newResult = createChange(ctx.cwd, name, title, intentInput);
+						emitOpenSpecState(ctx.cwd, pi);
+						ctx.ui.notify(`Created OpenSpec change: ${path.basename(newResult.changePath)}`, "info");
+					} catch (e) {
+						ctx.ui.notify(`Error: ${(e as Error).message}`, "error");
+					}
+				} else {
+					// Use the result we already have (with empty intent)
+					ctx.ui.notify(result.humanText, "info");
+				}
+			} else {
+				// All arguments provided or error case
+				ctx.ui.notify(result.humanText, result.ok ? "info" : "error");
+			}
+		},
+	} satisfies BridgedSlashCommand);
+
+	bridge.register(pi, {
+		name: "opsx:spec",
+		description: "Generate or add specs for a change: /opsx:spec <change>",
+		bridge: {
+			agentCallable: true,
+			sideEffectClass: "workspace-write",
+		},
+		structuredExecutor: async (args: string, ctx: SlashCommandExecutionContext) => {
+			let changeName: string;
+			if (ctx.bridgeInvocation) {
+				try {
+					const parsedArgs = JSON.parse((args || "").trim());
+					changeName = parsedArgs[0] || "";
+				} catch (e) {
+					changeName = (args || "").trim();
+				}
+			} else {
+				changeName = (args || "").trim();
+			}
+			
+			if (!changeName) {
+				return buildSlashCommandResult("opsx:spec", [], {
+					ok: false,
+					summary: "Usage: /opsx:spec <change-name>",
+					humanText: "Error: change-name required",
+					effects: { sideEffectClass: "workspace-write" },
+				});
 			}
 
 			const change = getChange(ctx.cwd, changeName);
 			if (!change) {
-				ctx.ui.notify(`Change '${changeName}' not found`, "error");
-				return;
+				return buildSlashCommandResult("opsx:spec", [changeName], {
+					ok: false,
+					summary: `Change '${changeName}' not found`,
+					humanText: `Change '${changeName}' not found`,
+					effects: { sideEffectClass: "workspace-write" },
+				});
 			}
 
-			// Ask the agent to generate specs
 			let proposalContent = "";
 			if (change.hasProposal) {
 				proposalContent = fs.readFileSync(path.join(change.path, "proposal.md"), "utf-8");
 			}
 
-			pi.sendMessage({
-				customType: "openspec-spec-request",
-				content: [
-					`[OpenSpec: Generate specs for \`${changeName}\`]`,
-					"",
-					change.hasProposal ? `Proposal:\n${proposalContent.slice(0, 3000)}` : "No proposal found.",
-					"",
-					"Generate Given/When/Then specs for this change using `openspec_manage` with action `add_spec`.",
-					"Each spec file should have:",
-					"  - `## ADDED Requirements` section",
-					"  - `### Requirement: <title>` for each requirement",
-					"  - `#### Scenario: <title>` with Given/When/Then clauses",
-					"",
-					"Make scenarios specific and testable — they will drive the implementation and verification.",
-				].join("\n"),
-				display: true,
-			}, { triggerTurn: true });
-		},
-	});
+			// Actually generate specs instead of just requesting them
+			try {
+				if (!change.hasProposal) {
+					return buildSlashCommandResult("opsx:spec", [changeName], {
+						ok: false,
+						summary: "No proposal found",
+						humanText: `Change '${changeName}' has no proposal. Run /opsx:propose first.`,
+						effects: { sideEffectClass: "workspace-write" },
+						nextSteps: [
+							{ label: "Create proposal", command: `/opsx:propose ${changeName}` },
+						],
+					});
+				}
 
-	pi.registerCommand("opsx:ff", {
+				// Generate a default spec from the proposal
+				const specContent = generateSpecFromProposal({
+					domain: "core",
+					proposalContent,
+				});
+
+				// Ensure specs directory exists
+				const specsDir = path.join(change.path, "specs");
+				fs.mkdirSync(specsDir, { recursive: true });
+
+				// Write the generated spec
+				const specFilePath = path.join(specsDir, "core.md");
+				fs.writeFileSync(specFilePath, specContent);
+
+				emitOpenSpecState(ctx.cwd, pi);
+
+				const content = [
+					`Generated spec file: specs/core.md`,
+					"",
+					change.hasProposal ? `Based on proposal content from proposal.md` : "Generated default spec structure.",
+					"",
+					"Edit the spec to add more specific Given/When/Then scenarios.",
+					"Each scenario should be specific and testable.",
+				].join("\n");
+
+				if (!ctx.bridgeInvocation) {
+					pi.sendMessage({
+						customType: "openspec-spec-generated",
+						content: `Generated spec for \`${changeName}\`:\n\n${content}`,
+						display: true,
+					}, { triggerTurn: false });
+				}
+
+				return buildSlashCommandResult("opsx:spec", [changeName], {
+					ok: true,
+					summary: `Generated spec for '${changeName}'`,
+					humanText: content,
+					data: { 
+						changeName, 
+						specFilePath: path.relative(ctx.cwd, specFilePath),
+						hasProposal: change.hasProposal, 
+						generatedContent: specContent.slice(0, 1000) 
+					},
+					effects: { 
+						sideEffectClass: "workspace-write",
+						filesChanged: [path.relative(ctx.cwd, specFilePath)],
+						lifecycleTouched: ["openspec"],
+					},
+					nextSteps: [
+						{ label: "Review and edit spec", command: `edit ${path.relative(ctx.cwd, specFilePath)}` },
+						{ label: "Generate design and tasks", command: `/opsx:ff ${changeName}` },
+					],
+				});
+			} catch (e) {
+				return buildSlashCommandResult("opsx:spec", [changeName], {
+					ok: false,
+					summary: `Error generating spec: ${(e as Error).message}`,
+					humanText: `Error generating spec: ${(e as Error).message}`,
+					effects: { sideEffectClass: "workspace-write" },
+				});
+			}
+		},
+		// No agentHandler needed - the structuredExecutor does the work
+	} satisfies BridgedSlashCommand);
+
+	bridge.register(pi, {
+		name: "opsx:ff",
 		description: "Fast-forward: generate design + tasks from specs: /opsx:ff <change>",
-		handler: async (args, ctx) => {
-			const changeName = (args || "").trim();
+		bridge: {
+			agentCallable: true,
+			sideEffectClass: "workspace-write",
+		},
+		structuredExecutor: async (args: string, ctx: SlashCommandExecutionContext) => {
+			let changeName: string;
+			if (ctx.bridgeInvocation) {
+				try {
+					const parsedArgs = JSON.parse((args || "").trim());
+					changeName = parsedArgs[0] || "";
+				} catch (e) {
+					changeName = (args || "").trim();
+				}
+			} else {
+				changeName = (args || "").trim();
+			}
+			
 			if (!changeName) {
-				ctx.ui.notify("Usage: /opsx:ff <change-name>", "warning");
-				return;
+				return buildSlashCommandResult("opsx:ff", [], {
+					ok: false,
+					summary: "Usage: /opsx:ff <change-name>",
+					humanText: "Error: change-name required",
+					effects: { sideEffectClass: "workspace-write" },
+				});
 			}
 
 			const change = getChange(ctx.cwd, changeName);
 			if (!change) {
-				ctx.ui.notify(`Change '${changeName}' not found`, "error");
-				return;
+				return buildSlashCommandResult("opsx:ff", [changeName], {
+					ok: false,
+					summary: `Change '${changeName}' not found`,
+					humanText: `Change '${changeName}' not found`,
+					effects: { sideEffectClass: "workspace-write" },
+				});
 			}
 
 			if (!change.hasSpecs && !change.hasProposal) {
-				ctx.ui.notify("Change has no specs or proposal. Run /opsx:spec first.", "warning");
-				return;
+				return buildSlashCommandResult("opsx:ff", [changeName], {
+					ok: false,
+					summary: "Change has no specs or proposal",
+					humanText: "Change has no specs or proposal. Run /opsx:spec first.",
+					effects: { sideEffectClass: "workspace-write" },
+					nextSteps: [
+						{ label: "Add specs", command: `/opsx:spec ${changeName}` },
+					],
+				});
 			}
 
-			pi.sendMessage({
-				customType: "openspec-ff-request",
-				content: [
-					`[OpenSpec: Fast-forward \`${changeName}\`]`,
-					"",
-					`Use \`openspec_manage\` with action \`fast_forward\` and change_name \`${changeName}\` ` +
-					`to generate design.md and tasks.md from the specs.`,
-					"",
-					"Then present the generated tasks for review before running `/cleave`.",
-				].join("\n"),
-				display: true,
-			}, { triggerTurn: true });
-		},
-	});
+			const files: string[] = [];
 
-	pi.registerCommand("opsx:status", {
+			// Generate design.md if not present
+			if (!change.hasDesign) {
+				const designLines = [`# ${change.name} — Design`, ""];
+
+				if (change.specs.length > 0) {
+					designLines.push("## Spec-Derived Architecture", "");
+					for (const spec of change.specs) {
+						designLines.push(`### ${spec.domain}`, "");
+						for (const section of spec.sections) {
+							if (section.type === "removed") continue;
+							for (const req of section.requirements) {
+								designLines.push(`- **${req.title}** (${section.type}) — ${req.scenarios.length} scenarios`);
+							}
+						}
+						designLines.push("");
+					}
+				}
+
+				// Read proposal for additional context
+				if (change.hasProposal) {
+					const proposal = fs.readFileSync(path.join(change.path, "proposal.md"), "utf-8");
+					const scopeMatch = proposal.match(/##\s+Scope\s*\n([\s\S]*?)(?=\n##\s|$)/i);
+					if (scopeMatch) {
+						designLines.push("## Scope", "", scopeMatch[1].trim(), "");
+					}
+				}
+
+				designLines.push("## File Changes", "");
+				designLines.push("<!-- Add file changes as you design the implementation -->", "");
+
+				fs.writeFileSync(path.join(change.path, "design.md"), designLines.join("\n"));
+				files.push("design.md");
+			}
+
+			// Generate tasks.md if not present
+			if (!change.hasTasks) {
+				const taskLines = [`# ${change.name} — Tasks`, ""];
+
+				if (change.specs.length > 0) {
+					// Generate task groups from spec domains/requirements
+					let groupNum = 1;
+					for (const spec of change.specs) {
+						for (const section of spec.sections) {
+							if (section.type === "removed") continue;
+							for (const req of section.requirements) {
+								taskLines.push(`## ${groupNum}. ${req.title}`, "");
+								// Each scenario becomes a task
+								let taskNum = 1;
+								for (const s of req.scenarios) {
+									taskLines.push(`- [ ] ${groupNum}.${taskNum} ${s.title}`);
+									taskNum++;
+								}
+								// Add a verification task
+								taskLines.push(`- [ ] ${groupNum}.${taskNum} Write tests for ${req.title}`);
+								taskLines.push("");
+								groupNum++;
+							}
+						}
+					}
+				} else {
+					taskLines.push("## 1. Implementation", "");
+					taskLines.push("- [ ] 1.1 Implement the proposed change", "");
+				}
+
+				fs.writeFileSync(path.join(change.path, "tasks.md"), taskLines.join("\n"));
+				files.push("tasks.md");
+			}
+
+			if (files.length === 0) {
+				return buildSlashCommandResult("opsx:ff", [changeName], {
+					ok: false,
+					summary: "design.md and tasks.md already exist",
+					humanText: `design.md and tasks.md already exist for '${changeName}'. Delete them to regenerate.`,
+					effects: { sideEffectClass: "workspace-write" },
+				});
+			}
+
+			emitOpenSpecState(ctx.cwd, pi);
+
+			// Read the generated content to include in the response
+			const generatedContent: { [filename: string]: string } = {};
+			for (const filename of files) {
+				const filePath = path.join(change.path, filename);
+				generatedContent[filename] = fs.readFileSync(filePath, "utf-8");
+			}
+
+			const content = [
+				`Generated files for '${changeName}':`,
+				"",
+				...files.map(f => `- ${f}`),
+				"",
+				"Files are ready for review and implementation.",
+				"Next: Review the generated tasks and run `/cleave` to execute them.",
+			].join("\n");
+
+			if (!ctx.bridgeInvocation) {
+				pi.sendMessage({
+					customType: "openspec-ff-complete",
+					content: `Generated design and tasks for \`${changeName}\`:\n\n${content}`,
+					display: true,
+				}, { triggerTurn: false });
+			}
+
+			return buildSlashCommandResult("opsx:ff", [changeName], {
+				ok: true,
+				summary: `Fast-forwarded '${changeName}': generated ${files.join(", ")}`,
+				humanText: content,
+				data: { files, changeName, generatedContent },
+				effects: {
+					sideEffectClass: "workspace-write",
+					filesChanged: files.map(f => path.join(change.path, f)),
+					lifecycleTouched: ["openspec"],
+				},
+				nextSteps: [
+					{ label: "Review files", rationale: "Check generated design.md and tasks.md" },
+					{ label: "Execute tasks", command: "/cleave" },
+				],
+			});
+		},
+		// No agentHandler needed - the structuredExecutor returns complete information
+	} satisfies BridgedSlashCommand);
+
+	bridge.register(pi, {
+		name: "opsx:status",
 		description: "Show all active OpenSpec changes",
-		handler: async (_args, ctx) => {
+		bridge: {
+			agentCallable: true,
+			sideEffectClass: "read",
+		},
+		structuredExecutor: async (args: string, ctx: SlashCommandExecutionContext) => {
 			const changes = listChanges(ctx.cwd);
 			if (changes.length === 0) {
-				ctx.ui.notify("No active OpenSpec changes. Use /opsx:propose to create one.", "info");
-				return;
+				return buildSlashCommandResult("opsx:status", [], {
+					ok: true,
+					summary: "No active OpenSpec changes",
+					humanText: "No active OpenSpec changes. Use /opsx:propose to create one.",
+					data: { changes: [] },
+					effects: { sideEffectClass: "read" },
+					nextSteps: [
+						{ label: "Create change", command: "/opsx:propose", rationale: "Start a new OpenSpec change" },
+					],
+				});
 			}
 
 			const lines = changes.map((c) => {
@@ -974,28 +1358,80 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 				const nextLine = verification.nextAction ? `\n  → ${verification.nextAction}` : `\n  → ${nextStepHint(c)}`;
 				return `${formatChangeStatus(c)}${verificationLine}${nextLine}`;
 			});
-			ctx.ui.notify(lines.join("\n\n"), "info");
-		},
-	});
 
-	pi.registerCommand("opsx:verify", {
+			return buildSlashCommandResult("opsx:status", [], {
+				ok: true,
+				summary: "OpenSpec changes status",
+				humanText: lines.join("\n\n"),
+				data: {
+					changes: changes.map((c) => {
+						const verification = getVerificationStatus(ctx.cwd, c);
+						return {
+							name: c.name,
+							stage: c.stage,
+							verificationStage: verification.coarseStage,
+							verificationSubstate: verification.substate,
+							nextAction: verification.nextAction,
+							totalTasks: c.totalTasks,
+							doneTasks: c.doneTasks,
+							specCount: countScenarios(c.specs),
+						};
+					}),
+				},
+				effects: { sideEffectClass: "read" },
+			});
+		},
+	} satisfies BridgedSlashCommand);
+
+	bridge.register(pi, {
+		name: "opsx:verify",
 		description: "Check verification status of a change: /opsx:verify <change>",
-		handler: async (args, ctx) => {
-			const changeName = (args || "").trim();
+		bridge: {
+			agentCallable: true,
+			sideEffectClass: "read",
+		},
+		structuredExecutor: async (args: string, ctx: SlashCommandExecutionContext) => {
+			let changeName: string;
+			if (ctx.bridgeInvocation) {
+				try {
+					const parsedArgs = JSON.parse((args || "").trim());
+					changeName = parsedArgs[0] || "";
+				} catch (e) {
+					changeName = (args || "").trim();
+				}
+			} else {
+				changeName = (args || "").trim();
+			}
+			
 			if (!changeName) {
-				ctx.ui.notify("Usage: /opsx:verify <change-name>", "warning");
-				return;
+				return buildSlashCommandResult("opsx:verify", [], {
+					ok: false,
+					summary: "Usage: /opsx:verify <change-name>",
+					humanText: "Usage: /opsx:verify <change-name>",
+					effects: { sideEffectClass: "read" },
+				});
 			}
 
 			const change = getChange(ctx.cwd, changeName);
 			if (!change) {
-				ctx.ui.notify(`Change '${changeName}' not found`, "error");
-				return;
+				return buildSlashCommandResult("opsx:verify", [changeName], {
+					ok: false,
+					summary: `Change '${changeName}' not found`,
+					humanText: `Change '${changeName}' not found`,
+					effects: { sideEffectClass: "read" },
+				});
 			}
 
 			if (!change.hasSpecs) {
-				ctx.ui.notify(`Change '${changeName}' has no specs to verify against`, "warning");
-				return;
+				return buildSlashCommandResult("opsx:verify", [changeName], {
+					ok: false,
+					summary: `Change '${changeName}' has no specs to verify against`,
+					humanText: `Change '${changeName}' has no specs to verify against`,
+					effects: { sideEffectClass: "read" },
+					nextSteps: [
+						{ label: "Add specs", command: `/opsx:spec ${changeName}` },
+					],
+				});
 			}
 
 			const assessmentState = await getAssessmentState(ctx.cwd, change);
@@ -1008,137 +1444,351 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 				?? (effectiveSubstate === "reopened-work"
 					? `Complete follow-up work for ${changeName}, reconcile lifecycle artifacts, then re-run /assess spec ${changeName}`
 					: null);
+
 			if (effectiveSubstate === "archive-ready" && assessmentState.record) {
-				ctx.ui.notify([
+				const summaryLines = [
 					`Verification state for '${changeName}': ${effectiveSubstate}`,
 					...(effectiveReason ? [`Why: ${effectiveReason}`] : []),
 					...(effectiveNextAction ? [`Next: ${effectiveNextAction}`] : []),
 					"",
 					...formatAssessmentSummary(assessmentState.record),
-				].join("\n"), "info");
-				return;
+				];
+
+				return buildSlashCommandResult("opsx:verify", [changeName], {
+					ok: true,
+					summary: `Archive ready: ${changeName}`,
+					humanText: summaryLines.join("\n"),
+					data: {
+						changeName,
+						substate: effectiveSubstate,
+						reason: effectiveReason,
+						nextAction: effectiveNextAction,
+						assessment: assessmentState.record,
+						archiveReady: true,
+					},
+					effects: { sideEffectClass: "read" },
+					nextSteps: effectiveNextAction ? [{ label: effectiveNextAction }] : [],
+				});
 			}
+
 			if ((effectiveSubstate === "reopened-work" || effectiveSubstate === "missing-binding" || effectiveSubstate === "awaiting-reconciliation") && assessmentState.record) {
-				ctx.ui.notify([
+				const summaryLines = [
 					`Verification state for '${changeName}': ${effectiveSubstate}`,
 					...(effectiveReason ? [`Why: ${effectiveReason}`] : []),
 					...(effectiveNextAction ? [`Next: ${effectiveNextAction}`] : []),
 					"",
 					...formatAssessmentSummary(assessmentState.record),
-				].join("\n"), "warning");
-				return;
+				];
+
+				return buildSlashCommandResult("opsx:verify", [changeName], {
+					ok: false,
+					summary: `Verification blocked: ${changeName}`,
+					humanText: summaryLines.join("\n"),
+					data: {
+						changeName,
+						substate: effectiveSubstate,
+						reason: effectiveReason,
+						nextAction: effectiveNextAction,
+						assessment: assessmentState.record,
+						archiveReady: false,
+					},
+					effects: { sideEffectClass: "read" },
+					nextSteps: effectiveNextAction ? [{ label: effectiveNextAction }] : [],
+				});
 			}
 
 			const refreshReason = assessmentState.status === "missing"
 				? "No persisted assessment exists yet."
 				: effectiveReason ?? assessmentState.reason;
-			pi.sendMessage({
-				customType: "openspec-verify",
-				content: [
-					`[OpenSpec: Verify \`${changeName}\`]`,
-					"",
-					`Verification state: ${effectiveSubstate ?? verification.substate ?? change.stage}`,
-					...(effectiveReason ? [effectiveReason, ""] : []),
-					`${refreshReason}`,
-					"",
-					`Run \`/assess spec ${changeName}\` now and persist the resulting structured lifecycle state by calling \`openspec_manage\` with action \`reconcile_after_assess\`, change_name \`${changeName}\`, assessment_kind \`spec\`, and the appropriate outcome.`,
-					"",
-					"If the assessment passes cleanly, persist outcome `pass`. If it reopens work, persist `reopen`. If the reviewer cannot determine status safely, persist `ambiguous`.",
-					"",
-					`After persistence, archive remains gated until the current assessment for \`${changeName}\` explicitly passes.`,
-				].join("\n"),
-				display: true,
-			}, { triggerTurn: true });
+
+			const content = [
+				`[OpenSpec: Verify \`${changeName}\`]`,
+				"",
+				`Verification state: ${effectiveSubstate ?? verification.substate ?? change.stage}`,
+				...(effectiveReason ? [effectiveReason, ""] : []),
+				`${refreshReason}`,
+				"",
+				`Run \`/assess spec ${changeName}\` now and persist the resulting structured lifecycle state by calling \`openspec_manage\` with action \`reconcile_after_assess\`, change_name \`${changeName}\`, assessment_kind \`spec\`, and the appropriate outcome.`,
+				"",
+				"If the assessment passes cleanly, persist outcome `pass`. If it reopens work, persist `reopen`. If the reviewer cannot determine status safely, persist `ambiguous`.",
+				"",
+				`After persistence, archive remains gated until the current assessment for \`${changeName}\` explicitly passes.`,
+			].join("\n");
+
+			if (!ctx.bridgeInvocation) {
+				pi.sendMessage({
+					customType: "openspec-verify",
+					content,
+					display: true,
+				}, { triggerTurn: true });
+			}
+
+			return buildSlashCommandResult("opsx:verify", [changeName], {
+				ok: true,
+				summary: `Verification assessment needed for '${changeName}'`,
+				humanText: content,
+				data: {
+					changeName,
+					substate: effectiveSubstate ?? verification.substate ?? change.stage,
+					reason: refreshReason,
+					nextAction: `/assess spec ${changeName}`,
+					assessment: assessmentState.record,
+					archiveReady: false,
+				},
+				effects: { sideEffectClass: "read" },
+				nextSteps: [
+					{ label: "Run assessment", command: `/assess spec ${changeName}`, rationale: "Verify specs against implementation" },
+				],
+			});
 		},
-	});
+		interactiveHandler: async (result, args, ctx) => {
+			const data = result.data as any;
+			if (data && data.archiveReady && result.ok) {
+				ctx.ui.notify(result.humanText, "info");
+			} else if (data && !data.archiveReady && data.substate && (data.substate === "reopened-work" || data.substate === "missing-binding" || data.substate === "awaiting-reconciliation")) {
+				ctx.ui.notify(result.humanText, "warning");
+			} else if (result.ok) {
+				// Trigger agent message for assessment requests
+				return;
+			} else {
+				ctx.ui.notify(result.humanText, "warning");
+			}
+		},
+		agentHandler: async (result, _args, _ctx) => {
+			const archiveReady = result.data && typeof result.data === 'object' && 
+				'archiveReady' in result.data ? (result.data as { archiveReady: boolean }).archiveReady : false;
+			if (result.ok && result.humanText && !archiveReady) {
+				pi.sendMessage({
+					customType: "openspec-verify",
+					content: result.humanText,
+					display: true,
+				}, { triggerTurn: true });
+			}
+		},
+	} satisfies BridgedSlashCommand);
 
-	pi.registerCommand("opsx:archive", {
+	bridge.register(pi, {
+		name: "opsx:archive",
 		description: "Archive a completed change: /opsx:archive <change>",
-		handler: async (args, ctx) => {
-			const changeName = (args || "").trim();
+		bridge: {
+			agentCallable: true,
+			sideEffectClass: "workspace-write",
+		},
+		structuredExecutor: async (args: string, ctx: SlashCommandExecutionContext) => {
+			let changeName: string;
+			if (ctx.bridgeInvocation) {
+				try {
+					const parsedArgs = JSON.parse((args || "").trim());
+					changeName = parsedArgs[0] || "";
+				} catch (e) {
+					changeName = (args || "").trim();
+				}
+			} else {
+				changeName = (args || "").trim();
+			}
+			
 			if (!changeName) {
-				ctx.ui.notify("Usage: /opsx:archive <change-name>", "warning");
-				return;
+				return buildSlashCommandResult("opsx:archive", [], {
+					ok: false,
+					summary: "Usage: /opsx:archive <change-name>",
+					humanText: "Usage: /opsx:archive <change-name>",
+					effects: { sideEffectClass: "workspace-write" },
+				});
 			}
 
-			const change = getChange(ctx.cwd, changeName);
-			if (!change) {
-				ctx.ui.notify(`Change '${changeName}' not found`, "error");
-				return;
+			const changeInfo = getChange(ctx.cwd, changeName);
+			if (!changeInfo) {
+				return buildSlashCommandResult("opsx:archive", [changeName], {
+					ok: false,
+					summary: `Change '${changeName}' not found`,
+					humanText: `Change '${changeName}' not found`,
+					effects: { sideEffectClass: "workspace-write" },
+				});
 			}
 
-			const assessmentState = await getAssessmentState(ctx.cwd, change);
+			const assessmentState = await getAssessmentState(ctx.cwd, changeInfo);
 			const assessmentGate = buildArchiveAssessmentGate(assessmentState, changeName);
 			if (!assessmentGate.ok) {
-				ctx.ui.notify([
+				const message = [
 					assessmentGate.message,
 					...(assessmentState.record ? ["", ...formatAssessmentSummary(assessmentState.record)] : []),
-				].join("\n"), "warning");
-				return;
+				].join("\n");
+
+				return buildSlashCommandResult("opsx:archive", [changeName], {
+					ok: false,
+					summary: `Archive refused: assessment gate failed`,
+					humanText: message,
+					data: { assessmentState, gateRefusal: assessmentGate.message },
+					effects: { sideEffectClass: "workspace-write" },
+					nextSteps: [
+						{ label: "Run verification", command: `/opsx:verify ${changeName}`, rationale: "Refresh assessment" },
+					],
+				});
 			}
 
 			const reconciliation = evaluateLifecycleReconciliation(ctx.cwd, changeName);
 			if (reconciliation.issues.length > 0) {
-				ctx.ui.notify(
-					`Archive refused for '${changeName}' because lifecycle state is stale:\n${formatReconciliationIssues(reconciliation.issues)}`,
-					"warning",
-				);
-				return;
+				const message = `Archive refused for '${changeName}' because lifecycle state is stale:\n${formatReconciliationIssues(reconciliation.issues)}`;
+
+				return buildSlashCommandResult("opsx:archive", [changeName], {
+					ok: false,
+					summary: "Archive refused: lifecycle reconciliation needed",
+					humanText: message,
+					data: { reconciliation, assessmentState },
+					effects: { sideEffectClass: "workspace-write" },
+					nextSteps: [
+						{ label: "Reconcile lifecycle", rationale: "Fix lifecycle state before archive" },
+					],
+				});
 			}
 
 			const result = archiveChange(ctx.cwd, changeName);
-			if (result.archived) {
-				// Archive gate: transition implementing → implemented
-				const transitioned = transitionDesignNodesOnArchive(ctx.cwd, changeName);
-				if (transitioned.length > 0) {
-					result.operations.push(
-						`Transitioned design node${transitioned.length > 1 ? "s" : ""} to implemented: ${transitioned.join(", ")}`,
-					);
+			if (!result.archived) {
+				return buildSlashCommandResult("opsx:archive", [changeName], {
+					ok: false,
+					summary: "Archive failed",
+					humanText: result.operations.join("\n"),
+					effects: { sideEffectClass: "workspace-write" },
+				});
+			}
+
+			if (changeInfo) {
+				const archiveCandidates = emitArchiveCandidates({ ...changeInfo, stage: "archived" });
+				if (archiveCandidates.length > 0) {
+					(sharedState.lifecycleCandidateQueue ??= []).push({
+						source: "openspec",
+						context: `archive for '${changeName}'`,
+						candidates: archiveCandidates,
+					});
+					result.operations.push(`Emitted ${archiveCandidates.length} lifecycle memory candidate(s)`);
 				}
-				ctx.ui.notify(
-					`Archived '${changeName}':\n${result.operations.map((op) => `  - ${op}`).join("\n")}`,
-					"info",
+			}
+
+			// Archive gate: transition implementing → implemented in design tree
+			const transitioned = transitionDesignNodesOnArchive(ctx.cwd, changeName);
+			if (transitioned.length > 0) {
+				result.operations.push(
+					`Transitioned design node${transitioned.length > 1 ? "s" : ""} to implemented: ${transitioned.join(", ")}`,
 				);
+			}
+
+			emitOpenSpecState(ctx.cwd, pi);
+
+			const summaryText = `Archived '${changeName}':\n${result.operations.map((op) => `  - ${op}`).join("\n")}`;
+
+			return buildSlashCommandResult("opsx:archive", [changeName], {
+				ok: true,
+				summary: `Archived '${changeName}'`,
+				humanText: summaryText,
+				data: { operations: result.operations, transitionedNodes: transitioned },
+				effects: {
+					sideEffectClass: "workspace-write",
+					filesChanged: [`openspec/archive/${changeName}`],
+					lifecycleTouched: ["openspec", ...(transitioned.length > 0 ? ["design-tree"] : [])],
+				},
+				nextSteps: [
+					{ label: "Change complete", rationale: "Specs merged to baseline" },
+				],
+			});
+		},
+		interactiveHandler: async (result, args, ctx) => {
+			if (result.ok) {
+				ctx.ui.notify(result.humanText, "info");
 			} else {
-				ctx.ui.notify(result.operations.join("\n"), "error");
+				ctx.ui.notify(result.humanText, "warning");
 			}
 		},
-	});
+	} satisfies BridgedSlashCommand);
 
-	// Convenience: /opsx:apply delegates to /cleave
-	pi.registerCommand("opsx:apply", {
+	bridge.register(pi, {
+		name: "opsx:apply",
 		description: "Continue implementing a change (delegates to /cleave)",
-		handler: async (args, ctx) => {
-			const changeName = (args || "").trim();
+		bridge: {
+			agentCallable: true,
+			sideEffectClass: "workspace-write",
+		},
+		structuredExecutor: async (args: string, ctx: SlashCommandExecutionContext) => {
+			let changeName: string;
+			if (ctx.bridgeInvocation) {
+				try {
+					const parsedArgs = JSON.parse((args || "").trim());
+					changeName = parsedArgs[0] || "";
+				} catch (e) {
+					changeName = (args || "").trim();
+				}
+			} else {
+				changeName = (args || "").trim();
+			}
+			
 			if (!changeName) {
-				ctx.ui.notify("Usage: /opsx:apply <change-name>", "warning");
-				return;
+				return buildSlashCommandResult("opsx:apply", [], {
+					ok: false,
+					summary: "Usage: /opsx:apply <change-name>",
+					humanText: "Error: change-name required",
+					effects: { sideEffectClass: "workspace-write" },
+				});
 			}
 
 			const change = getChange(ctx.cwd, changeName);
 			if (!change) {
-				ctx.ui.notify(`Change '${changeName}' not found`, "error");
-				return;
+				return buildSlashCommandResult("opsx:apply", [changeName], {
+					ok: false,
+					summary: `Change '${changeName}' not found`,
+					humanText: `Change '${changeName}' not found`,
+					effects: { sideEffectClass: "workspace-write" },
+				});
 			}
 
 			if (!change.hasTasks) {
-				ctx.ui.notify(`Change '${changeName}' has no tasks. Run /opsx:ff first.`, "warning");
-				return;
+				return buildSlashCommandResult("opsx:apply", [changeName], {
+					ok: false,
+					summary: `Change '${changeName}' has no tasks`,
+					humanText: `Change '${changeName}' has no tasks. Run /opsx:ff first.`,
+					effects: { sideEffectClass: "workspace-write" },
+					nextSteps: [
+						{ label: "Generate tasks", command: `/opsx:ff ${changeName}` },
+					],
+				});
 			}
 
-			pi.sendMessage({
-				customType: "openspec-apply",
-				content: [
-					`[OpenSpec: Apply \`${changeName}\`]`,
-					"",
-					`Continue implementing \`${changeName}\` — ${change.doneTasks}/${change.totalTasks} tasks done.`,
-					"",
-					"Use `/cleave` to parallelize remaining tasks, or work on them directly.",
-				].join("\n"),
-				display: true,
-			}, { triggerTurn: true });
+			const content = [
+				`[OpenSpec: Apply \`${changeName}\`]`,
+				"",
+				`Continue implementing \`${changeName}\` — ${change.doneTasks}/${change.totalTasks} tasks done.`,
+				"",
+				"Use `/cleave` to parallelize remaining tasks, or work on them directly.",
+			].join("\n");
+
+			if (!ctx.bridgeInvocation) {
+				pi.sendMessage({
+					customType: "openspec-apply",
+					content,
+					display: true,
+				}, { triggerTurn: true });
+			}
+
+			return buildSlashCommandResult("opsx:apply", [changeName], {
+				ok: true,
+				summary: `Apply requested for '${changeName}' (${change.doneTasks}/${change.totalTasks} tasks done)`,
+				humanText: content,
+				data: { changeName, doneTasks: change.doneTasks, totalTasks: change.totalTasks },
+				effects: { sideEffectClass: "workspace-write" },
+				nextSteps: [
+					{ label: "Parallelize tasks", command: "/cleave", rationale: "Execute remaining tasks in parallel" },
+					{ label: "Work directly", rationale: "Continue implementation manually" },
+				],
+			});
 		},
-	});
+		agentHandler: async (result, _args, _ctx) => {
+			if (result.ok && result.humanText) {
+				pi.sendMessage({
+					customType: "openspec-apply",
+					content: result.humanText,
+					display: true,
+				}, { triggerTurn: true });
+			}
+		},
+	} satisfies BridgedSlashCommand);
 
 	// ─── Message Renderers ───────────────────────────────────────────
 

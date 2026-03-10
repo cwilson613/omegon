@@ -31,9 +31,22 @@ describe("slash-command-bridge", () => {
         sideEffectClass: "read",
         resultContract: "demo.inspect.v1",
       },
-      structuredExecutor: async (args) => {
+      structuredExecutor: async (args, ctx) => {
         receivedArgs = args;
-        return buildSlashCommandResult("inspect", args.split(/\s+/).filter(Boolean), {
+        
+        // Parse args based on whether it's a bridge invocation or not
+        let parsedArgs: string[];
+        if (ctx?.bridgeInvocation) {
+          try {
+            parsedArgs = JSON.parse(args);
+          } catch (e) {
+            parsedArgs = [args]; // fallback for single string
+          }
+        } else {
+          parsedArgs = args.split(/\s+/).filter(Boolean);
+        }
+        
+        return buildSlashCommandResult("inspect", parsedArgs, {
           ok: true,
           summary: "Inspection complete",
           humanText: "Inspection complete",
@@ -46,7 +59,7 @@ describe("slash-command-bridge", () => {
 
     const result = await bridge.execute({ command: "inspect", args: ["alpha", "beta"] }, {} as any);
 
-    assert.equal(receivedArgs, "alpha beta");
+    assert.equal(receivedArgs, '["alpha","beta"]');
     assert.equal(result.ok, true);
     assert.deepEqual(result.args, ["alpha", "beta"]);
     assert.equal(result.effects.sideEffectClass, "read");
@@ -118,8 +131,20 @@ describe("slash-command-bridge", () => {
     const pi = makeFakePi();
     const notifications: Array<{ text: string; level: string }> = [];
 
-    const structuredExecutor = async (args: string) => {
-      const tokens = args.split(/\s+/).filter(Boolean);
+    const structuredExecutor = async (args: string, ctx?: any) => {
+      let tokens: string[];
+      
+      // Handle both JSON (from bridge) and space-separated (from direct call)
+      if (ctx?.bridgeInvocation) {
+        try {
+          tokens = JSON.parse(args);
+        } catch (e) {
+          tokens = [args]; // fallback for single string
+        }
+      } else {
+        tokens = args.split(/\s+/).filter(Boolean);
+      }
+      
       const mode = tokens.length <= 3 ? "execute" : "cleave";
       return buildSlashCommandResult("assess-complexity", tokens, {
         ok: true,
