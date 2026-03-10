@@ -2,8 +2,8 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
 import { debug } from "../debug.ts";
-import { listChanges, getAssessmentStatus, resolveLifecycleSummary } from "./spec.ts";
-import { evaluateLifecycleReconciliation } from "./reconcile.ts";
+import { listChanges } from "./spec.ts";
+import { buildLifecycleSummary } from "./lifecycle.ts";
 
 /**
  * Emit OpenSpec state to sharedState for the unified dashboard.
@@ -23,19 +23,7 @@ export function emitOpenSpecState(cwd: string, pi: ExtensionAPI): void {
 
 			// Resolve canonical lifecycle summary — single source of truth for
 			// readiness and verification substate, shared with status/get surfaces.
-			const assessment = getAssessmentStatus(cwd, c.name);
-			const reconciliation = evaluateLifecycleReconciliation(cwd, c.name);
-			const archiveBlockedReason = reconciliation.issues.length > 0
-				? reconciliation.issues.map((issue) => issue.suggestedAction).join(" ")
-				: null;
-			const lifecycle = resolveLifecycleSummary({
-				change: c,
-				record: assessment.record,
-				freshness: assessment.freshness,
-				archiveBlocked: reconciliation.issues.length > 0,
-				archiveBlockedReason,
-				archiveBlockedIssueCodes: reconciliation.issues.map((issue) => issue.code),
-			});
+			const lifecycle = buildLifecycleSummary(cwd, c);
 
 			return {
 				name: c.name,

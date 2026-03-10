@@ -1184,8 +1184,9 @@ export function resolveLifecycleSummary(input: {
 	archiveBlocked: boolean;
 	archiveBlockedReason: string | null;
 	archiveBlockedIssueCodes: readonly string[];
+	boundNodeIds?: readonly string[];
 }): LifecycleSummary {
-	const { change, record, freshness, archiveBlocked, archiveBlockedReason, archiveBlockedIssueCodes } = input;
+	const { change, record, freshness, archiveBlocked, archiveBlockedReason, archiveBlockedIssueCodes, boundNodeIds } = input;
 
 	// Derive verification status via existing resolveVerificationStatus — preserving
 	// the historical substate contract without duplicating its logic.
@@ -1203,7 +1204,28 @@ export function resolveLifecycleSummary(input: {
 
 	const bindingStatus: LifecycleSummary["bindingStatus"] = archiveBlockedIssueCodes.includes("missing_design_binding")
 		? "unbound"
-		: "unknown";
+		: (boundNodeIds && boundNodeIds.length > 0) ? "bound" : "unknown";
+
+	// When stage is not "verifying" (e.g. "implementing" after a reopen appended tasks),
+	// resolveVerificationStatus returns null reason/nextAction.  Derive a fallback so that
+	// the archive gate still surfaces a meaningful message.
+	let reason = vs.reason;
+	let nextAction = vs.nextAction;
+	if (!archiveReady && !reason) {
+		if (!record) {
+			reason = "No persisted assessment record exists for this task-complete change.";
+			nextAction = `/assess spec ${change.name}`;
+		} else if (record.outcome === "reopen" || record.reconciliation?.reopen) {
+			reason = "The latest persisted assessment reopened work.";
+			nextAction = `Complete follow-up work for ${change.name}, reconcile lifecycle artifacts, then re-run /assess spec ${change.name}`;
+		} else if (record.outcome === "ambiguous") {
+			reason = "The latest persisted assessment is ambiguous and must be refreshed before archive.";
+			nextAction = `Refresh /assess spec ${change.name} for the current implementation snapshot`;
+		} else if (freshness && !freshness.current) {
+			reason = freshness.reasons.join(" ");
+			nextAction = `Refresh /assess spec ${change.name} for the current implementation snapshot`;
+		}
+	}
 
 	return {
 		stage: change.stage,
@@ -1213,8 +1235,8 @@ export function resolveLifecycleSummary(input: {
 		totalTasks: change.totalTasks,
 		doneTasks: change.doneTasks,
 		assessmentFreshness: freshness,
-		nextAction: vs.nextAction,
-		reason: vs.reason ?? null,
+		nextAction: nextAction ?? null,
+		reason: reason ?? null,
 	};
 }
 

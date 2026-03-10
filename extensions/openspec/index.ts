@@ -721,7 +721,7 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 							content: [{
 								type: "text",
 								text: [
-									`Archive refused for '${params.change_name}': ${lifecycle.nextAction ?? "lifecycle not ready for archive."}`,
+									`Archive refused for '${params.change_name}': ${lifecycle.reason ?? lifecycle.nextAction ?? "lifecycle not ready for archive."}`,
 									...(assessmentState.record ? ["", ...formatAssessmentSummary(assessmentState.record)] : []),
 								].join("\n"),
 							}],
@@ -955,15 +955,22 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 					ctx.ui.notify(`Error: ${(e as Error).message}`, "error");
 				}
 			} else if (name && title) {
-				// Name and title provided, prompt for intent only
+				// Change was already created by structuredExecutor with empty intent.
+				// Prompt for intent and patch proposal.md — do NOT call createChange again.
 				const intentInput = await ctx.ui.input("Enter change intent (what this change accomplishes):");
-				if (intentInput) {
+				const changeData = result.data as { changePath?: string } | undefined;
+				if (intentInput && changeData?.changePath) {
 					try {
-						const newResult = createChange(ctx.cwd, name, title, intentInput);
+						const proposalPath = path.join(changeData.changePath, "proposal.md");
+						if (fs.existsSync(proposalPath)) {
+							const current = fs.readFileSync(proposalPath, "utf-8");
+							fs.writeFileSync(proposalPath, current.replace(/^## Intent\n[\s\S]*?(?=\n##|$)/m, `## Intent\n${intentInput}\n`));
+						}
 						emitOpenSpecState(ctx.cwd, pi);
-						ctx.ui.notify(`Created OpenSpec change: ${path.basename(newResult.changePath)}`, "info");
+						ctx.ui.notify(`Created OpenSpec change: ${path.basename(changeData.changePath)}`, "info");
 					} catch (e) {
-						ctx.ui.notify(`Error: ${(e as Error).message}`, "error");
+						ctx.ui.notify(`Error updating intent: ${(e as Error).message}`, "warning");
+						ctx.ui.notify(result.humanText, "info");
 					}
 				} else {
 					// Use the result we already have (with empty intent)
@@ -1558,7 +1565,7 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 			if (!lifecycle.archiveReady) {
 				const assessmentState = await getAssessmentState(ctx.cwd, changeInfo);
 				const message = [
-					`Archive refused for '${changeName}': ${lifecycle.nextAction ?? "lifecycle not ready for archive."}`,
+					`Archive refused for '${changeName}': ${lifecycle.reason ?? lifecycle.nextAction ?? "lifecycle not ready for archive."}`,
 					...(assessmentState.record ? ["", ...formatAssessmentSummary(assessmentState.record)] : []),
 				].join("\n");
 
@@ -1566,7 +1573,7 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 					ok: false,
 					summary: "Archive refused: lifecycle not ready",
 					humanText: message,
-					data: { lifecycle },
+					data: { lifecycle, gateRefusal: true },
 					effects: { sideEffectClass: "workspace-write" },
 					nextSteps: [
 						{ label: "Run verification", command: `/opsx:verify ${changeName}`, rationale: "Refresh assessment to unblock archive" },

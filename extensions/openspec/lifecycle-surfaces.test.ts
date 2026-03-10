@@ -52,7 +52,7 @@ function scaffoldChange(
 		addSpec(
 			changePath,
 			"core",
-			`## Added\n### Requirement: R1\nBasic requirement\n#### Scenario: S1\nGiven context\nWhen action\nThen result\n`,
+			`## ADDED Requirements\n\n### Requirement: R1\nBasic requirement\n#### Scenario: S1\nGiven context\nWhen action\nThen result\n`,
 		);
 	}
 

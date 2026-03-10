@@ -44,5 +44,6 @@ export function buildLifecycleSummary(repoPath: string, change: ChangeInfo): Lif
 		archiveBlocked: reconciliation.issues.length > 0,
 		archiveBlockedReason,
 		archiveBlockedIssueCodes: reconciliation.issues.map((issue) => issue.code),
+		boundNodeIds: reconciliation.boundNodeIds,
 	});
 }

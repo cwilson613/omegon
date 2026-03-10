@@ -248,7 +248,7 @@ describe("openspec lifecycle integration", () => {
     await persistAssessment("ambiguous");
     const ambiguous = await runCommand("opsx:archive", "my-change");
     assert.equal(ambiguous.notifications.length, 1);
-    assert.match(ambiguous.notifications[0].text, /structured assessment is ambiguous/i);
+    assert.match(ambiguous.notifications[0].text, /latest persisted assessment is ambiguous/i);
     assert.equal(ambiguous.notifications[0].level, "warning");
 
     pi = createFakePi();
@@ -266,7 +266,7 @@ describe("openspec lifecycle integration", () => {
 
     const stale = await runCommand("opsx:archive", "my-change");
     assert.equal(stale.notifications.length, 1);
-    assert.match(stale.notifications[0].text, /latest assessment is stale/i);
+    assert.match(stale.notifications[0].text, /implementation snapshot fingerprint differs/i);
     assert.equal(stale.notifications[0].level, "warning");
   });
 });
