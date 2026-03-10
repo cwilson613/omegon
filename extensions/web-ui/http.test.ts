@@ -60,6 +60,8 @@ describe("GET /api/state", () => {
 // ── Slice routes ──────────────────────────────────────────────────────────────
 
 const SLICE_PATHS = [
+  "/api/session",
+  "/api/dashboard",
   "/api/design-tree",
   "/api/openspec",
   "/api/cleave",

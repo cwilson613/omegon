@@ -9,6 +9,7 @@
 import * as http from "node:http";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { buildControlPlaneState, buildSlice } from "./state.ts";
 import type { ControlPlaneState } from "./types.ts";
 
@@ -34,15 +35,21 @@ export interface WebUIServer {
 
 // ── HTML shell ────────────────────────────────────────────────────────────────
 
-const STATIC_DIR = path.join(path.dirname(new URL(import.meta.url).pathname), "static");
+const STATIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "static");
+
+// Cache shell content at module load time to avoid synchronous I/O on every request.
+let _shellCache: string | null = null;
 
 function serveShell(): string {
+  if (_shellCache !== null) return _shellCache;
   const indexPath = path.join(STATIC_DIR, "index.html");
   if (fs.existsSync(indexPath)) {
-    return fs.readFileSync(indexPath, "utf8");
+    _shellCache = fs.readFileSync(indexPath, "utf8");
+  } else {
+    // Inline fallback if static dir is unavailable
+    _shellCache = buildInlineShell();
   }
-  // Inline fallback if static dir is unavailable
-  return buildInlineShell();
+  return _shellCache;
 }
 
 function buildInlineShell(): string {
@@ -156,7 +163,8 @@ function handleRequest(
   repoRoot: string,
   startedAt: number
 ): void {
-  const url = req.url ?? "/";
+  const rawUrl = req.url ?? "/";
+  const url = new URL(rawUrl, "http://x").pathname;
   const method = (req.method ?? "GET").toUpperCase();
 
   // ── Root shell ──
@@ -201,7 +209,7 @@ function handleRequest(
   }
 
   // ── 404 for everything else ──
-  jsonResponse(res, 404, { error: "Not Found", path: url });
+  jsonResponse(res, 404, { error: "Not Found" });
 }
 
 // ── Server lifecycle ──────────────────────────────────────────────────────────
@@ -238,8 +246,9 @@ export function startWebUIServer(options: WebUIServerOptions = {}): Promise<WebU
         get url() { return url; },
         get startedAt() { return startedAt; },
         stop(): Promise<void> {
-          return new Promise((res, rej) => {
-            server.close((err) => (err ? rej(err) : res()));
+          return new Promise((fulfill, fail) => {
+            server.closeAllConnections();
+            server.close((err) => (err ? fail(err) : fulfill()));
           });
         },
       };
