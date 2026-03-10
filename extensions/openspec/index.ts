@@ -864,54 +864,58 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 			const trimmedArgs = (args || "").trim();
 			
 			if (ctx.bridgeInvocation) {
-				// When called via bridge, we need to handle the toArgString conversion issue.
-				// Since arguments can contain spaces, we need a robust parsing approach.
-				// The bridge converts ["name", "title with spaces", "intent with spaces"] 
-				// to "name title with spaces intent with spaces".
-				// To solve this, we expect the caller to provide exactly 3 args through the bridge,
-				// and we know that space splitting will break multi-word arguments.
-				
-				const parts = trimmedArgs.split(/\s+/);
-				
-				// Simple case: if we have exactly 3 parts, they are name, title, intent (no internal spaces)
-				if (parts.length === 3) {
-					const [name, title, intent] = parts;
-					try {
-						const result = createChange(ctx.cwd, name, title, intent);
-						emitOpenSpecState(ctx.cwd, pi);
-						
-						return buildSlashCommandResult("opsx:propose", [name, title, intent], {
-							ok: true,
-							summary: `Created OpenSpec change: ${path.basename(result.changePath)}`,
-							humanText: `Created: ${result.changePath}\n\nNext: Add specs with \`/opsx:spec ${path.basename(result.changePath)}\` ` +
-								`or use \`openspec_manage\` with action \`generate_spec\``,
-							data: { changePath: result.changePath, files: result.files },
-							effects: {
-								sideEffectClass: "workspace-write",
-								filesChanged: result.files.map(f => path.join(result.changePath, f)),
-								lifecycleTouched: ["openspec"],
-							},
-							nextSteps: [
-								{ label: "Add specs", command: `/opsx:spec ${path.basename(result.changePath)}` },
-								{ label: "Generate specs", rationale: "Use openspec_manage with action generate_spec" },
-							],
-						});
-					} catch (e) {
-						return buildSlashCommandResult("opsx:propose", [name, title, intent], {
-							ok: false,
-							summary: `Error: ${(e as Error).message}`,
-							humanText: `Error: ${(e as Error).message}`,
-							effects: { sideEffectClass: "workspace-write" },
-						});
-					}
-				} else {
-					// Complex case: arguments contain spaces, so we can't parse reliably
-					// Return error indicating the bridge limitation
+				// When called via bridge, args are JSON-encoded to preserve boundaries
+				let parsedArgs: string[];
+				try {
+					parsedArgs = JSON.parse(trimmedArgs);
+				} catch (e) {
 					return buildSlashCommandResult("opsx:propose", [], {
 						ok: false,
-						summary: "Bridge parsing error",
-						humanText: "Error: Cannot reliably parse arguments with spaces via bridge. " +
-							"Use single-word arguments or call openspec_manage directly with separate name/title/intent parameters.",
+						summary: "Bridge argument parsing error",
+						humanText: "Error: Invalid argument format from bridge",
+						effects: { sideEffectClass: "workspace-write" },
+					});
+				}
+				
+				const [name, title, intent] = parsedArgs;
+				
+				if (!name) {
+					return buildSlashCommandResult("opsx:propose", parsedArgs, {
+						ok: false,
+						summary: "Usage: /opsx:propose <name> <title> <intent>",
+						humanText: "Error: name required for propose",
+						effects: { sideEffectClass: "workspace-write" },
+					});
+				}
+				
+				const finalTitle = title || name;
+				const finalIntent = intent || "";
+				
+				try {
+					const result = createChange(ctx.cwd, name, finalTitle, finalIntent);
+					emitOpenSpecState(ctx.cwd, pi);
+					
+					return buildSlashCommandResult("opsx:propose", [name, finalTitle, finalIntent], {
+						ok: true,
+						summary: `Created OpenSpec change: ${path.basename(result.changePath)}`,
+						humanText: `Created: ${result.changePath}\n\nNext: Add specs with \`/opsx:spec ${path.basename(result.changePath)}\` ` +
+							`or use \`openspec_manage\` with action \`generate_spec\``,
+						data: { changePath: result.changePath, files: result.files },
+						effects: {
+							sideEffectClass: "workspace-write",
+							filesChanged: result.files.map(f => path.join(result.changePath, f)),
+							lifecycleTouched: ["openspec"],
+						},
+						nextSteps: [
+							{ label: "Add specs", command: `/opsx:spec ${path.basename(result.changePath)}` },
+							{ label: "Generate specs", rationale: "Use openspec_manage with action generate_spec" },
+						],
+					});
+				} catch (e) {
+					return buildSlashCommandResult("opsx:propose", [name, finalTitle, finalIntent], {
+						ok: false,
+						summary: `Error: ${(e as Error).message}`,
+						humanText: `Error: ${(e as Error).message}`,
 						effects: { sideEffectClass: "workspace-write" },
 					});
 				}
@@ -931,7 +935,9 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 				}
 				
 				const finalTitle = title || name;
-				const intent = ""; // Interactive prompting for intent would be handled in interactiveHandler
+				// Interactive prompting for intent will be handled in interactiveHandler
+				// For now, use empty string and let handler prompt if needed
+				const intent = "";
 				
 				try {
 					const result = createChange(ctx.cwd, name, finalTitle, intent);
@@ -945,7 +951,7 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 						display: true,
 					}, { triggerTurn: false });
 
-					return buildSlashCommandResult("opsx:propose", [name, finalTitle], {
+					return buildSlashCommandResult("opsx:propose", [name, finalTitle, intent], {
 						ok: true,
 						summary: `Created OpenSpec change: ${path.basename(result.changePath)}`,
 						humanText: `Created: ${result.changePath}\n\nNext: Add specs with \`/opsx:spec ${path.basename(result.changePath)}\` ` +
@@ -962,7 +968,7 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 						],
 					});
 				} catch (e) {
-					return buildSlashCommandResult("opsx:propose", [name, finalTitle], {
+					return buildSlashCommandResult("opsx:propose", [name, finalTitle, intent], {
 						ok: false,
 						summary: `Error: ${(e as Error).message}`,
 						humanText: `Error: ${(e as Error).message}`,
@@ -972,10 +978,56 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 			}
 		},
 		interactiveHandler: async (result, args, ctx) => {
-			if (result.ok) {
-				ctx.ui.notify(result.humanText, "info");
-			} else {
+			if (!result.ok) {
 				ctx.ui.notify(result.humanText, "error");
+				return;
+			}
+
+			// Check if we need to prompt for intent 
+			const trimmedArgs = (args || "").trim();
+			const parts = trimmedArgs.split(/\s+/);
+			const name = parts[0];
+			const title = parts.slice(1).join(" ");
+			
+			if (name && !title) {
+				// Only name provided, prompt for title and intent
+				const titleInput = await ctx.ui.input("Enter change title:");
+				if (!titleInput) {
+					ctx.ui.notify("Change creation cancelled", "warning");
+					return;
+				}
+				
+				const intentInput = await ctx.ui.input("Enter change intent (what this change accomplishes):");
+				if (!intentInput) {
+					ctx.ui.notify("Change creation cancelled", "warning");
+					return;
+				}
+
+				try {
+					const newResult = createChange(ctx.cwd, name, titleInput, intentInput);
+					emitOpenSpecState(ctx.cwd, pi);
+					ctx.ui.notify(`Created OpenSpec change: ${path.basename(newResult.changePath)}`, "info");
+				} catch (e) {
+					ctx.ui.notify(`Error: ${(e as Error).message}`, "error");
+				}
+			} else if (name && title) {
+				// Name and title provided, prompt for intent only
+				const intentInput = await ctx.ui.input("Enter change intent (what this change accomplishes):");
+				if (intentInput) {
+					try {
+						const newResult = createChange(ctx.cwd, name, title, intentInput);
+						emitOpenSpecState(ctx.cwd, pi);
+						ctx.ui.notify(`Created OpenSpec change: ${path.basename(newResult.changePath)}`, "info");
+					} catch (e) {
+						ctx.ui.notify(`Error: ${(e as Error).message}`, "error");
+					}
+				} else {
+					// Use the result we already have (with empty intent)
+					ctx.ui.notify(result.humanText, "info");
+				}
+			} else {
+				// All arguments provided or error case
+				ctx.ui.notify(result.humanText, result.ok ? "info" : "error");
 			}
 		},
 	} satisfies BridgedSlashCommand);
@@ -988,7 +1040,18 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 			sideEffectClass: "workspace-write",
 		},
 		structuredExecutor: async (args: string, ctx: SlashCommandExecutionContext) => {
-			const changeName = (args || "").trim();
+			let changeName: string;
+			if (ctx.bridgeInvocation) {
+				try {
+					const parsedArgs = JSON.parse((args || "").trim());
+					changeName = parsedArgs[0] || "";
+				} catch (e) {
+					changeName = (args || "").trim();
+				}
+			} else {
+				changeName = (args || "").trim();
+			}
+			
 			if (!changeName) {
 				return buildSlashCommandResult("opsx:spec", [], {
 					ok: false,
@@ -1013,48 +1076,83 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 				proposalContent = fs.readFileSync(path.join(change.path, "proposal.md"), "utf-8");
 			}
 
-			const content = [
-				`[OpenSpec: Generate specs for \`${changeName}\`]`,
-				"",
-				change.hasProposal ? `Proposal:\n${proposalContent.slice(0, 3000)}` : "No proposal found.",
-				"",
-				"Generate Given/When/Then specs for this change using `openspec_manage` with action `add_spec`.",
-				"Each spec file should have:",
-				"  - `## ADDED Requirements` section",
-				"  - `### Requirement: <title>` for each requirement",
-				"  - `#### Scenario: <title>` with Given/When/Then clauses",
-				"",
-				"Make scenarios specific and testable — they will drive the implementation and verification.",
-			].join("\n");
+			// Actually generate specs instead of just requesting them
+			try {
+				if (!change.hasProposal) {
+					return buildSlashCommandResult("opsx:spec", [changeName], {
+						ok: false,
+						summary: "No proposal found",
+						humanText: `Change '${changeName}' has no proposal. Run /opsx:propose first.`,
+						effects: { sideEffectClass: "workspace-write" },
+						nextSteps: [
+							{ label: "Create proposal", command: `/opsx:propose ${changeName}` },
+						],
+					});
+				}
 
-			if (!ctx.bridgeInvocation) {
-				pi.sendMessage({
-					customType: "openspec-spec-request",
-					content,
-					display: true,
-				}, { triggerTurn: true });
-			}
+				// Generate a default spec from the proposal
+				const specContent = generateSpecFromProposal({
+					domain: "core",
+					proposalContent,
+				});
 
-			return buildSlashCommandResult("opsx:spec", [changeName], {
-				ok: true,
-				summary: `Spec generation requested for '${changeName}'`,
-				humanText: content,
-				data: { changeName, hasProposal: change.hasProposal, proposalContent: proposalContent.slice(0, 3000) },
-				effects: { sideEffectClass: "workspace-write" },
-				nextSteps: [
-					{ label: "Generate specs", command: "openspec_manage action:add_spec", rationale: "Use tool to add Given/When/Then scenarios" },
-				],
-			});
-		},
-		agentHandler: async (result, _args, _ctx) => {
-			if (result.ok && result.humanText) {
-				pi.sendMessage({
-					customType: "openspec-spec-request",
-					content: result.humanText,
-					display: true,
-				}, { triggerTurn: true });
+				// Ensure specs directory exists
+				const specsDir = path.join(change.path, "specs");
+				fs.mkdirSync(specsDir, { recursive: true });
+
+				// Write the generated spec
+				const specFilePath = path.join(specsDir, "core.md");
+				fs.writeFileSync(specFilePath, specContent);
+
+				emitOpenSpecState(ctx.cwd, pi);
+
+				const content = [
+					`Generated spec file: specs/core.md`,
+					"",
+					change.hasProposal ? `Based on proposal content from proposal.md` : "Generated default spec structure.",
+					"",
+					"Edit the spec to add more specific Given/When/Then scenarios.",
+					"Each scenario should be specific and testable.",
+				].join("\n");
+
+				if (!ctx.bridgeInvocation) {
+					pi.sendMessage({
+						customType: "openspec-spec-generated",
+						content: `Generated spec for \`${changeName}\`:\n\n${content}`,
+						display: true,
+					}, { triggerTurn: false });
+				}
+
+				return buildSlashCommandResult("opsx:spec", [changeName], {
+					ok: true,
+					summary: `Generated spec for '${changeName}'`,
+					humanText: content,
+					data: { 
+						changeName, 
+						specFilePath: path.relative(ctx.cwd, specFilePath),
+						hasProposal: change.hasProposal, 
+						generatedContent: specContent.slice(0, 1000) 
+					},
+					effects: { 
+						sideEffectClass: "workspace-write",
+						filesChanged: [path.relative(ctx.cwd, specFilePath)],
+						lifecycleTouched: ["openspec"],
+					},
+					nextSteps: [
+						{ label: "Review and edit spec", command: `edit ${path.relative(ctx.cwd, specFilePath)}` },
+						{ label: "Generate design and tasks", command: `/opsx:ff ${changeName}` },
+					],
+				});
+			} catch (e) {
+				return buildSlashCommandResult("opsx:spec", [changeName], {
+					ok: false,
+					summary: `Error generating spec: ${(e as Error).message}`,
+					humanText: `Error generating spec: ${(e as Error).message}`,
+					effects: { sideEffectClass: "workspace-write" },
+				});
 			}
 		},
+		// No agentHandler needed - the structuredExecutor does the work
 	} satisfies BridgedSlashCommand);
 
 	bridge.register(pi, {
@@ -1065,7 +1163,18 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 			sideEffectClass: "workspace-write",
 		},
 		structuredExecutor: async (args: string, ctx: SlashCommandExecutionContext) => {
-			const changeName = (args || "").trim();
+			let changeName: string;
+			if (ctx.bridgeInvocation) {
+				try {
+					const parsedArgs = JSON.parse((args || "").trim());
+					changeName = parsedArgs[0] || "";
+				} catch (e) {
+					changeName = (args || "").trim();
+				}
+			} else {
+				changeName = (args || "").trim();
+			}
+			
 			if (!changeName) {
 				return buildSlashCommandResult("opsx:ff", [], {
 					ok: false,
@@ -1178,28 +1287,35 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 
 			emitOpenSpecState(ctx.cwd, pi);
 
+			// Read the generated content to include in the response
+			const generatedContent: { [filename: string]: string } = {};
+			for (const filename of files) {
+				const filePath = path.join(change.path, filename);
+				generatedContent[filename] = fs.readFileSync(filePath, "utf-8");
+			}
+
 			const content = [
-				`[OpenSpec: Fast-forward \`${changeName}\`]`,
+				`Generated files for '${changeName}':`,
 				"",
-				`Use \`openspec_manage\` with action \`fast_forward\` and change_name \`${changeName}\` ` +
-				`to generate design.md and tasks.md from the specs.`,
+				...files.map(f => `- ${f}`),
 				"",
-				"Then present the generated tasks for review before running `/cleave`.",
+				"Files are ready for review and implementation.",
+				"Next: Review the generated tasks and run `/cleave` to execute them.",
 			].join("\n");
 
 			if (!ctx.bridgeInvocation) {
 				pi.sendMessage({
-					customType: "openspec-ff-request",
-					content,
+					customType: "openspec-ff-complete",
+					content: `Generated design and tasks for \`${changeName}\`:\n\n${content}`,
 					display: true,
-				}, { triggerTurn: true });
+				}, { triggerTurn: false });
 			}
 
 			return buildSlashCommandResult("opsx:ff", [changeName], {
 				ok: true,
 				summary: `Fast-forwarded '${changeName}': generated ${files.join(", ")}`,
-				humanText: `Fast-forwarded '${changeName}': generated ${files.join(", ")}\n\nNext: Review the generated files, then \`/cleave\` to execute tasks in parallel.`,
-				data: { files, changeName },
+				humanText: content,
+				data: { files, changeName, generatedContent },
 				effects: {
 					sideEffectClass: "workspace-write",
 					filesChanged: files.map(f => path.join(change.path, f)),
@@ -1211,21 +1327,7 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 				],
 			});
 		},
-		agentHandler: async (result, _args, _ctx) => {
-			if (result.ok && result.data && typeof result.data === 'object' && 
-			    'changeName' in result.data && 'files' in result.data) {
-				const data = result.data as { changeName: string; files: string[] };
-				pi.sendMessage({
-					customType: "openspec-ff-request",
-					content: [
-						`[OpenSpec: Fast-forward \`${data.changeName}\`]`,
-						"",
-						`Generated ${data.files.join(", ")}. Review the files and run \`/cleave\` to execute tasks.`,
-					].join("\n"),
-					display: true,
-				}, { triggerTurn: true });
-			}
-		},
+		// No agentHandler needed - the structuredExecutor returns complete information
 	} satisfies BridgedSlashCommand);
 
 	bridge.register(pi, {
@@ -1289,7 +1391,18 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 			sideEffectClass: "read",
 		},
 		structuredExecutor: async (args: string, ctx: SlashCommandExecutionContext) => {
-			const changeName = (args || "").trim();
+			let changeName: string;
+			if (ctx.bridgeInvocation) {
+				try {
+					const parsedArgs = JSON.parse((args || "").trim());
+					changeName = parsedArgs[0] || "";
+				} catch (e) {
+					changeName = (args || "").trim();
+				}
+			} else {
+				changeName = (args || "").trim();
+			}
+			
 			if (!changeName) {
 				return buildSlashCommandResult("opsx:verify", [], {
 					ok: false,
@@ -1462,7 +1575,18 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 			sideEffectClass: "workspace-write",
 		},
 		structuredExecutor: async (args: string, ctx: SlashCommandExecutionContext) => {
-			const changeName = (args || "").trim();
+			let changeName: string;
+			if (ctx.bridgeInvocation) {
+				try {
+					const parsedArgs = JSON.parse((args || "").trim());
+					changeName = parsedArgs[0] || "";
+				} catch (e) {
+					changeName = (args || "").trim();
+				}
+			} else {
+				changeName = (args || "").trim();
+			}
+			
 			if (!changeName) {
 				return buildSlashCommandResult("opsx:archive", [], {
 					ok: false,
@@ -1584,7 +1708,18 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 			sideEffectClass: "workspace-write",
 		},
 		structuredExecutor: async (args: string, ctx: SlashCommandExecutionContext) => {
-			const changeName = (args || "").trim();
+			let changeName: string;
+			if (ctx.bridgeInvocation) {
+				try {
+					const parsedArgs = JSON.parse((args || "").trim());
+					changeName = parsedArgs[0] || "";
+				} catch (e) {
+					changeName = (args || "").trim();
+				}
+			} else {
+				changeName = (args || "").trim();
+			}
+			
 			if (!changeName) {
 				return buildSlashCommandResult("opsx:apply", [], {
 					ok: false,

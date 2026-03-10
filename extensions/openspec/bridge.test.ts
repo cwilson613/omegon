@@ -156,41 +156,49 @@ describe("openspec bridge", () => {
     assert.equal(changeData.doneTasks, 2);
   });
 
-  it("opsx:propose fails with multi-word arguments via bridge", async () => {
+  it("opsx:propose handles multi-word arguments via bridge", async () => {
     const result = await bridge.execute(
       { command: "opsx:propose", args: ["new-feature", "New Feature", "Add cool stuff"] }, 
       { cwd: tmpDir, bridgeInvocation: true } as any
     );
 
-    assert.equal(result.ok, false);
+    assert.equal(result.ok, true);
     assert.equal(result.effects.sideEffectClass, "workspace-write");
-    assert.match(result.humanText, /Cannot reliably parse arguments with spaces/);
+    assert.ok(result.data);
+    assert.ok((result.data as any).changePath);
+    
+    // Verify the proposal was created with the correct title and intent
+    const changePath = (result.data as any).changePath;
+    assert.ok(fs.existsSync(path.join(changePath, "proposal.md")));
+    
+    const proposalContent = fs.readFileSync(path.join(changePath, "proposal.md"), "utf-8");
+    assert.match(proposalContent, /# New Feature/);
+    assert.match(proposalContent, /Add cool stuff/);
   });
 
-  it("opsx:propose incorrectly parses space-containing args as separate", async () => {
-    // This test shows the limitation: ["missing-intent", "Missing Intent"] 
-    // becomes 3 space-separated parts: "missing-intent", "Missing", "Intent"
-    // The bridge treats this as valid 3-argument input
+  it("opsx:propose correctly handles space-containing args", async () => {
+    // With JSON encoding, multi-word arguments are preserved correctly
     const result = await bridge.execute(
-      { command: "opsx:propose", args: ["missing-intent", "Missing Intent"] }, 
+      { command: "opsx:propose", args: ["space-test", "Title With Spaces", "Intent with multiple words"] }, 
       { cwd: tmpDir, bridgeInvocation: true } as any
     );
 
-    // This succeeds (incorrectly) because the bridge converts the 2-element array 
-    // into a 3-element split: name="missing-intent", title="Missing", intent="Intent"
+    // This succeeds correctly with the full title and intent preserved
     assert.equal(result.ok, true);
     assert.equal(result.effects.sideEffectClass, "workspace-write");
     
     const changePath = (result.data as any).changePath;
     assert.ok(fs.existsSync(path.join(changePath, "proposal.md")));
     
-    // The proposal will contain "Missing" as title and "Intent" as intent, not "Missing Intent" as title
+    // The proposal contains the full title and intent with spaces preserved
     const proposalContent = fs.readFileSync(path.join(changePath, "proposal.md"), "utf-8");
-    assert.match(proposalContent, /# Missing/); // title becomes just "Missing"
-    assert.match(proposalContent, /Intent/); // intent becomes just "Intent"
+    assert.match(proposalContent, /# Title With Spaces/); // title preserved with spaces
+    assert.match(proposalContent, /Intent with multiple words/); // intent preserved with spaces
   });
 
   it("opsx:propose works with single-word arguments via bridge", async () => {
+    // This test validates the simple case - single words don't have parsing issues
+    // The real challenge is multi-word arguments (tested separately)
     const result = await bridge.execute(
       { command: "opsx:propose", args: ["single-word-test", "SingleTitle", "SingleIntent"] }, 
       { cwd: tmpDir, bridgeInvocation: true } as any
@@ -209,15 +217,24 @@ describe("openspec bridge", () => {
     assert.match(proposalContent, /SingleIntent/);
   });
 
-  it("opsx:propose fails gracefully with multi-word arguments via bridge", async () => {
+  it("opsx:propose handles complex multi-word arguments via bridge", async () => {
     const result = await bridge.execute(
       { command: "opsx:propose", args: ["multi-word-test", "My Feature Title", "A detailed intent description"] }, 
       { cwd: tmpDir, bridgeInvocation: true } as any
     );
 
-    assert.equal(result.ok, false);
+    assert.equal(result.ok, true);
     assert.equal(result.effects.sideEffectClass, "workspace-write");
-    assert.match(result.humanText, /Cannot reliably parse arguments with spaces/);
+    assert.ok(result.data);
+    assert.ok((result.data as any).changePath);
+    
+    // Verify the proposal was created with the correct title and intent
+    const changePath = (result.data as any).changePath;
+    assert.ok(fs.existsSync(path.join(changePath, "proposal.md")));
+    
+    const proposalContent = fs.readFileSync(path.join(changePath, "proposal.md"), "utf-8");
+    assert.match(proposalContent, /# My Feature Title/);
+    assert.match(proposalContent, /A detailed intent description/);
   });
 
   it("opsx:verify returns structured verification status", async () => {

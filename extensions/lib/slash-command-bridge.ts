@@ -80,7 +80,9 @@ const EXECUTE_PARAMS = Type.Object({
 export type SlashCommandBridgeExecuteParams = Static<typeof EXECUTE_PARAMS>;
 
 function toArgString(args: readonly string[] | undefined): string {
-  return (args ?? []).join(" ").trim();
+  // Use JSON encoding to preserve argument boundaries for parsing
+  // This allows arguments with spaces to be reconstructed properly
+  return JSON.stringify(args ?? []);
 }
 
 function summarize(command: string, args: readonly string[] | undefined): string {
