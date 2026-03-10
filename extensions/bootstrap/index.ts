@@ -488,13 +488,62 @@ async function installMissing(ctx: CommandContext, tiers: DepTier[]): Promise<vo
 	}
 }
 
-/** Run a shell command asynchronously with streaming output, returning exit code */
-function runAsync(cmd: string, timeoutMs: number = 300_000): Promise<number> {
+/**
+ * Determine whether a command string requires a shell interpreter.
+ *
+ * Commands that contain shell operators (pipes, redirects, logical
+ * connectors, glob expansions, subshells, environment variable
+ * assignments, or quoted whitespace) cannot be safely split into
+ * argv tokens without a shell.  Everything else can be dispatched
+ * directly via execve-style spawn.
+ */
+export function requiresShell(cmd: string): boolean {
+	// Shell metacharacters that need sh -c interpretation
+	return /[|&;<>()$`\\!*?[\]{}#~]/.test(cmd);
+}
+
+/**
+ * Split a simple (no-shell) command string into [executable, ...args].
+ *
+ * Only call this after confirming `requiresShell(cmd) === false`.
+ * Splitting is naive whitespace-based — sufficient for the dep install
+ * commands in deps.ts which do not use quoting.
+ */
+export function parseCommandArgv(cmd: string): [string, ...string[]] {
+	const parts = cmd.trim().split(/\s+/).filter(Boolean);
+	if (parts.length === 0) throw new Error("Empty command");
+	return parts as [string, ...string[]];
+}
+
+/**
+ * Run a helper command asynchronously with streaming output.
+ *
+ * For commands that do not require shell interpretation, the executable
+ * is invoked directly (no shell involved).  Commands that require shell
+ * metacharacters (pipes, ||, subshells, etc.) are passed to `sh -c`
+ * as an isolated, constrained shell invocation — callers must NOT
+ * construct these strings by concatenating user-supplied fragments.
+ *
+ * The install commands come exclusively from the static `deps.ts`
+ * registry and are never influenced by operator input.
+ *
+ * Returns the process exit code (124 = timeout).
+ */
+export function runAsync(cmd: string, timeoutMs: number = 300_000): Promise<number> {
 	return new Promise((resolve) => {
-		const child = spawn("sh", ["-c", cmd], {
-			stdio: "inherit",
-			env: { ...process.env, NONINTERACTIVE: "1", HOMEBREW_NO_AUTO_UPDATE: "1" },
-		});
+		const env = { ...process.env, NONINTERACTIVE: "1", HOMEBREW_NO_AUTO_UPDATE: "1" };
+
+		let child;
+		if (requiresShell(cmd)) {
+			// Shell-bound path: isolated to static dep-registry commands only.
+			// The `cmd` value originates from `InstallOption.cmd` in deps.ts —
+			// never from user input or string concatenation at the call site.
+			child = spawn("sh", ["-c", cmd], { stdio: "inherit", env });
+		} else {
+			// Preferred path: explicit executable + argv, no shell involved.
+			const [exe, ...args] = parseCommandArgv(cmd);
+			child = spawn(exe, args, { stdio: "inherit", env });
+		}
 
 		const timer = setTimeout(() => {
 			child.kill("SIGTERM");
