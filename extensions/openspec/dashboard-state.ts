@@ -2,7 +2,8 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
 import { debug } from "../debug.ts";
-import { listChanges } from "./spec.ts";
+import { listChanges, getAssessmentStatus, resolveLifecycleSummary } from "./spec.ts";
+import { evaluateLifecycleReconciliation } from "./reconcile.ts";
 
 /**
  * Emit OpenSpec state to sharedState for the unified dashboard.
@@ -19,11 +20,31 @@ export function emitOpenSpecState(cwd: string, pi: ExtensionAPI): void {
 			if (c.hasSpecs) artifacts.push("specs");
 			if (c.hasTasks) artifacts.push("tasks");
 			const specDomains = c.specs.map((s) => s.domain).filter(Boolean);
+
+			// Resolve canonical lifecycle summary — single source of truth for
+			// readiness and verification substate, shared with status/get surfaces.
+			const assessment = getAssessmentStatus(cwd, c.name);
+			const reconciliation = evaluateLifecycleReconciliation(cwd, c.name);
+			const archiveBlockedReason = reconciliation.issues.length > 0
+				? reconciliation.issues.map((issue) => issue.suggestedAction).join(" ")
+				: null;
+			const lifecycle = resolveLifecycleSummary({
+				change: c,
+				record: assessment.record,
+				freshness: assessment.freshness,
+				archiveBlocked: reconciliation.issues.length > 0,
+				archiveBlockedReason,
+				archiveBlockedIssueCodes: reconciliation.issues.map((issue) => issue.code),
+			});
+
 			return {
 				name: c.name,
-				stage: c.stage || "proposal",
-				tasksDone: c.doneTasks,
-				tasksTotal: c.totalTasks,
+				stage: lifecycle.stage,
+				verificationSubstate: lifecycle.verificationSubstate,
+				archiveReady: lifecycle.archiveReady,
+				bindingStatus: lifecycle.bindingStatus,
+				tasksDone: lifecycle.doneTasks,
+				tasksTotal: lifecycle.totalTasks,
 				artifacts,
 				specDomains,
 				path: c.path,

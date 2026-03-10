@@ -45,9 +45,11 @@ import {
 	writeAssessmentRecord,
 	getAssessmentStatus,
 	resolveVerificationStatus,
+	resolveLifecycleSummary,
 	type AssessmentKind,
 	type AssessmentOutcome,
 	type AssessmentRecord,
+	type LifecycleSummary,
 	type VerificationStatus,
 } from "./spec.ts";
 import { transitionDesignNodesOnArchive } from "./archive-gate.ts";
@@ -251,19 +253,34 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 		];
 	}
 
-	function getVerificationStatus(cwd: string, change: ChangeInfo): VerificationStatus {
+	function getLifecycleSummary(cwd: string, change: ChangeInfo): LifecycleSummary {
 		const assessment = getAssessmentStatus(cwd, change.name);
 		const reconciliation = evaluateLifecycleReconciliation(cwd, change.name);
 		const archiveBlockedReason = reconciliation.issues.length > 0
 			? reconciliation.issues.map((issue) => issue.suggestedAction).join(" ")
 			: null;
-		return resolveVerificationStatus({
-			stage: change.stage,
+		return resolveLifecycleSummary({
+			change,
 			record: assessment.record,
 			freshness: assessment.freshness,
 			archiveBlocked: reconciliation.issues.length > 0,
 			archiveBlockedReason,
 			archiveBlockedIssueCodes: reconciliation.issues.map((issue) => issue.code),
+		});
+	}
+
+	/** @deprecated Use getLifecycleSummary — kept for internal callsites not yet migrated */
+	function getVerificationStatus(cwd: string, change: ChangeInfo): VerificationStatus {
+		const summary = getLifecycleSummary(cwd, change);
+		return resolveVerificationStatus({
+			stage: summary.stage,
+			record: summary.assessmentFreshness !== null
+				? getAssessmentStatus(cwd, change.name).record
+				: null,
+			freshness: summary.assessmentFreshness ?? { current: false, reasons: ["No assessment record"] },
+			archiveBlocked: !summary.archiveReady && summary.verificationSubstate !== null && summary.verificationSubstate !== "archive-ready",
+			archiveBlockedReason: summary.nextAction,
+			archiveBlockedIssueCodes: summary.bindingStatus === "unbound" ? ["missing_design_binding"] : [],
 			changeName: change.name,
 		});
 	}
@@ -342,12 +359,12 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 					}
 
 					const lines = changes.map((c) => {
-						const verification = getVerificationStatus(cwd, c);
-						const verificationLine = verification.substate
-							? `\n  Verification: ${verification.substate}`
+						const lifecycle = getLifecycleSummary(cwd, c);
+						const verificationLine = lifecycle.verificationSubstate
+							? `\n  Verification: ${lifecycle.verificationSubstate}`
 							: "";
-						const nextLine = verification.nextAction
-							? `\n  Next: ${verification.nextAction}`
+						const nextLine = lifecycle.nextAction
+							? `\n  Next: ${lifecycle.nextAction}`
 							: `\n  ${nextStepHint(c)}`;
 						return `${formatChangeStatus(c)}${verificationLine}${nextLine}`;
 					});
@@ -356,15 +373,17 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 						content: [{ type: "text", text: lines.join("\n\n") }],
 						details: {
 							changes: changes.map((c) => {
-								const verification = getVerificationStatus(cwd, c);
+								const lifecycle = getLifecycleSummary(cwd, c);
 								return {
 									name: c.name,
-									stage: c.stage,
-									verificationStage: verification.coarseStage,
-									verificationSubstate: verification.substate,
-									nextAction: verification.nextAction,
-									totalTasks: c.totalTasks,
-									doneTasks: c.doneTasks,
+									stage: lifecycle.stage,
+									verificationStage: lifecycle.stage,
+									verificationSubstate: lifecycle.verificationSubstate,
+									archiveReady: lifecycle.archiveReady,
+									bindingStatus: lifecycle.bindingStatus,
+									nextAction: lifecycle.nextAction,
+									totalTasks: lifecycle.totalTasks,
+									doneTasks: lifecycle.doneTasks,
 									specCount: countScenarios(c.specs),
 								};
 							}),
@@ -411,13 +430,12 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 						}
 					}
 
-					const verification = getVerificationStatus(cwd, change);
-					if (verification.substate) {
-						lines.push("", `**Verification substate:** ${verification.substate}`);
-						if (verification.reason) lines.push(`**Why:** ${verification.reason}`);
+					const lifecycle = getLifecycleSummary(cwd, change);
+					if (lifecycle.verificationSubstate) {
+						lines.push("", `**Verification substate:** ${lifecycle.verificationSubstate}`);
 					}
 
-					lines.push("", verification.nextAction ? `Next: ${verification.nextAction}` : nextStepHint(change));
+					lines.push("", lifecycle.nextAction ? `Next: ${lifecycle.nextAction}` : nextStepHint(change));
 
 					// Include proposal content if it exists
 					if (change.hasProposal) {
@@ -1353,9 +1371,9 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 			}
 
 			const lines = changes.map((c) => {
-				const verification = getVerificationStatus(ctx.cwd, c);
-				const verificationLine = verification.substate ? `\n  Verification: ${verification.substate}` : "";
-				const nextLine = verification.nextAction ? `\n  → ${verification.nextAction}` : `\n  → ${nextStepHint(c)}`;
+				const lifecycle = getLifecycleSummary(ctx.cwd, c);
+				const verificationLine = lifecycle.verificationSubstate ? `\n  Verification: ${lifecycle.verificationSubstate}` : "";
+				const nextLine = lifecycle.nextAction ? `\n  → ${lifecycle.nextAction}` : `\n  → ${nextStepHint(c)}`;
 				return `${formatChangeStatus(c)}${verificationLine}${nextLine}`;
 			});
 
@@ -1365,15 +1383,17 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 				humanText: lines.join("\n\n"),
 				data: {
 					changes: changes.map((c) => {
-						const verification = getVerificationStatus(ctx.cwd, c);
+						const lifecycle = getLifecycleSummary(ctx.cwd, c);
 						return {
 							name: c.name,
-							stage: c.stage,
-							verificationStage: verification.coarseStage,
-							verificationSubstate: verification.substate,
-							nextAction: verification.nextAction,
-							totalTasks: c.totalTasks,
-							doneTasks: c.doneTasks,
+							stage: lifecycle.stage,
+							verificationStage: lifecycle.stage,
+							verificationSubstate: lifecycle.verificationSubstate,
+							archiveReady: lifecycle.archiveReady,
+							bindingStatus: lifecycle.bindingStatus,
+							nextAction: lifecycle.nextAction,
+							totalTasks: lifecycle.totalTasks,
+							doneTasks: lifecycle.doneTasks,
 							specCount: countScenarios(c.specs),
 						};
 					}),
@@ -1435,12 +1455,12 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 			}
 
 			const assessmentState = await getAssessmentState(ctx.cwd, change);
-			const verification = getVerificationStatus(ctx.cwd, change);
-			const effectiveSubstate = verification.substate
+			const lifecycle = getLifecycleSummary(ctx.cwd, change);
+			const effectiveSubstate = lifecycle.verificationSubstate
 				?? (assessmentState.record?.outcome === "reopen" ? "reopened-work" : null);
-			const effectiveReason = verification.reason
+			const effectiveReason: string | null = lifecycle.reason
 				?? (effectiveSubstate === "reopened-work" ? "The latest persisted assessment reopened work." : null);
-			const effectiveNextAction = verification.nextAction
+			const effectiveNextAction = lifecycle.nextAction
 				?? (effectiveSubstate === "reopened-work"
 					? `Complete follow-up work for ${changeName}, reconcile lifecycle artifacts, then re-run /assess spec ${changeName}`
 					: null);
@@ -1504,7 +1524,7 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 			const content = [
 				`[OpenSpec: Verify \`${changeName}\`]`,
 				"",
-				`Verification state: ${effectiveSubstate ?? verification.substate ?? change.stage}`,
+				`Verification state: ${effectiveSubstate ?? lifecycle.verificationSubstate ?? change.stage}`,
 				...(effectiveReason ? [effectiveReason, ""] : []),
 				`${refreshReason}`,
 				"",
@@ -1529,7 +1549,7 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 				humanText: content,
 				data: {
 					changeName,
-					substate: effectiveSubstate ?? verification.substate ?? change.stage,
+					substate: effectiveSubstate ?? lifecycle.verificationSubstate ?? change.stage,
 					reason: refreshReason,
 					nextAction: `/assess spec ${changeName}`,
 					assessment: assessmentState.record,
