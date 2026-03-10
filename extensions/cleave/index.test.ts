@@ -2,11 +2,28 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { describe, it } from "node:test";
 
+function runJsonScript(script: string) {
+	return JSON.parse(execFileSync("node", ["-e", script], {
+		cwd: process.cwd(),
+		encoding: "utf-8",
+		stdio: ["ignore", "pipe", "pipe"],
+	}));
+}
+
 function runAssessSpecScenario(mode: "bridged" | "interactive" | "reopen") {
 	const script = String.raw`
 (async () => {
   const { createAssessStructuredExecutors } = await import('./extensions/cleave/index.ts');
   const mode = ${JSON.stringify(mode)};
+  const changeName = 'cleave-dirty-tree-checkpointing';
+  const scenarios = [
+    { domain: 'cleave/preflight', requirement: 'Cleave runs a dirty-tree preflight before worktree dispatch', scenario: 'clean tree proceeds without preflight interruption', status: 'PASS', evidence: ['extensions/cleave/index.ts'] },
+    { domain: 'cleave/preflight', requirement: 'Cleave runs a dirty-tree preflight before worktree dispatch', scenario: 'dirty tree shows classified preflight choices', status: 'PASS', evidence: ['extensions/cleave/index.ts'] },
+    { domain: 'cleave/preflight', requirement: 'Volatile artifacts do not block cleave by default', scenario: 'volatile artifacts are visible but separately handled', status: 'PASS', evidence: ['extensions/cleave/index.ts'] },
+    { domain: 'cleave/preflight', requirement: 'Checkpointing is an explicit operator-approved action', scenario: 'checkpoint action prepares a scoped commit', status: mode === 'reopen' ? 'FAIL' : 'PASS', evidence: ['extensions/cleave/index.ts'], notes: mode === 'reopen' ? 'Reopened work.' : undefined },
+    { domain: 'cleave/preflight', requirement: 'Preflight handles transient low-confidence classification conservatively', scenario: 'unknown files are not silently included in checkpoint scope', status: 'PASS', evidence: ['extensions/cleave/index.ts'] },
+    { domain: 'cleave/preflight', requirement: 'Preflight works without an active OpenSpec change', scenario: 'generic classification works without OpenSpec context', status: 'PASS', evidence: ['extensions/cleave/index.ts'] },
+  ];
   let runnerCalled = false;
   const pi = {
     exec: async (_cmd, args) => {
@@ -22,32 +39,16 @@ function runAssessSpecScenario(mode: "bridged" | "interactive" | "reopen") {
       if (mode === 'interactive') {
         throw new Error('interactive assess should not invoke the bridged runner');
       }
-      if (mode === 'reopen') {
-        return {
-          assessed: {
-            summary: { total: 4, pass: 3, fail: 1, unclear: 0 },
-            scenarios: [
-              { domain: 'harness/slash-commands', requirement: 'Bridged /assess spec returns a completed structured result', scenario: 'scenario 1', status: 'PASS', evidence: ['extensions/cleave/index.ts'] },
-              { domain: 'harness/slash-commands', requirement: 'Interactive /assess may remain follow-up driven without corrupting the bridge contract', scenario: 'scenario 2', status: 'PASS', evidence: ['extensions/cleave/index.ts'] },
-              { domain: 'harness/slash-commands', requirement: 'Bridged assess lifecycle metadata is trustworthy for reconciliation', scenario: 'scenario 3', status: 'FAIL', evidence: ['extensions/cleave/index.ts'], notes: 'Reopened work.' },
-              { domain: 'harness/slash-commands', requirement: 'Bridged /assess preserves normalized invocation args', scenario: 'scenario 4', status: 'PASS', evidence: ['extensions/cleave/bridge.ts'] },
-            ],
-            changedFiles: ['extensions/cleave/index.ts'],
-            constraints: ['Lifecycle metadata must be derived after scenario evaluation'],
-          },
-        };
-      }
       return {
         assessed: {
-          summary: { total: 4, pass: 4, fail: 0, unclear: 0 },
-          scenarios: [
-            { domain: 'harness/slash-commands', requirement: 'Bridged /assess spec returns a completed structured result', scenario: 'scenario 1', status: 'PASS', evidence: ['extensions/cleave/index.ts'] },
-            { domain: 'harness/slash-commands', requirement: 'Interactive /assess may remain follow-up driven without corrupting the bridge contract', scenario: 'scenario 2', status: 'PASS', evidence: ['extensions/cleave/index.ts'] },
-            { domain: 'harness/slash-commands', requirement: 'Bridged assess lifecycle metadata is trustworthy for reconciliation', scenario: 'scenario 3', status: 'PASS', evidence: ['extensions/cleave/index.ts'] },
-            { domain: 'harness/slash-commands', requirement: 'Bridged /assess preserves normalized invocation args', scenario: 'scenario 4', status: 'PASS', evidence: ['extensions/cleave/bridge.ts'] },
-          ],
-          changedFiles: [],
-          constraints: ['Bridge result must remain authoritative in-band'],
+          summary: mode === 'reopen'
+            ? { total: 6, pass: 5, fail: 1, unclear: 0 }
+            : { total: 6, pass: 6, fail: 0, unclear: 0 },
+          scenarios,
+          changedFiles: mode === 'reopen' ? ['extensions/cleave/index.ts'] : [],
+          constraints: mode === 'reopen'
+            ? ['Lifecycle metadata must be derived after scenario evaluation']
+            : ['Bridge result must remain authoritative in-band'],
         },
       };
     },
@@ -55,7 +56,7 @@ function runAssessSpecScenario(mode: "bridged" | "interactive" | "reopen") {
   const ctx = mode === 'interactive'
     ? { cwd: process.cwd(), hasUI: true, waitForIdle: async () => {}, model: { id: 'test-model' } }
     : { cwd: process.cwd(), bridgeInvocation: true, hasUI: false, model: { id: 'test-model' } };
-  const result = await executors.spec('assess-bridge-completed-results', ctx);
+  const result = await executors.spec(changeName, ctx);
   process.stdout.write(JSON.stringify({
     summary: result.summary,
     completion: result.completion,
@@ -70,11 +71,57 @@ function runAssessSpecScenario(mode: "bridged" | "interactive" | "reopen") {
 })();
 `;
 
-	return JSON.parse(execFileSync("node", ["-e", script], {
-		cwd: process.cwd(),
-		encoding: "utf-8",
-		stdio: ["ignore", "pipe", "pipe"],
-	}));
+	return runJsonScript(script);
+}
+
+function runDirtyTreePreflightScenario(mode: "clean" | "volatile-only" | "checkpoint" | "generic" | "unknowns") {
+	const script = String.raw`
+(async () => {
+  const { runDirtyTreePreflight } = await import('./extensions/cleave/index.ts');
+  const mode = ${JSON.stringify(mode)};
+  const commands = [];
+  const updates = [];
+  const answersByMode = {
+    clean: [],
+    'volatile-only': [],
+    checkpoint: ['checkpoint', '', 'y'],
+    generic: ['proceed-without-cleave'],
+    unknowns: ['stash-unrelated'],
+  };
+  const inputs = [...answersByMode[mode]];
+  const pi = {
+    exec: async (cmd, args) => {
+      commands.push([cmd, ...args]);
+      if (cmd !== 'git') return { code: 0, stdout: '', stderr: '' };
+      if (args[0] === 'status') {
+        const stdoutByMode = {
+          clean: '',
+          'volatile-only': ' M .pi/memory/facts.jsonl\n',
+          checkpoint: ' M openspec/changes/cleave-dirty-tree-checkpointing/tasks.md\n?? docs/cleave-dirty-tree-checkpointing.md\n',
+          generic: ' M README.md\n',
+          unknowns: ' M openspec/changes/other-change/tasks.md\n?? scratch/notes.md\n',
+        };
+        return { code: 0, stdout: stdoutByMode[mode], stderr: '' };
+      }
+      if (args[0] === 'add' || args[0] === 'commit' || args[0] === 'stash') {
+        return { code: 0, stdout: '', stderr: '' };
+      }
+      return { code: 0, stdout: '', stderr: '' };
+    },
+  };
+  const result = await runDirtyTreePreflight(pi, {
+    repoPath: process.cwd(),
+    openspecChangePath: mode === 'generic' ? undefined : 'openspec/changes/cleave-dirty-tree-checkpointing',
+    onUpdate: (payload) => updates.push(payload),
+    ui: mode === 'clean' || mode === 'volatile-only'
+      ? undefined
+      : { input: async (_prompt, initial) => inputs.shift() ?? initial ?? '' },
+  });
+  process.stdout.write(JSON.stringify({ result, commands, updates }));
+})();
+`;
+
+	return runJsonScript(script);
 }
 
 describe("createAssessStructuredExecutors", () => {
@@ -120,10 +167,62 @@ describe("createAssessStructuredExecutors", () => {
 });
 
 describe("dirty-tree preflight acceptance coverage", () => {
-	it.todo("clean tree proceeds without a dirty-tree checkpoint prompt");
-	it.todo("dirty tree summary distinguishes related, unrelated or unknown, and volatile files");
-	it.todo("volatile-only dirt does not block cleave by default");
-	it.todo("low-confidence unknown files are excluded from checkpoint scope by default");
-	it.todo("generic classification still works when no active OpenSpec change exists");
-	it.todo("checkpoint plans stage related files and wait for explicit approval before committing");
+	it("clean tree proceeds without a dirty-tree checkpoint prompt", () => {
+		const result = runDirtyTreePreflightScenario("clean");
+		assert.equal(result.result, "continue");
+		assert.deepEqual(result.updates, []);
+		assert.deepEqual(result.commands, [["git", "status", "--porcelain"]]);
+	});
+
+	it("dirty tree summary distinguishes related, unrelated or unknown, and volatile files", () => {
+		const result = runDirtyTreePreflightScenario("unknowns");
+		const summary = result.updates[0]?.content?.[0]?.text ?? "";
+		assert.match(summary, /related changes/i);
+		assert.match(summary, /unrelated \/ unknown changes/i);
+		assert.match(summary, /volatile artifacts/i);
+		assert.match(summary, /openspec\/changes\/other-change\/tasks\.md/);
+		assert.match(summary, /scratch\/notes\.md/);
+	});
+
+	it("volatile-only dirt does not block cleave by default", () => {
+		const result = runDirtyTreePreflightScenario("volatile-only");
+		const summary = result.updates[0]?.content?.[0]?.text ?? "";
+		assert.equal(result.result, "continue");
+		assert.match(summary, /volatile artifacts/i);
+		assert.doesNotMatch(summary, /interactive input is unavailable/i);
+		assert.equal(result.commands.filter((command: string[]) => command[1] === "stash").length, 0);
+	});
+
+	it("low-confidence unknown files are excluded from checkpoint scope by default", () => {
+		const result = runDirtyTreePreflightScenario("unknowns");
+		const stashCommand = result.commands.find((command: string[]) => command[1] === "stash");
+		assert.equal(result.result, "continue");
+		assert.ok(stashCommand, "expected stash command for unrelated/unknown files");
+		assert.ok(stashCommand.includes("openspec/changes/other-change/tasks.md"));
+		assert.ok(stashCommand.includes("scratch/notes.md"));
+		assert.equal(result.commands.some((command: string[]) => command[1] === "add"), false);
+		assert.equal(result.commands.some((command: string[]) => command[1] === "commit"), false);
+	});
+
+	it("generic classification still works when no active OpenSpec change exists", () => {
+		const result = runDirtyTreePreflightScenario("generic");
+		const summary = result.updates[0]?.content?.[0]?.text ?? "";
+		assert.equal(result.result, "skip_cleave");
+		assert.match(summary, /generic preflight fallback without OpenSpec context/i);
+		assert.match(summary, /proceed-without-cleave/i);
+	});
+
+	it("checkpoint plans stage related files and wait for explicit approval before committing", () => {
+		const result = runDirtyTreePreflightScenario("checkpoint");
+		const summary = result.updates[0]?.content?.[0]?.text ?? "";
+		const addCommand = result.commands.find((command: string[]) => command[1] === "add");
+		const commitCommand = result.commands.find((command: string[]) => command[1] === "commit");
+		assert.equal(result.result, "continue");
+		assert.match(summary, /Suggested checkpoint commit:/i);
+		assert.ok(addCommand, "expected git add to stage checkpoint files");
+		assert.ok(commitCommand, "expected git commit after explicit approval");
+		assert.ok(addCommand.includes("openspec/changes/cleave-dirty-tree-checkpointing/tasks.md"));
+		assert.ok(addCommand.includes("docs/cleave-dirty-tree-checkpointing.md"));
+		assert.ok(commitCommand.some((part: string) => /checkpoint/i.test(String(part))));
+	});
 });

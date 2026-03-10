@@ -1,6 +1,17 @@
+---
+id: cleave-dirty-tree-checkpointing
+title: Cleave dirty-tree checkpointing
+status: implemented
+parent: null
+tags: [cleave, git, openspec, workflow, preflight]
+open_questions: []
+branches: ["feature/assess-bridge-completed-results"]
+openspec_change: cleave-dirty-tree-checkpointing
+---
+
 # Cleave dirty-tree checkpointing
 
-## Summary
+## Overview
 
 `/cleave` needs a clean git state before it can create worktrees, dispatch child agents, and merge their branches back safely. Dirty-tree checkpointing adds an explicit preflight step so operator intent is captured before parallel execution begins.
 
@@ -10,7 +21,9 @@ The workflow is designed around three policy decisions:
 - **checkpoint commits are lifecycle milestones**, not just end-of-change archive events
 - approved **volatile artifacts** such as `.pi/memory/facts.jsonl` stay visible but should not block cleave by default
 
-## Why this exists
+## Research
+
+### Why this exists
 
 OpenSpec and design-tree work often leave the repository in a legitimate in-progress state:
 
@@ -20,9 +33,9 @@ OpenSpec and design-tree work often leave the repository in a legitimate in-prog
 
 Without preflight handling, `/cleave` treats all of that as the same kind of failure. The result is repeated "working tree has uncommitted changes" interruptions at exactly the moment the operator is trying to start parallel work.
 
-## Preflight behavior
+### Preflight behavior
 
-When `/cleave` sees a dirty tree, pi-kit should classify the changed paths before doing any git mutation.
+When `/cleave` sees a dirty tree, pi-kit classifies the changed paths before doing any git mutation.
 
 ### Classification buckets
 
@@ -38,7 +51,7 @@ When `/cleave` sees a dirty tree, pi-kit should classify the changed paths befor
 
 ### Operator actions
 
-The preflight step should offer explicit choices:
+The preflight step offers explicit choices:
 
 - **checkpoint**
 - **stash-unrelated**
@@ -48,7 +61,7 @@ The preflight step should offer explicit choices:
 
 The important property is that pi-kit performs the mechanics after the operator makes one policy decision; the operator should not need to manually juggle git commands.
 
-## Checkpoint policy
+### Checkpoint policy
 
 Checkpointing is intentionally conservative.
 
@@ -59,7 +72,7 @@ Checkpointing is intentionally conservative.
 
 That means checkpointing is assisted, not automatic.
 
-## Volatile-file policy
+### Volatile-file policy
 
 Volatile files are part of the preflight summary so the operator can see them, but they should not block cleave the same way feature drift does.
 
@@ -69,7 +82,7 @@ Expected handling:
 - allow a one-step volatile-only stash action
 - avoid forcing a full checkpoint or cancel flow when the tree is only dirty because of approved operational artifacts
 
-## Generic mode without OpenSpec
+### Generic mode without OpenSpec
 
 Dirty-tree preflight still matters when there is no active OpenSpec change.
 
@@ -81,25 +94,48 @@ In that case, pi-kit should still:
 
 The classification is less informed, so the system should bias even harder toward conservative inclusion.
 
-## Lifecycle implications
+## Decisions
 
-Checkpointing is part of the implementation lifecycle, not just repo hygiene.
+### Decision: Add an explicit cleave preflight checkpoint phase
 
-Useful checkpoint moments include:
+**Status:** decided
+**Rationale:** Before `/cleave` runs, pi-kit should detect dirty-tree state and treat it as a first-class workflow step, not just a hard error. The operator should be offered structured choices to checkpoint current work, stash unrelated work, or continue in-session without cleave.
 
-- after a previous task group is implementation-complete
-- after proposal, spec, or tasks rewrites settle
-- immediately before a new `/cleave` run starts
+### Decision: Checkpointing should be tied to lifecycle milestones, not only archive
 
-Archive is still the completion milestone, but pre-cleave checkpointing is the practical milestone that keeps worktrees and merges safe.
+**Status:** decided
+**Rationale:** Waiting until an OpenSpec change is fully complete and archived is too late for git hygiene. The useful checkpoint moments are after implementation-complete work, after spec/task rewrites settle, and immediately before a new `/cleave` run begins.
 
-## Acceptance criteria captured in tests/specs
+### Decision: Memory sync artifacts should not block cleave by default
 
-The lifecycle artifacts for `cleave-dirty-tree-checkpointing` preserve these expectations:
+**Status:** decided
+**Rationale:** Tracked memory files like `.pi/memory/facts.jsonl` are operational artifacts that change during normal sessions. Cleave preflight should keep them visible but handle them separately from substantive implementation drift.
 
-- clean trees bypass preflight interruption
-- dirty trees are summarized by related, unrelated or unknown, and volatile files
-- volatile-only dirt does not block cleave by default
-- checkpoint flows require explicit operator approval before committing
-- low-confidence files stay out of checkpoint scope unless the operator says otherwise
-- generic dirty-tree classification still works without active OpenSpec context
+## Open Questions
+
+*No open questions.*
+
+## Implementation Notes
+
+### File Scope
+
+- `extensions/cleave/index.ts` (modified) — run dirty-tree preflight before worktree creation and enforce explicit operator choices
+- `extensions/cleave/workspace.ts` (modified) — classify related, unrelated, unknown, and volatile paths and build checkpoint plans
+- `extensions/cleave/types.ts` (modified) — define preflight result and operator action types
+- `extensions/cleave/dispatcher.ts` (modified) — keep execution gated on clean-state preconditions before child dispatch
+- `extensions/lib/git-state.ts` (new) — inspect git status, separate volatile artifacts, and support checkpoint/stash planning
+- `extensions/cleave/index.test.ts` (modified) — acceptance coverage for clean-tree bypass, dirty-tree summaries, volatile-only handling, generic fallback, and checkpoint approval flow
+- `docs/cleave-dirty-tree-checkpointing.md` (modified) — bound design-tree node documenting workflow and policy
+- `openspec/changes/cleave-dirty-tree-checkpointing/tasks.md` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+
+### Constraints
+
+- Never auto-commit without explicit operator approval.
+- Volatile allowlist entries must stay visible in the preflight summary even when they do not block cleave.
+- When classification confidence is low, prefer asking, stashing, or canceling over silently bundling files into a checkpoint.
+- Preflight must work even when no active OpenSpec change is active, using generic git-state classification.
+- Operator choices should minimize manual git steps: one decision, then pi executes the mechanics.
+- Generic preflight without OpenSpec context is intentionally conservative: non-volatile files are classified as low-confidence `unknown` and excluded from checkpoint scope by default.
+- Cleave dispatch still performs a second dirty-tree guard immediately before child execution; if the repo becomes dirty after preflight, dispatch aborts rather than running worktrees against a changed base.
+- Non-volatile dirty trees require interactive input to resolve; in non-interactive contexts runDirtyTreePreflight throws instead of auto-selecting an action (extensions/cleave/index.ts:297-303).
+- Cleave now enforces two clean-state guards: preflight before worktree setup and a second git status --porcelain check immediately before child dispatch, aborting if the repo became dirty after preflight (extensions/cleave/index.ts:1838-1857, extensions/cleave/dispatcher.ts:435-445).
