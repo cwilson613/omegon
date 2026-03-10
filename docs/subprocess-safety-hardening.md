@@ -1,7 +1,7 @@
 ---
 id: subprocess-safety-hardening
 title: Subprocess safety hardening
-status: implementing
+status: implemented
 parent: repo-consolidation-hardening
 tags: [security, process, subprocess, hardening]
 open_questions: []
@@ -31,3 +31,20 @@ The parent repo-consolidation-hardening topic is still proposal-only and spans a
 ## Open Questions
 
 *No open questions.*
+
+## Implementation Notes
+
+### File Scope
+
+- `extensions/web-ui/index.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/web-ui/index.test.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/local-inference/index.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/local-inference/index.test.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/bootstrap/index.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/bootstrap/index.test.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `openspec/changes/subprocess-safety-hardening/tasks.md` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+
+### Constraints
+
+- Prefer explicit executable plus argv subprocess dispatch over shell-string command construction in helper flows.
+- Do not terminate unrelated Ollama processes when no managed child is tracked by pi-kit.
