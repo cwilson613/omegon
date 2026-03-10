@@ -408,6 +408,89 @@ function isSecretAccessCommand(command: string): boolean {
 }
 
 // ============================================================================
+// Clipboard helpers — read secret values without showing them on screen
+// ============================================================================
+
+/**
+ * Detect which clipboard read command is available.
+ * Returns the command string or undefined if none found.
+ */
+function detectClipboardCommand(): string | undefined {
+  // macOS
+  try { execSync("which pbpaste", { stdio: "pipe" }); return "pbpaste"; } catch {}
+  // Linux (X11)
+  try { execSync("which xclip", { stdio: "pipe" }); return "xclip -selection clipboard -o"; } catch {}
+  // Linux (X11/Wayland)
+  try { execSync("which xsel", { stdio: "pipe" }); return "xsel --clipboard --output"; } catch {}
+  // Wayland
+  try { execSync("which wl-paste", { stdio: "pipe" }); return "wl-paste --no-newline"; } catch {}
+  return undefined;
+}
+
+/**
+ * Read the current clipboard contents. Returns undefined on failure.
+ */
+function readClipboard(): string | undefined {
+  const cmd = detectClipboardCommand();
+  if (!cmd) return undefined;
+  try {
+    return execSync(cmd, { encoding: "utf-8", timeout: 5_000, stdio: ["pipe", "pipe", "pipe"] }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Prompt the user to provide a secret value via clipboard (preferred) or
+ * fallback to direct input if clipboard is unavailable.
+ *
+ * The clipboard flow avoids showing the secret on screen — the user copies
+ * the value first, then confirms, and we read it from the clipboard.
+ */
+async function promptForSecretValue(
+  ctx: any,
+  secretName: string,
+  promptMessage: string,
+): Promise<string | undefined> {
+  const clipCmd = detectClipboardCommand();
+
+  if (clipCmd) {
+    // Clipboard-based flow — value never shown on screen
+    const confirmed = await ctx.ui.confirm(
+      `🔐 ${secretName}`,
+      `${promptMessage}\n\n` +
+      `Copy the value to your clipboard, then confirm.\n` +
+      `The value will be read from the clipboard and will not be displayed.`
+    );
+    if (!confirmed) return undefined;
+
+    const value = readClipboard();
+    if (!value) {
+      ctx.ui.notify(`❌ Clipboard is empty or unreadable. Copy the value and try again.`, "error");
+      return undefined;
+    }
+
+    // Show length confirmation without revealing the value
+    const charDesc = `${value.length} character${value.length !== 1 ? "s" : ""}`;
+    const confirmValue = await ctx.ui.confirm(
+      `🔐 ${secretName}`,
+      `Read ${charDesc} from clipboard. Use this value?`
+    );
+    if (!confirmValue) return undefined;
+
+    return value;
+  }
+
+  // Fallback: no clipboard command available — warn and use direct input
+  ctx.ui.notify(
+    `⚠️ No clipboard command found (pbpaste, xclip, xsel, wl-paste).\n` +
+    `The value will be visible as you type.`,
+    "warning"
+  );
+  return ctx.ui.input(promptMessage);
+}
+
+// ============================================================================
 // macOS Keychain helpers
 // ============================================================================
 
@@ -877,7 +960,7 @@ export default function (pi: ExtensionAPI) {
               if (!action || action === "Cancel") return;
 
               if (action === "Replace with a new value") {
-                const val = await ctx.ui.input(`Enter the new value for ${secretName}:`);
+                const val = await promptForSecretValue(ctx, secretName, `Provide the new value for ${secretName}:`);
                 if (!val) return;
                 try {
                   storeInKeychain(secretName, val);
@@ -888,10 +971,12 @@ export default function (pi: ExtensionAPI) {
               }
             } else {
               // Not in keychain — prompt for value and store it
-              const val = await ctx.ui.input(
+              const val = await promptForSecretValue(
+                ctx,
+                secretName,
                 `No Keychain entry found for "${service}".\n\n` +
-                `Enter the value for ${secretName} — it will be stored in your login keychain\n` +
-                `(protected by Touch ID / password):`
+                `Provide the value for ${secretName} — it will be stored in your login keychain\n` +
+                `(protected by Touch ID / password).`
               );
               if (!val) return;
 
@@ -928,9 +1013,10 @@ export default function (pi: ExtensionAPI) {
             if (!cmd) return;
             recipes[secretName] = cmd.startsWith("!") ? cmd : `!${cmd}`;
           } else if (choice.startsWith("Paste value")) {
-            const val = await ctx.ui.input(
-              `⚠️  Enter the value for ${secretName}:\n\n` +
-              `This will be stored in plaintext in ~/.pi/agent/secrets.json.\n` +
+            const val = await promptForSecretValue(
+              ctx,
+              secretName,
+              `⚠️  This will be stored in plaintext in ~/.pi/agent/secrets.json.\n` +
               `Consider using Keychain instead.`
             );
             if (!val) return;
