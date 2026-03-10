@@ -29,6 +29,11 @@ The initially identified highest-leverage consolidation and hardening slices are
 **Status:** decided
 **Rationale:** The concrete risk-reduction and consistency slices identified at the start of the effort have been delivered as separate archived changes. Remaining opportunities are broader architectural improvements that should be tracked as future initiatives rather than keeping this umbrella effort open indefinitely.
 
+### Decision: Completed Design→OpenSpec→Cleave slices should not retain dedicated feature branches
+
+**Status:** decided
+**Rationale:** Once a slice has progressed from design through OpenSpec-backed implementation and its lifecycle is complete, keeping its dedicated feature branch open adds noise without preserving additional lifecycle value. Any later bug fix or enhancement should be tracked as a new change rather than by reusing the old branch.
+
 ## Open Questions
 
 *No open questions.*
