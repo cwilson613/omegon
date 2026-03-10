@@ -220,6 +220,20 @@ export function createSlashCommandBridge(): SlashCommandBridge {
   return new SlashCommandBridge();
 }
 
+const SHARED_BRIDGE_SYMBOL = Symbol.for("pi-kit-shared-slash-command-bridge");
+
+/**
+ * Get the shared SlashCommandBridge instance across all extensions.
+ * Creates one if it doesn't exist yet.
+ */
+export function getSharedBridge(): SlashCommandBridge {
+  const global = globalThis as any;
+  if (!global[SHARED_BRIDGE_SYMBOL]) {
+    global[SHARED_BRIDGE_SYMBOL] = new SlashCommandBridge();
+  }
+  return global[SHARED_BRIDGE_SYMBOL] as SlashCommandBridge;
+}
+
 export function buildSlashCommandResult<TData = unknown, TLifecycle = unknown>(
   command: string,
   args: readonly string[] | undefined,
