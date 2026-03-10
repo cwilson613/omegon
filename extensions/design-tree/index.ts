@@ -57,7 +57,9 @@ import {
 	readGitBranch,
 	sanitizeBranchName,
 	writeNodeDocument,
+	parseFrontmatter,
 } from "./tree.ts";
+import { getSharedBridge, buildSlashCommandResult } from "../lib/slash-command-bridge.ts";
 
 // ─── Extension ───────────────────────────────────────────────────────────────
 
@@ -1363,9 +1365,224 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 		emitCurrentState();
 		startDocsWatcher(ctx.cwd);
 
+		// Check for migrateable design docs and hint
+		const { toMigrate } = detectMigratableDesignDocs(ctx.cwd);
+		if (toMigrate.length > 0) {
+			ctx.ui.notify(
+				`📦 ${toMigrate.length} completed design doc(s) can be archived to docs/design/. Run /migrate to clean up.`,
+				"info",
+			);
+		}
+
 		// Auto-associate current branch on session start
 		tryAssociateBranch(ctx);
 	});
+
+	// ─── /migrate command ────────────────────────────────────────────────
+
+	/**
+	 * Detect design docs in docs/ that should be archived to docs/design/
+	 * and offer to move them. Returns { migrated, skipped, errors }.
+	 */
+	function detectMigratableDesignDocs(cwd: string): {
+		toMigrate: Array<{ file: string; id: string; status: string }>;
+		activeExplorations: Array<{ file: string; id: string; status: string }>;
+	} {
+		const docsDir = path.join(cwd, "docs");
+		if (!fs.existsSync(docsDir)) return { toMigrate: [], activeExplorations: [] };
+
+		const designSubdir = path.join(docsDir, "design");
+		const alreadyArchived = new Set<string>();
+		if (fs.existsSync(designSubdir)) {
+			for (const f of fs.readdirSync(designSubdir)) {
+				if (f.endsWith(".md")) alreadyArchived.add(f);
+			}
+		}
+
+		const toMigrate: Array<{ file: string; id: string; status: string }> = [];
+		const activeExplorations: Array<{ file: string; id: string; status: string }> = [];
+
+		for (const file of fs.readdirSync(docsDir)) {
+			if (!file.endsWith(".md")) continue;
+			if (alreadyArchived.has(file)) continue;
+
+			const filePath = path.join(docsDir, file);
+			const stat = fs.statSync(filePath);
+			if (!stat.isFile()) continue;
+
+			const content = fs.readFileSync(filePath, "utf-8");
+			const fm = parseFrontmatter(content);
+			if (!fm || !fm.id || !fm.status) continue; // Not a design doc
+
+			const status = fm.status as string;
+			const entry = { file, id: fm.id as string, status };
+
+			if (status === "implemented" || status === "deferred") {
+				toMigrate.push(entry);
+			} else {
+				// seed, exploring, decided, blocked — leave in docs/
+				activeExplorations.push(entry);
+			}
+		}
+
+		return { toMigrate, activeExplorations };
+	}
+
+	function executeDocsMigration(cwd: string, files: Array<{ file: string }>): {
+		migrated: string[];
+		errors: Array<{ file: string; error: string }>;
+	} {
+		const docsDir = path.join(cwd, "docs");
+		const designDir = path.join(docsDir, "design");
+		fs.mkdirSync(designDir, { recursive: true });
+
+		const migrated: string[] = [];
+		const errors: Array<{ file: string; error: string }> = [];
+
+		// Detect if we're in a git repo
+		let useGitMv = false;
+		try {
+			execFileSync("git", ["rev-parse", "--git-dir"], { cwd, stdio: "pipe" });
+			useGitMv = true;
+		} catch {
+			// Not a git repo — use plain fs.rename
+		}
+
+		for (const { file } of files) {
+			const src = path.join(docsDir, file);
+			const dst = path.join(designDir, file);
+
+			try {
+				if (useGitMv) {
+					execFileSync("git", ["mv", src, dst], { cwd, stdio: "pipe" });
+				} else {
+					fs.renameSync(src, dst);
+				}
+				migrated.push(file);
+			} catch (e: any) {
+				errors.push({ file, error: e.message?.slice(0, 200) ?? "unknown error" });
+			}
+		}
+
+		return { migrated, errors };
+	}
+
+	pi.registerCommand("migrate", {
+		description: "Migrate design docs: archive implemented/deferred explorations to docs/design/",
+		handler: async (_args, ctx) => {
+			const cwd = ctx.cwd;
+			const { toMigrate, activeExplorations } = detectMigratableDesignDocs(cwd);
+
+			if (toMigrate.length === 0) {
+				const msg = activeExplorations.length > 0
+					? `No design docs to migrate. ${activeExplorations.length} active exploration(s) remain in docs/ (correct).`
+					: "No design docs found in docs/. Nothing to migrate.";
+				ctx.ui.notify(msg, "info");
+				return;
+			}
+
+			// Show what will be migrated
+			const lines = [
+				`Found ${toMigrate.length} design doc(s) to archive to docs/design/:`,
+				"",
+				...toMigrate.map((d) => `  ${STATUS_ICONS[d.status as NodeStatus] ?? "○"} ${d.file} (${d.status})`),
+			];
+			if (activeExplorations.length > 0) {
+				lines.push(
+					"",
+					`${activeExplorations.length} active exploration(s) will stay in docs/:`,
+					...activeExplorations.map((d) => `  ${STATUS_ICONS[d.status as NodeStatus] ?? "○"} ${d.file} (${d.status})`),
+				);
+			}
+
+			const confirmed = await ctx.ui.confirm(
+				"Migrate design docs",
+				lines.join("\n") + "\n\nProceed with migration?",
+			);
+			if (!confirmed) {
+				ctx.ui.notify("Migration cancelled.", "info");
+				return;
+			}
+
+			const { migrated, errors } = executeDocsMigration(cwd, toMigrate);
+
+			// Reload the tree to pick up new locations
+			reload(cwd);
+			emitCurrentState();
+
+			const summary = [
+				`✅ Migrated ${migrated.length} design doc(s) to docs/design/`,
+			];
+			if (errors.length > 0) {
+				summary.push(`⚠️  ${errors.length} error(s):`);
+				for (const e of errors) summary.push(`  ${e.file}: ${e.error}`);
+			}
+			if (activeExplorations.length > 0) {
+				summary.push(`ℹ️  ${activeExplorations.length} active exploration(s) unchanged in docs/`);
+			}
+
+			pi.sendMessage({
+				customType: "design-tree-migrate",
+				content: summary.join("\n"),
+				display: true,
+			});
+		},
+	});
+
+	// Bridge /migrate for agent access
+	const bridge = getSharedBridge();
+	bridge.register(pi, {
+		name: "migrate",
+		description: "Migrate design docs: archive implemented/deferred explorations to docs/design/",
+		bridge: {
+			agentCallable: true,
+			sideEffectClass: "git-write",
+			requiresConfirmation: true,
+			summary: "Archive completed design docs from docs/ to docs/design/",
+		},
+		structuredExecutor: async (_args, ctx) => {
+			const cwd = (ctx as ExtensionContext).cwd;
+			const { toMigrate, activeExplorations } = detectMigratableDesignDocs(cwd);
+
+			if (toMigrate.length === 0) {
+				return buildSlashCommandResult("migrate", [], {
+					ok: true,
+					summary: "Nothing to migrate",
+					humanText: activeExplorations.length > 0
+						? `No completed design docs to migrate. ${activeExplorations.length} active exploration(s) remain in docs/.`
+						: "No design docs found in docs/.",
+					effects: { sideEffectClass: "read" },
+				});
+			}
+
+			const { migrated, errors } = executeDocsMigration(cwd, toMigrate);
+
+			reload(cwd);
+			emitCurrentState();
+
+			const humanLines = [
+				`Migrated ${migrated.length} design doc(s) to docs/design/`,
+				...migrated.map((f) => `  ✓ ${f}`),
+			];
+			if (errors.length > 0) {
+				humanLines.push(`${errors.length} error(s):`);
+				for (const e of errors) humanLines.push(`  ✗ ${e.file}: ${e.error}`);
+			}
+
+			return buildSlashCommandResult("migrate", [], {
+				ok: errors.length === 0,
+				summary: `Migrated ${migrated.length} doc(s)${errors.length > 0 ? `, ${errors.length} error(s)` : ""}`,
+				humanText: humanLines.join("\n"),
+				effects: {
+					sideEffectClass: "git-write",
+					filesChanged: migrated.map((f) => `docs/design/${f}`),
+				},
+				data: { migrated, errors, activeExplorations: activeExplorations.map((a) => a.file) },
+			});
+		},
+	});
+
+	// ─── Session lifecycle ───────────────────────────────────────────────
 
 	pi.on("agent_end", async () => {
 		if (tree.nodes.size > 0) {
