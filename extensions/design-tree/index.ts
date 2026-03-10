@@ -148,6 +148,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 				archiveBlocked,
 				archiveBlockedReason,
 				archiveBlockedIssueCodes,
+				bound: true, // resolveNodeLifecycleSummary only calls this for bound nodes
 			});
 		} catch {
 			// Non-fatal — return null if OpenSpec data is unavailable
@@ -264,8 +265,11 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 							branches: n.branches,
 							openspec_change: n.openspec_change ?? null,
 							lifecycle: {
-								// Normalized binding status from canonical resolver when available;
-								// falls back to boolean from archive-gate for unbound nodes.
+								// Normalized binding status from canonical resolver when available.
+								// The fallback (binding.bound ? "bound" : "unbound") is an explicit safety
+								// guard for the error paths where resolveNodeLifecycleSummary returns null
+								// (e.g. getChange() fails or throws). For successfully bound nodes,
+								// resolveLifecycleSummary(bound:true) now returns "bound" directly.
 								boundToOpenSpec: binding.bound,
 								bindingStatus: lifecycleSummary?.bindingStatus ?? (binding.bound ? "bound" : "unbound"),
 								implementationPhase: n.status === "implementing" || n.status === "implemented",

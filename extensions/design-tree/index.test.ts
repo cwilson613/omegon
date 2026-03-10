@@ -115,10 +115,11 @@ describe("design-tree lifecycle metadata", () => {
 		const node = listResult.details.nodes[0];
 		// boundToOpenSpec should remain true (backward-compat)
 		assert.equal(node.lifecycle.boundToOpenSpec, true);
-		// bindingStatus should be the normalized string form
-		assert.ok(
-			["bound", "unbound", "unknown"].includes(node.lifecycle.bindingStatus),
-			`bindingStatus must be canonical, got: ${node.lifecycle.bindingStatus}`,
+		// bindingStatus must be "bound" for a known-bound node — not merely a valid string
+		assert.equal(
+			node.lifecycle.bindingStatus,
+			"bound",
+			`bindingStatus must be "bound" for a bound node, got: ${node.lifecycle.bindingStatus}`,
 		);
 		// archiveReady and nextAction fields must be present (may be null for a proposal-only change)
 		assert.ok("archiveReady" in node.lifecycle, "archiveReady must be present in list lifecycle");

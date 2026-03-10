@@ -7,16 +7,15 @@ import type { DesignTreeDashboardState } from "../shared-state.ts";
 import { debug } from "../debug.ts";
 
 export function emitDesignTreeState(pi: ExtensionAPI, dt: DesignTree, focused: DesignNode | null): void {
-	// Exclude implemented/deferred nodes from dashboard — they're archived journals, not active work
-	const nodes = Array.from(dt.nodes.values()).filter(
-		(n) => n.status !== "implemented" && n.status !== "deferred"
-	);
+	const allNodes = Array.from(dt.nodes.values());
+	// Exclude implemented/deferred nodes from the active dashboard view — they're archived journals
+	const nodes = allNodes.filter((n) => n.status !== "implemented" && n.status !== "deferred");
 	const state: DesignTreeDashboardState = {
 		nodeCount: nodes.length,
 		decidedCount: nodes.filter((n) => n.status === "decided").length,
 		exploringCount: nodes.filter((n) => n.status === "exploring" || n.status === "seed").length,
 		implementingCount: nodes.filter((n) => n.status === "implementing").length,
-		implementedCount: nodes.filter((n) => n.status === "implemented").length,
+		implementedCount: allNodes.filter((n) => n.status === "implemented").length,
 		blockedCount: nodes.filter((n) => n.status === "blocked").length,
 		openQuestionCount: getAllOpenQuestions(dt).length,
 		focusedNode: focused

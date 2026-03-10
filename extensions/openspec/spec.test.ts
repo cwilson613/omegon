@@ -840,13 +840,14 @@ describe("lifecycle/resolver", () => {
 				archiveBlocked: false,
 				archiveBlockedReason: null,
 				archiveBlockedIssueCodes: [],
+				bound: true,
 			});
 
 			// All required fields present
 			assert.equal(typeof summary.stage, "string", "stage must be present");
 			assert.equal(typeof summary.archiveReady, "boolean", "archiveReady must be present");
 			assert.equal(typeof summary.bindingStatus, "string", "bindingStatus must be present");
-			assert.equal(summary.bindingStatus, "unknown", "bindingStatus is unknown when no missing_design_binding issue code is present");
+			assert.equal(summary.bindingStatus, "bound", "bindingStatus is 'bound' when bound=true and no missing_design_binding issue code is present");
 			assert.equal(typeof summary.totalTasks, "number", "totalTasks must be present");
 			assert.equal(typeof summary.doneTasks, "number", "doneTasks must be present");
 			assert.ok(summary.assessmentFreshness !== undefined, "assessmentFreshness must be present");

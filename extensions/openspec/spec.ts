@@ -1164,6 +1164,8 @@ export function resolveLifecycleSummary(input: {
 	archiveBlocked: boolean;
 	archiveBlockedReason: string | null;
 	archiveBlockedIssueCodes: readonly string[];
+	/** Whether a design-tree node is confirmed bound to this change. When true and no missing_design_binding issue code is present, bindingStatus resolves to "bound". */
+	bound?: boolean;
 }): LifecycleSummary {
 	const { change, record, freshness, archiveBlocked, archiveBlockedReason, archiveBlockedIssueCodes } = input;
 
@@ -1183,6 +1185,8 @@ export function resolveLifecycleSummary(input: {
 
 	const bindingStatus: LifecycleSummary["bindingStatus"] = archiveBlockedIssueCodes.includes("missing_design_binding")
 		? "unbound"
+		: input.bound
+		? "bound"
 		: "unknown";
 
 	return {
