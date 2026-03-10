@@ -112,11 +112,17 @@ describe("dashboard recovery state", () => {
     );
     footer.setContext(makeContext() as any);
 
-    const lines = footer.render(160);
-    assert.ok(lines.some((line) => line.includes("↺ Recovery") && line.includes("retrying") && line.includes("server_error")), lines.join("\n"));
-    assert.ok(lines.some((line) => line.includes("Retrying once after upstream server_error.")), lines.join("\n"));
-    assert.ok(lines.some((line) => line.includes("1/1 retries")), lines.join("\n"));
-    assert.ok(lines.some((line) => line.includes("→ anthropic/claude-sonnet-4-5")), lines.join("\n"));
+    // At width>=120 the wide 2-column layout places recovery in a ~79-char
+    // left column — header + summary fit, but the long target annotation
+    // ("→ anthropic/claude-sonnet-4-5") gets truncated. Use stacked width
+    // (< 120) to assert the full detail line.
+    const linesWide = footer.render(160);
+    assert.ok(linesWide.some((line) => line.includes("↺ Recovery") && line.includes("retrying") && line.includes("server_error")), linesWide.join("\n"));
+    assert.ok(linesWide.some((line) => line.includes("Retrying once after upstream server_error.")), linesWide.join("\n"));
+
+    const linesStacked = footer.render(100);
+    assert.ok(linesStacked.some((line) => line.includes("1/1 retries")), linesStacked.join("\n"));
+    assert.ok(linesStacked.some((line) => line.includes("→ anthropic/claude-sonnet-4-5")), linesStacked.join("\n"));
   });
 
   it("omits recovery lines when no recovery state is present", () => {
