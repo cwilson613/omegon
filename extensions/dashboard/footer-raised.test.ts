@@ -122,8 +122,9 @@ describe("DashboardFooter raised mode polish", () => {
     footer.setContext(makeContext() as any);
 
     const lines = footer.render(160);
-    const memoryLine = lines.find((line) => line.includes("Memory "));
-    assert.ok(memoryLine);
+    // Consolidated memory line shows injected count + token estimate
+    const memoryLine = lines.find((line) => line.includes("injected") || line.includes("tok"));
+    assert.ok(memoryLine, `expected consolidated memory line; got:\n${lines.join("\n")}`);
     assert.ok(!memoryLine?.includes("chars:"));
     assert.ok(!memoryLine?.includes("hits:"));
   });
@@ -249,7 +250,7 @@ describe("DashboardFooter raised mode polish", () => {
     assert.ok(!bareStatsLine, `raised mode must not emit a duplicate bare stats row:\n${lines.join("\n")}`);
   });
 
-  it("narrow raised mode (<120) stays stacked — no │ divider rows", () => {
+  it("narrow raised mode (<120) stays stacked — no inner column divider rows", () => {
     (sharedState as any).cleave = {
       status: "dispatching",
       updatedAt: Date.now(),
@@ -265,9 +266,13 @@ describe("DashboardFooter raised mode polish", () => {
     footer.setContext(makeContext() as any);
 
     const lines = footer.render(100);
+    // Box borders use │ on every content row; stacked mode has no two-column split
+    // so there must be no rows with *two* │ chars (one inner column divider + box borders).
+    // A box content row has exactly 2 │ chars (left and right border).
+    const threeOrMorePipe = lines.filter((l) => (l.match(/│/g) ?? []).length > 2);
     assert.ok(
-      lines.every((l) => !l.includes("│")),
-      `narrow mode must not use column divider:\n${lines.join("\n")}`,
+      threeOrMorePipe.length === 0,
+      `narrow mode must not use inner column divider:\n${threeOrMorePipe.join("\n")}`,
     );
   });
 
@@ -344,7 +349,7 @@ describe("DashboardFooter raised mode polish", () => {
     );
   });
 
-  it("compact hint appears in the pinned footer zone, not below duplicate generic rows", () => {
+  it("compact hint appears in the box bottom border", () => {
     (sharedState as any).cleave = {
       status: "dispatching",
       updatedAt: Date.now(),
@@ -364,15 +369,13 @@ describe("DashboardFooter raised mode polish", () => {
     const hintIdx = lines.findIndex((l) => l.includes("compact") || l.includes("/dash"));
     assert.ok(hintIdx !== -1, `compact hint not found in output:\n${lines.join("\n")}`);
 
-    // The hint must appear before the pwd line (⌂) — it is in the pinned zone
-    // above the footer data, not pushed below a duplicate stats block.
-    const pwdIdx = lines.findIndex((l) => l.includes("⌂"));
-    if (pwdIdx !== -1) {
-      assert.ok(
-        hintIdx < pwdIdx,
-        `hint (line ${hintIdx}) appeared after pwd line (line ${pwdIdx}) — hint may be displaced:\n${lines.join("\n")}`,
-      );
-    }
+    // The hint is embedded in the bottom border (╰ /dash to compact ─...─╯)
+    // which must be the last line.
+    assert.equal(
+      hintIdx,
+      lines.length - 1,
+      `hint should be on the last line (bottom border); found at line ${hintIdx} of ${lines.length}:\n${lines.join("\n")}`,
+    );
   });
 
   it("openspec rows use compact separator — no double-punctuation in progress+stage", () => {

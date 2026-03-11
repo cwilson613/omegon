@@ -16,7 +16,7 @@ import type { ReadonlyFooterDataProvider } from "@mariozechner/pi-coding-agent";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { TUI } from "@mariozechner/pi-tui";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
-import { leftRight, mergeColumns } from "./render-utils.ts";
+import { leftRight, mergeColumns, padRight } from "./render-utils.ts";
 import { buildBranchTreeLines, readLocalBranches } from "./git.ts";
 import type { DashboardState, RecoveryCooldownSummary, RecoveryDashboardState } from "./types.ts";
 import { sharedState } from "../shared-state.ts";
@@ -348,41 +348,89 @@ export class DashboardFooter implements Component {
   }
 
   /**
-   * Stacked layout for narrow terminals (<120 cols).
-   * All sections rendered full-width, top to bottom.
+   * Shared boxing helper: wraps contentLines + footerLines in a corner-bounded box.
+   * Top border embeds topLineContent (first branch tree line).
+   * Bottom border embeds "/dash to compact" hint.
    */
-  private renderRaisedStacked(width: number): string[] {
-    const lines: string[] = [];
+  private renderBoxed(
+    contentLines: string[],
+    footerLines: string[],
+    topLineContent: string,
+    width: number,
+  ): string[] {
+    const theme = this.theme;
+    const b = (s: string) => theme.fg("border", s);
+    const innerWidth = width - 4; // 2 for │, 2 for spaces
 
-    lines.push(...this.buildBranchTree(width));
-    lines.push(...this.buildDesignTreeLines(width));
-    lines.push(...this.buildOpenSpecLines(width));
-    lines.push(...this.buildRecoveryLines(width));
-    lines.push(...this.buildCleaveLines(width));
-    lines.push(...this.buildFooterZone(width));
+    // Top border: ╭─ <topLineContent> ─...─╮
+    const topContentWidth = visibleWidth(topLineContent);
+    const topPad = Math.max(0, width - 5 - topContentWidth);
+    const topBorder = b("╭─ ") + topLineContent + b(" " + "─".repeat(topPad) + "╮");
+    const lines: string[] = [topBorder];
+
+    // Content lines
+    for (const line of contentLines) {
+      const inner = padRight(truncateToWidth(line, innerWidth, "…"), innerWidth);
+      lines.push(b("│") + " " + inner + " " + b("│"));
+    }
+
+    // Section divider ├──┤
+    lines.push(b("├") + b("─".repeat(width - 2)) + b("┤"));
+
+    // Footer lines
+    for (const line of footerLines) {
+      const inner = padRight(truncateToWidth(line, innerWidth, "…"), innerWidth);
+      lines.push(b("│") + " " + inner + " " + b("│"));
+    }
+
+    // Bottom border: ╰ /dash to compact ─...─╯
+    const hintText = " /dash to compact ";
+    const hintColored = b("╰") + theme.fg("dim", hintText);
+    const hintWidth = visibleWidth(hintText);
+    const botPad = Math.max(0, width - 2 - hintWidth);
+    const bottomBorder = hintColored + b("─".repeat(botPad) + "╯");
+    lines.push(bottomBorder);
 
     return lines;
   }
 
   /**
-   * Wide layout (≥120 cols) — 3-zone:
-   *   Zone A: Git branch tree — full width
-   *   Zone B: mergeColumns — Design tree + Recovery + Cleave left │ OpenSpec right
-   *   Zone C: Shared footer (meta, memory audit, separator, hint, footer data)
+   * Stacked layout for narrow terminals (<120 cols).
+   * All sections rendered full-width, top to bottom.
+   */
+  private renderRaisedStacked(width: number): string[] {
+    const innerWidth = width - 4;
+    const branchLines = this.buildBranchTree(innerWidth);
+    const [topLine = "", ...extraBranchLines] = branchLines;
+
+    const contentLines = [
+      ...extraBranchLines,
+      ...this.buildDesignTreeLines(innerWidth),
+      ...this.buildOpenSpecLines(innerWidth),
+      ...this.buildRecoveryLines(innerWidth),
+      ...this.buildCleaveLines(innerWidth),
+    ];
+
+    return this.renderBoxed(contentLines, this.buildFooterZone(innerWidth), topLine, width);
+  }
+
+  /**
+   * Wide layout (≥120 cols) — corner-bounded box:
+   *   Top border: branch tree first line
+   *   Content: extra branch lines + two-column (design+recovery+cleave | openspec)
+   *   Section divider ├──┤
+   *   Footer zone
+   *   Bottom border: /dash to compact hint
    */
   private renderRaisedWide(width: number): string[] {
-    const divider = "│";
-    const leftColWidth = Math.floor((width - divider.length) / 2);
-    const rightColWidth = width - leftColWidth - divider.length;
+    const innerWidth = width - 4;
+    const leftColWidth = Math.floor((innerWidth - 1) / 2);
+    const rightColWidth = innerWidth - leftColWidth - 1;
+    const colDivider = this.theme.fg("dim", "│");
 
-    const lines: string[] = [];
+    const branchLines = this.buildBranchTree(innerWidth);
+    const [topLine = "", ...extraBranchLines] = branchLines;
 
-    // Zone A — git branch tree full-width
-    lines.push(...this.buildBranchTree(width));
-
-    // Zone B — two-column split:
-    //   left  = design tree + recovery + cleave (active work context)
-    //   right = openspec (spec/task progress)
     const leftLines = [
       ...this.buildDesignTreeLines(leftColWidth),
       ...this.buildRecoveryLines(leftColWidth),
@@ -390,40 +438,66 @@ export class DashboardFooter implements Component {
     ];
     const rightLines = this.buildOpenSpecLines(rightColWidth);
 
-    if (leftLines.length > 0 || rightLines.length > 0) {
-      lines.push(...mergeColumns(leftLines, rightLines, leftColWidth, rightColWidth, divider));
-    }
+    const contentLines: string[] = [
+      ...extraBranchLines,
+      ...(leftLines.length > 0 || rightLines.length > 0
+        ? mergeColumns(leftLines, rightLines, leftColWidth, rightColWidth, colDivider)
+        : []),
+    ];
 
-    // Zone C — shared footer
-    lines.push(...this.buildFooterZone(width));
-
-    return lines;
+    return this.renderBoxed(contentLines, this.buildFooterZone(innerWidth), topLine, width);
   }
 
   // ── Footer Zone (shared by stacked + wide layouts) ────────────
 
   /**
-   * Build the shared footer zone: meta line, memory audit, separator, hint,
+   * Build the shared footer zone: meta line, consolidated memory line,
    * and the original footer data lines.
+   * Separator and /dash hint are now handled by renderBoxed().
    */
   private buildFooterZone(width: number): string[] {
-    const theme = this.theme;
     const zone: string[] = [];
 
     const raisedMeta = this.buildRaisedMetaLine(width);
     if (raisedMeta) zone.push(raisedMeta);
 
-    const memoryAuditLine = this.buildMemoryAuditLine(width);
-    if (memoryAuditLine) zone.push(memoryAuditLine);
-
-    const ruleLen = Math.max(2, width - 2);
-    zone.push(theme.fg("dim", "╶" + "─".repeat(ruleLen) + "╴"));
-
-    zone.push(truncateToWidth(theme.fg("dim", "/dash to compact"), width, "…"));
+    const memLine = this.buildConsolidatedMemoryLine(width);
+    if (memLine) zone.push(memLine);
 
     zone.push(...this.renderFooterData(width));
 
     return zone;
+  }
+
+  /**
+   * Consolidated memory line: combines total stored fact count (from extension
+   * status) with injection metrics. Replaces buildMemoryAuditLine in raised mode.
+   */
+  private buildConsolidatedMemoryLine(width: number): string {
+    const theme = this.theme;
+    const extStatuses = this.footerData.getExtensionStatuses();
+    const memStatus = extStatuses.get("memory") ?? "";
+    const totalMatch = memStatus.match(/(\d+)\s+facts/);
+    const totalFacts = totalMatch ? parseInt(totalMatch[1], 10) : null;
+
+    const metrics = sharedState.lastMemoryInjection;
+    if (!metrics && totalFacts === null) return "";
+
+    const parts: string[] = [];
+    if (totalFacts !== null) {
+      parts.push(theme.fg("accent", "⌗") + theme.fg("dim", ` ${totalFacts} total`));
+    }
+    if (metrics) {
+      parts.push(theme.fg("dim", `${metrics.projectFactCount} injected`));
+      if (metrics.workingMemoryFactCount > 0) parts.push(theme.fg("dim", `wm:${metrics.workingMemoryFactCount}`));
+      if (metrics.episodeCount > 0) parts.push(theme.fg("dim", `ep:${metrics.episodeCount}`));
+      if (metrics.globalFactCount > 0) parts.push(theme.fg("dim", `global:${metrics.globalFactCount}`));
+      parts.push(theme.fg("dim", `~${metrics.estimatedTokens} tok`));
+    } else {
+      parts.push(theme.fg("dim", "pending injection"));
+    }
+
+    return truncateToWidth(parts.join(theme.fg("dim", " · ")), width, "…");
   }
 
   // ── Section builders (shared by stacked + wide layouts) ───────
@@ -876,6 +950,7 @@ export class DashboardFooter implements Component {
       const extensionStatuses = this.footerData.getExtensionStatuses();
       if (extensionStatuses.size > 0) {
         const sortedStatuses = Array.from(extensionStatuses.entries())
+          .filter(([name]) => name !== "memory")  // covered by consolidated memory line
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([_name, text]) => {
             const cleanText = sanitizeStatusText(text);
