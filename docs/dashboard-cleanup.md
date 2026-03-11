@@ -1,7 +1,7 @@
 ---
 id: dashboard-cleanup
 title: Dashboard cleanup and footer coherence
-status: implementing
+status: implemented
 related: [dash-raised-layout, unified-dashboard]
 tags: [dashboard, footer, ux, layout, cleanup]
 open_questions: []
@@ -84,6 +84,8 @@ Inspection of `extensions/dashboard/footer.ts` shows the apparent duplicate foot
 - `extensions/web-ui/state.ts` (modified) — Expose the same operator-facing dashboard metadata and recovery actionability structurally through backend snapshot builders.
 - `extensions/web-ui/types.ts` (modified) — Extend dashboard/recovery snapshot types so web consumers can render the cleaned-up metadata coherently.
 - `extensions/web-ui/index.test.ts` (modified) — Add/update backend/web UI state tests proving dashboard metadata parity with the TUI cleanup.
+- `docs/dashboard-cleanup.md` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `openspec/changes/dashboard-cleanup/tasks.md` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
 
 ### Constraints
 
