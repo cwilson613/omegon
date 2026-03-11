@@ -79,7 +79,7 @@ describe("buildDesignItems", () => {
 
   it("shows empty hint for zero nodes", () => {
     const items = buildDesignItems({
-      nodeCount: 0, decidedCount: 0, exploringCount: 0, blockedCount: 0, implementingCount: 0, implementedCount: 0,
+      nodeCount: 0, decidedCount: 0, exploringCount: 0, blockedCount: 0, implementingCount: 0, implementedCount: 0, deferredCount: 0,
       openQuestionCount: 0, focusedNode: null,
     }, new Set());
     // Summary + empty hint
@@ -88,7 +88,7 @@ describe("buildDesignItems", () => {
 
   it("builds summary item", () => {
     const items = buildDesignItems({
-      nodeCount: 5, decidedCount: 2, exploringCount: 1, blockedCount: 0, implementingCount: 0, implementedCount: 0,
+      nodeCount: 5, decidedCount: 2, exploringCount: 1, blockedCount: 0, implementingCount: 0, implementedCount: 0, deferredCount: 0,
       openQuestionCount: 3, focusedNode: null,
     }, new Set());
 
@@ -102,7 +102,7 @@ describe("buildDesignItems", () => {
 
   it("builds focused node item", () => {
     const items = buildDesignItems({
-      nodeCount: 1, decidedCount: 1, exploringCount: 0, blockedCount: 0, implementingCount: 0, implementedCount: 0,
+      nodeCount: 1, decidedCount: 1, exploringCount: 0, blockedCount: 0, implementingCount: 0, implementedCount: 0, deferredCount: 0,
       openQuestionCount: 0,
       focusedNode: { id: "n1", title: "Auth Design", status: "decided", questions: [] },
     }, new Set());
@@ -117,7 +117,7 @@ describe("buildDesignItems", () => {
 
   it("emits openUri for linkable design items", () => {
     const items = buildDesignItems({
-      nodeCount: 1, decidedCount: 1, exploringCount: 0, blockedCount: 0, implementingCount: 0, implementedCount: 0,
+      nodeCount: 1, decidedCount: 1, exploringCount: 0, blockedCount: 0, implementingCount: 0, implementedCount: 0, deferredCount: 0,
       openQuestionCount: 0,
       focusedNode: {
         id: "n1",
@@ -136,7 +136,7 @@ describe("buildDesignItems", () => {
   it("shows questions when expanded", () => {
     const expanded = new Set(["dt-focused-n1"]);
     const items = buildDesignItems({
-      nodeCount: 1, decidedCount: 0, exploringCount: 1, blockedCount: 0, implementingCount: 0, implementedCount: 0,
+      nodeCount: 1, decidedCount: 0, exploringCount: 1, blockedCount: 0, implementingCount: 0, implementedCount: 0, deferredCount: 0,
       openQuestionCount: 2,
       focusedNode: { id: "n1", title: "Node", status: "exploring", questions: ["Why?", "How?"] },
     }, expanded);
@@ -149,7 +149,7 @@ describe("buildDesignItems", () => {
 
   it("hides questions when collapsed", () => {
     const items = buildDesignItems({
-      nodeCount: 1, decidedCount: 0, exploringCount: 1, blockedCount: 0, implementingCount: 0, implementedCount: 0,
+      nodeCount: 1, decidedCount: 0, exploringCount: 1, blockedCount: 0, implementingCount: 0, implementedCount: 0, deferredCount: 0,
       openQuestionCount: 2,
       focusedNode: { id: "n1", title: "Node", status: "exploring", questions: ["Why?", "How?"] },
     }, new Set()); // not expanded
@@ -160,7 +160,7 @@ describe("buildDesignItems", () => {
 
   it("marks focused node as expandable when it has questions", () => {
     const items = buildDesignItems({
-      nodeCount: 1, decidedCount: 0, exploringCount: 1, blockedCount: 0, implementingCount: 0, implementedCount: 0,
+      nodeCount: 1, decidedCount: 0, exploringCount: 1, blockedCount: 0, implementingCount: 0, implementedCount: 0, deferredCount: 0,
       openQuestionCount: 1,
       focusedNode: { id: "n1", title: "Node", status: "exploring", questions: ["Why?"] },
     }, new Set());
@@ -171,7 +171,7 @@ describe("buildDesignItems", () => {
 
   it("shows node list when nodes provided", () => {
     const items = buildDesignItems({
-      nodeCount: 3, decidedCount: 1, exploringCount: 2, blockedCount: 0, implementingCount: 0, implementedCount: 0,
+      nodeCount: 3, decidedCount: 1, exploringCount: 2, blockedCount: 0, implementingCount: 0, implementedCount: 0, deferredCount: 0,
       openQuestionCount: 0, focusedNode: null,
       nodes: [
         { id: "a", title: "Alpha", status: "decided", questionCount: 0 },
@@ -187,7 +187,7 @@ describe("buildDesignItems", () => {
 
   it("skips focused node from node list to avoid duplication", () => {
     const items = buildDesignItems({
-      nodeCount: 3, decidedCount: 1, exploringCount: 2, blockedCount: 0, implementingCount: 0, implementedCount: 0,
+      nodeCount: 3, decidedCount: 1, exploringCount: 2, blockedCount: 0, implementingCount: 0, implementedCount: 0, deferredCount: 0,
       openQuestionCount: 0,
       focusedNode: { id: "b", title: "Beta", status: "exploring", questions: [] },
       nodes: [
@@ -205,7 +205,7 @@ describe("buildDesignItems", () => {
 
   it("renders question count badge on nodes with open questions", () => {
     const items = buildDesignItems({
-      nodeCount: 1, decidedCount: 0, exploringCount: 1, blockedCount: 0, implementingCount: 0, implementedCount: 0,
+      nodeCount: 1, decidedCount: 0, exploringCount: 1, blockedCount: 0, implementingCount: 0, implementedCount: 0, deferredCount: 0,
       openQuestionCount: 3, focusedNode: null,
       nodes: [
         { id: "x", title: "Has Questions", status: "exploring", questionCount: 3 },
@@ -220,7 +220,7 @@ describe("buildDesignItems", () => {
 
   it("omits question badge when questionCount is 0", () => {
     const items = buildDesignItems({
-      nodeCount: 1, decidedCount: 1, exploringCount: 0, blockedCount: 0, implementingCount: 0, implementedCount: 0,
+      nodeCount: 1, decidedCount: 1, exploringCount: 0, blockedCount: 0, implementingCount: 0, implementedCount: 0, deferredCount: 0,
       openQuestionCount: 0, focusedNode: null,
       nodes: [
         { id: "y", title: "No Questions", status: "decided", questionCount: 0 },
@@ -235,7 +235,7 @@ describe("buildDesignItems", () => {
 
   it("shows empty hint when no nodes array", () => {
     const items = buildDesignItems({
-      nodeCount: 0, decidedCount: 0, exploringCount: 0, blockedCount: 0, implementingCount: 0, implementedCount: 0,
+      nodeCount: 0, decidedCount: 0, exploringCount: 0, blockedCount: 0, implementingCount: 0, implementedCount: 0, deferredCount: 0,
       openQuestionCount: 0, focusedNode: null,
     }, new Set());
 
@@ -387,7 +387,7 @@ describe("rebuildItems", () => {
 
   it("dispatches to correct builder per tab", () => {
     (sharedState as any).designTree = {
-      nodeCount: 1, decidedCount: 1, exploringCount: 0, blockedCount: 0, implementingCount: 0, implementedCount: 0,
+      nodeCount: 1, decidedCount: 1, exploringCount: 0, blockedCount: 0, implementingCount: 0, implementedCount: 0, deferredCount: 0,
       openQuestionCount: 0, focusedNode: null,
     };
     const designItems = rebuildItems("design", new Set());

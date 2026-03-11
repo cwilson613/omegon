@@ -9,8 +9,9 @@ import { debug } from "../debug.ts";
 export function emitDesignTreeState(pi: ExtensionAPI, dt: DesignTree, focused: DesignNode | null): void {
 	if (dt.nodes.size === 0) return;
 	const allNodes = Array.from(dt.nodes.values());
-	// Exclude implemented/deferred nodes from the active dashboard view — they're archived journals
-	const nodes = allNodes.filter((n) => n.status !== "implemented" && n.status !== "deferred");
+	// Exclude implemented nodes from the active dashboard view — they're done work.
+	// Deferred nodes remain visible: they are future work, not OBE.
+	const nodes = allNodes.filter((n) => n.status !== "implemented");
 	const state: DesignTreeDashboardState = {
 		nodeCount: nodes.length,
 		decidedCount: nodes.filter((n) => n.status === "decided").length,
@@ -18,6 +19,7 @@ export function emitDesignTreeState(pi: ExtensionAPI, dt: DesignTree, focused: D
 		implementingCount: nodes.filter((n) => n.status === "implementing").length,
 		implementedCount: allNodes.filter((n) => n.status === "implemented").length,
 		blockedCount: nodes.filter((n) => n.status === "blocked").length,
+		deferredCount: nodes.filter((n) => n.status === "deferred").length,
 		openQuestionCount: getAllOpenQuestions(dt).length,
 		focusedNode: focused
 			? {

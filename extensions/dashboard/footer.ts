@@ -509,6 +509,7 @@ export class DashboardFooter implements Component {
     if (dt.implementingCount > 0) statusParts.push(theme.fg("accent", `${dt.implementingCount} implementing`));
     if (dt.exploringCount > 0) statusParts.push(theme.fg("accent", `${dt.exploringCount} exploring`));
     if (dt.blockedCount > 0) statusParts.push(theme.fg("error", `${dt.blockedCount} blocked`));
+    if (dt.deferredCount > 0) statusParts.push(theme.fg("dim", `${dt.deferredCount} deferred`));
     if (dt.openQuestionCount > 0) statusParts.push(theme.fg("dim", `${dt.openQuestionCount}?`));
 
     lines.push(theme.fg("accent", "◈ Design Tree") + "  " + statusParts.join(" · "));
@@ -575,6 +576,7 @@ export class DashboardFooter implements Component {
       case "implemented": return theme.fg("success", "✓");
       case "exploring": return theme.fg("accent", "◐");
       case "blocked": return theme.fg("error", "✕");
+      case "deferred": return theme.fg("dim", "⊘");
       case "seed": return theme.fg("dim", "○");
       default: return theme.fg("dim", "○");
     }

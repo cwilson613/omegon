@@ -27,6 +27,7 @@ export interface DesignTreeDashboardState {
   implementingCount: number;
   implementedCount: number;
   blockedCount: number;
+  deferredCount: number;
   openQuestionCount: number;
   focusedNode: DesignTreeFocusedNode | null;
   /** All nodes for overlay list view */
