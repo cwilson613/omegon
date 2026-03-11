@@ -47,7 +47,7 @@ function sanitizeStatusText(text: string): string {
 }
 
 function getRecoveryState(): RecoveryDashboardState | undefined {
-  return (sharedState as { recovery?: RecoveryDashboardState }).recovery;
+  return sharedState.recovery;
 }
 
 function formatCooldownRemaining(until: number, now: number = Date.now()): string {
@@ -460,6 +460,10 @@ export class DashboardFooter implements Component {
     const recovery = getRecoveryState();
     if (!recovery) return [];
 
+    // Collapse non-actionable states (observed/informational) in raised mode —
+    // they add noise without operator-relevant information.
+    if (recovery.action === "observe") return [];
+
     const actionColor: ThemeColor = recovery.action === "retry" ? "warning"
       : recovery.action === "switch_candidate" || recovery.action === "switch_offline" ? "accent"
       : recovery.action === "cooldown" ? "warning"
@@ -582,19 +586,22 @@ export class DashboardFooter implements Component {
     const os = sharedState.openspec;
     if (!os || os.changes.length === 0) return lines;
 
-    const totalDone = os.changes.reduce((s, c) => s + c.tasksDone, 0);
-    const totalAll = os.changes.reduce((s, c) => s + c.tasksTotal, 0);
+    const active = os.changes.filter(c => c.stage !== "archived");
+    if (active.length === 0) return lines;
+
+    const totalDone = active.reduce((s, c) => s + c.tasksDone, 0);
+    const totalAll = active.reduce((s, c) => s + c.tasksTotal, 0);
     const allComplete = totalAll > 0 && totalDone >= totalAll;
     const aggregateProgress = totalAll > 0
       ? theme.fg(allComplete ? "success" : "dim", ` ${totalDone}/${totalAll}`)
       : "";
     lines.push(
       theme.fg("accent", "◎ OpenSpec") +
-      theme.fg("dim", `  ${os.changes.length} change${os.changes.length > 1 ? "s" : ""}`) +
+      theme.fg("dim", `  ${active.length} change${active.length > 1 ? "s" : ""}`) +
       aggregateProgress,
     );
 
-    for (const c of os.changes.slice(0, 3)) {
+    for (const c of active.slice(0, 3)) {
       const done = c.tasksTotal > 0 && c.tasksDone >= c.tasksTotal;
       const icon = done ? theme.fg("success", "✓") : theme.fg("dim", "◦");
 
@@ -739,6 +746,38 @@ export class DashboardFooter implements Component {
     return `${turnLabel}${bar} ${pctColored}${windowStr}`;
   }
 
+  // ── Token cache ───────────────────────────────────────────────
+
+  /**
+   * Incrementally scan new session entries and update the cached token/cost
+   * accumulators and last-seen thinking level. Safe to call repeatedly; only
+   * processes entries beyond `lastEntryCount`.
+   */
+  private _updateTokenCache(): void {
+    const ctx = this.ctxRef;
+    if (!ctx) return;
+    try {
+      const entries = ctx.sessionManager.getEntries();
+      for (let i = this.lastEntryCount; i < entries.length; i++) {
+        const entry = entries[i] as any;
+        if (entry.type === "message" && entry.message?.role === "assistant") {
+          const usage = entry.message.usage;
+          if (usage) {
+            this.cachedTokens.input += usage.input || 0;
+            this.cachedTokens.output += usage.output || 0;
+            this.cachedTokens.cacheRead += usage.cacheRead || 0;
+            this.cachedTokens.cacheWrite += usage.cacheWrite || 0;
+            this.cachedTokens.cost += usage.cost?.total || 0;
+          }
+        }
+        if (entry.type === "thinking_level_change" && entry.thinkingLevel) {
+          this.cachedThinkingLevel = entry.thinkingLevel;
+        }
+      }
+      this.lastEntryCount = entries.length;
+    } catch { /* session may not be ready */ }
+  }
+
   // ── Original Footer Data ──────────────────────────────────────
 
   private renderFooterData(width: number): string[] {
@@ -790,27 +829,7 @@ export class DashboardFooter implements Component {
     // block. Emitting it again here would create a duplicate generic footer row
     // that contradicts the "one coherent dashboard" layout contract.
     if (!raised && ctx) {
-      // Incrementally update cached token stats (only scan new entries)
-      try {
-        const entries = ctx.sessionManager.getEntries();
-        for (let i = this.lastEntryCount; i < entries.length; i++) {
-          const entry = entries[i] as any;
-          if (entry.type === "message" && entry.message?.role === "assistant") {
-            const usage = entry.message.usage;
-            if (usage) {
-              this.cachedTokens.input += usage.input || 0;
-              this.cachedTokens.output += usage.output || 0;
-              this.cachedTokens.cacheRead += usage.cacheRead || 0;
-              this.cachedTokens.cacheWrite += usage.cacheWrite || 0;
-              this.cachedTokens.cost += usage.cost?.total || 0;
-            }
-          }
-          if (entry.type === "thinking_level_change" && entry.thinkingLevel) {
-            this.cachedThinkingLevel = entry.thinkingLevel;
-          }
-        }
-        this.lastEntryCount = entries.length;
-      } catch { /* session may not be ready */ }
+      this._updateTokenCache();
 
       // Left side: simplified context usage as requested (X%/tokens)
       const usage = ctx.getContextUsage();
@@ -848,26 +867,7 @@ export class DashboardFooter implements Component {
     } else if (raised && ctx) {
       // In raised mode, still update the token cache so compact mode stays current,
       // but do not emit a redundant stats line.
-      try {
-        const entries = ctx.sessionManager.getEntries();
-        for (let i = this.lastEntryCount; i < entries.length; i++) {
-          const entry = entries[i] as any;
-          if (entry.type === "message" && entry.message?.role === "assistant") {
-            const usage = entry.message.usage;
-            if (usage) {
-              this.cachedTokens.input += usage.input || 0;
-              this.cachedTokens.output += usage.output || 0;
-              this.cachedTokens.cacheRead += usage.cacheRead || 0;
-              this.cachedTokens.cacheWrite += usage.cacheWrite || 0;
-              this.cachedTokens.cost += usage.cost?.total || 0;
-            }
-          }
-          if (entry.type === "thinking_level_change" && entry.thinkingLevel) {
-            this.cachedThinkingLevel = entry.thinkingLevel;
-          }
-        }
-        this.lastEntryCount = entries.length;
-      } catch { /* session may not be ready */ }
+      this._updateTokenCache();
     }
 
     // ── Extension statuses — raised mode only ──
