@@ -335,6 +335,9 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 		throw new Error(summary + "\n\nInteractive input is unavailable, so cleave cannot resolve the dirty tree automatically.");
 	}
 
+	// Mutable classification — refreshed after each checkpoint attempt (C1/W1).
+	let currentClassification = classification;
+
 	while (true) {
 		const answer = normalizePreflightInput(await options.ui.input(
 			"Dirty tree action [checkpoint|stash-unrelated|stash-volatile|proceed-without-cleave|cancel]:",
@@ -342,7 +345,7 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 		try {
 			switch (answer) {
 				case "checkpoint": {
-					await checkpointRelatedChanges(pi, options.repoPath, classification, checkpointPlan.message, options.ui);
+					await checkpointRelatedChanges(pi, options.repoPath, currentClassification, checkpointPlan.message, options.ui);
 					// Re-verify cleanliness after the checkpoint commit.
 					const postCheckpointStatus = await pi.exec("git", ["status", "--porcelain"], {
 						cwd: options.repoPath,
@@ -353,14 +356,33 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 						// Tree is clean — checkpoint fully resolved the dirty tree.
 						return "continue";
 					}
-					// Remaining dirty files — emit explicit diagnosis and stay in preflight.
+
+					// Re-derive classification from the post-checkpoint state (C1).
+					currentClassification = classifyPreflightDirtyPaths(
+						postState.entries.map((e) => e.path),
+						{ changeName, openspecContext },
+					);
+
+					// C2: If only volatile files remain, auto-stash and continue.
+					if (postState.nonVolatile.length === 0 && currentClassification.volatile.length > 0) {
+						await stashPaths(pi, options.repoPath, "cleave-preflight-volatile", currentClassification.volatile);
+						options.onUpdate?.({
+							content: [{ type: "text", text: "Checkpoint succeeded. Remaining volatile artifacts stashed automatically — cleave continuing." }],
+							details: { phase: "preflight", autoResolved: "volatile_only_stash" },
+						});
+						return "continue";
+					}
+
+					// Remaining dirty files — emit precise diagnosis (C3: classify per-path reason).
 					const remainingPaths = postState.entries.map((e) => e.path);
 					const diagnosisLines = [
 						"Checkpoint committed successfully, but dirty files remain — cleave cannot continue yet:",
-						...remainingPaths.map((p) => `  • ${p}`),
+						...currentClassification.related.map((f) => `  • ${f.path}  [related — may not have been staged/committed]`),
+						...currentClassification.unrelated.map((f) => `  • ${f.path}  [unrelated: ${f.reason}]`),
+						...currentClassification.unknown.map((f) => `  • ${f.path}  [unknown — not in change scope]`),
+						...currentClassification.volatile.map((f) => `  • ${f.path}  [volatile artifact]`),
 						"",
-						"These files were not included in the checkpoint (unrelated, volatile, or unknown classification).",
-						"Choose another preflight action to resolve them.",
+						"Choose another preflight action to resolve the remaining files.",
 					];
 					options.onUpdate?.({
 						content: [{ type: "text", text: diagnosisLines.join("\n") }],
@@ -369,10 +391,11 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 					break;
 				}
 				case "stash-unrelated":
-					await stashPaths(pi, options.repoPath, "cleave-preflight-unrelated", [...classification.unrelated, ...classification.unknown]);
+					// C1: Use currentClassification (refreshed after checkpoint) not the stale original.
+					await stashPaths(pi, options.repoPath, "cleave-preflight-unrelated", [...currentClassification.unrelated, ...currentClassification.unknown]);
 					return "continue";
 				case "stash-volatile":
-					await stashPaths(pi, options.repoPath, "cleave-preflight-volatile", classification.volatile);
+					await stashPaths(pi, options.repoPath, "cleave-preflight-volatile", currentClassification.volatile);
 					return "continue";
 				case "proceed-without-cleave":
 					return "skip_cleave";
