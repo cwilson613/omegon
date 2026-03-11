@@ -520,78 +520,147 @@ export function parseCommandArgv(cmd: string): [string, ...string[]] {
 }
 
 /**
- * Run a helper command asynchronously with streaming output.
+ * Strip ANSI escape sequences from a string so we can display raw text
+ * through pi's notification system without garbled control codes.
+ */
+function stripAnsi(str: string): string {
+	// Covers CSI sequences, OSC, simple escapes, and reset codes.
+	// eslint-disable-next-line no-control-regex
+	return str.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[^[]/g, "");
+}
+
+/**
+ * Decide whether a captured output line is worth forwarding to the operator.
  *
- * For commands that do not require shell interpretation, the executable
- * is invoked directly (no shell involved).  Commands that require shell
- * metacharacters (pipes, ||, subshells, etc.) are passed to `sh -c`
- * as an isolated, constrained shell invocation — callers must NOT
- * construct these strings by concatenating user-supplied fragments.
+ * Filters out progress-bar-only lines (filled entirely with ═ = > # etc.)
+ * and carriage-return-overwritten lines that cargo/rustup use for spinners.
+ */
+function isSignificantLine(raw: string): boolean {
+	const s = stripAnsi(raw).trim();
+	if (s.length === 0) return false;
+	// Pure progress bar characters — not meaningful as text
+	if (/^[=>\-#.·⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ]+$/.test(s)) return false;
+	// Very long lines are likely binary blobs or encoded data
+	if (s.length > 300) return false;
+	return true;
+}
+
+/**
+ * Run a helper command asynchronously, streaming output through `onLine`.
+ *
+ * stdin is closed (no interactive prompts).  stdout and stderr are both
+ * piped so output is captured and forwarded through pi's notification
+ * system rather than fighting with the TUI renderer.
+ *
+ * A heartbeat tick fires every `heartbeatMs` so the operator knows the
+ * process is still alive during long compilations (e.g. cargo build).
  *
  * The install commands come exclusively from the static `deps.ts`
  * registry and are never influenced by operator input.
  *
  * Returns the process exit code (124 = timeout).
- *
- * stdio: "inherit" is intentional — install commands produce streaming
- * progress output (brew's download bar, cargo's compilation log) that is
- * useful to stream directly to the terminal.  pi's TUI captures stdin but
- * does not redirect stdout/stderr, so inherit is safe for output.
  */
-export function runAsync(cmd: string, timeoutMs: number = 300_000): Promise<number> {
+export function runAsync(
+	cmd: string,
+	onLine: (line: string) => void,
+	timeoutMs: number = 600_000,
+	heartbeatMs: number = 15_000,
+): Promise<number> {
 	return new Promise((resolve) => {
-		const env = { ...process.env, NONINTERACTIVE: "1", HOMEBREW_NO_AUTO_UPDATE: "1" };
+		const env = {
+			...process.env,
+			// Homebrew / generic non-interactive suppression
+			NONINTERACTIVE: "1",
+			HOMEBREW_NO_AUTO_UPDATE: "1",
+			// Rustup: skip the interactive "1) Proceed / 2) Customise / 3) Cancel"
+			// prompt entirely.  Belt-and-suspenders alongside the -y flag in the
+			// install command.
+			RUSTUP_INIT_SKIP_PATH_CHECK: "yes",
+		};
 
 		let child;
 		if (requiresShell(cmd)) {
-			// Shell-bound path: isolated to static dep-registry commands only.
-			// The `cmd` value originates from `InstallOption.cmd` in deps.ts —
-			// never from user input or string concatenation at the call site.
-			child = spawn("sh", ["-c", cmd], { stdio: "inherit", env });
+			child = spawn("sh", ["-c", cmd], { stdio: ["ignore", "pipe", "pipe"], env });
 		} else {
-			// Preferred path: explicit executable + argv, no shell involved.
 			const [exe, ...args] = parseCommandArgv(cmd);
-			child = spawn(exe, args, { stdio: "inherit", env });
+			child = spawn(exe, args, { stdio: ["ignore", "pipe", "pipe"], env });
 		}
 
 		let settled = false;
 		let sigkillTimer: ReturnType<typeof setTimeout> | undefined;
+		let elapsedSec = 0;
 
 		const settle = (code: number) => {
 			if (settled) return;
 			settled = true;
+			clearTimeout(timer);
+			clearInterval(heartbeat);
+			clearTimeout(sigkillTimer);
 			resolve(code);
 		};
 
+		// Heartbeat — fires every heartbeatMs while the process is running.
+		const heartbeat = setInterval(() => {
+			elapsedSec += heartbeatMs / 1000;
+			onLine(`   ⏳ still running… (${elapsedSec}s)`);
+		}, heartbeatMs);
+
+		// Forward captured lines from both streams.
+		const attachStream = (stream: NodeJS.ReadableStream | null) => {
+			if (!stream) return;
+			let buf = "";
+			stream.on("data", (chunk: Buffer) => {
+				// Strip carriage returns so spinner overwrites don't stack.
+				buf += chunk.toString().replace(/\r/g, "\n");
+				const parts = buf.split("\n");
+				buf = parts.pop() ?? "";
+				for (const part of parts) {
+					if (isSignificantLine(part)) onLine("   " + stripAnsi(part).trim());
+				}
+			});
+			stream.on("end", () => {
+				if (buf && isSignificantLine(buf)) onLine("   " + stripAnsi(buf).trim());
+			});
+		};
+		attachStream(child.stdout);
+		attachStream(child.stderr);
+
 		const timer = setTimeout(() => {
 			child.kill("SIGTERM");
-			// Some processes (e.g. brew install) ignore SIGTERM.  Schedule a
-			// SIGKILL after a 5-second grace period to prevent orphaned children.
 			sigkillTimer = setTimeout(() => {
 				try { child.kill("SIGKILL"); } catch { /* already exited */ }
 			}, 5_000);
-			settle(124); // timeout exit code
+			settle(124);
 		}, timeoutMs);
 
-		child.on("exit", (code) => {
-			clearTimeout(timer);
-			clearTimeout(sigkillTimer);
-			settle(code ?? 1);
-		});
-
-		child.on("error", () => {
-			clearTimeout(timer);
-			clearTimeout(sigkillTimer);
-			settle(1);
-		});
+		child.on("exit", (code) => settle(code ?? 1));
+		child.on("error", () => settle(1));
 	});
+}
+
+/**
+ * After rustup installs, the cargo binaries land in ~/.cargo/bin which is
+ * NOT in the current process's PATH (only added to future shells via
+ * .profile/.bashrc).  Source it now so subsequent deps (e.g. mdserve) can
+ * find cargo without the operator having to open a new terminal.
+ */
+function patchPathForCargo(): void {
+	const cargoBin = join(homedir(), ".cargo", "bin");
+	const current = process.env.PATH ?? "";
+	if (!current.split(":").includes(cargoBin)) {
+		process.env.PATH = `${cargoBin}:${current}`;
+	}
 }
 
 async function installDeps(ctx: CommandContext, deps: DepStatus[]): Promise<void> {
 	// Sort so prerequisites come first (e.g., cargo before mdserve)
 	const sorted = sortByRequires(deps);
+	const total = sorted.length;
 
-	for (const { dep } of sorted) {
+	for (let i = 0; i < sorted.length; i++) {
+		const { dep } = sorted[i];
+		const step = `[${i + 1}/${total}]`;
+
 		// Check prerequisites — re-verify availability live (not from stale array)
 		if (dep.requires?.length) {
 			const unmet = dep.requires.filter((reqId) => {
@@ -599,37 +668,42 @@ async function installDeps(ctx: CommandContext, deps: DepStatus[]): Promise<void
 				return reqDep ? !reqDep.check() : false;
 			});
 			if (unmet.length > 0) {
-				ctx.ui.notify(`\n⚠️  Skipping ${dep.name} — requires ${unmet.join(", ")} (not available)`);
+				ctx.ui.notify(`\n${step} ⚠️  Skipping ${dep.name} — requires ${unmet.join(", ")} (not yet available)`);
 				continue;
 			}
 		}
 
 		const cmd = bestInstallCmd(dep);
 		if (!cmd) {
-			ctx.ui.notify(`\n⚠️  No install command available for ${dep.name} on this platform`);
+			ctx.ui.notify(`\n${step} ⚠️  No install command available for ${dep.name} on this platform`);
 			continue;
 		}
 
-		ctx.ui.notify(`\n📦 Installing ${dep.name}...`);
+		ctx.ui.notify(`\n${step} 📦 Installing ${dep.name}…`);
 		ctx.ui.notify(`   → \`${cmd}\``);
 
-		const exitCode = await runAsync(cmd);
+		const exitCode = await runAsync(
+			cmd,
+			(line) => ctx.ui.notify(line),
+		);
+
+		// Rustup installs to ~/.cargo/bin — patch PATH immediately so the rest
+		// of the install sequence (e.g. mdserve) can find cargo.
+		if (dep.id === "cargo" && exitCode === 0) {
+			patchPathForCargo();
+		}
 
 		if (exitCode === 0 && dep.check()) {
-			ctx.ui.notify(`   ✅ ${dep.name} installed successfully`);
+			ctx.ui.notify(`${step} ✅ ${dep.name} installed successfully`);
 		} else if (exitCode === 124) {
-			ctx.ui.notify(`   ❌ ${dep.name} install timed out (5 min limit)`);
+			ctx.ui.notify(`${step} ❌ ${dep.name} install timed out (10 min limit)`);
 		} else if (exitCode === 0) {
-			ctx.ui.notify(`   ⚠️  Command succeeded but ${dep.name} not found on PATH. You may need to restart your shell.`);
+			ctx.ui.notify(`${step} ⚠️  Command succeeded but ${dep.name} not found on PATH — you may need to open a new shell.`);
 		} else {
-			ctx.ui.notify(`   ❌ Failed to install ${dep.name} (exit code ${exitCode})`);
+			ctx.ui.notify(`${step} ❌ Failed to install ${dep.name} (exit ${exitCode})`);
 			const hints = dep.install.filter((o) => o.cmd !== cmd);
-			if (hints.length > 0) {
-				ctx.ui.notify(`   Alternative: \`${hints[0].cmd}\``);
-			}
-			if (dep.url) {
-				ctx.ui.notify(`   Manual install: ${dep.url}`);
-			}
+			if (hints.length > 0) ctx.ui.notify(`   Alternative: \`${hints[0]!.cmd}\``);
+			if (dep.url) ctx.ui.notify(`   Manual install: ${dep.url}`);
 		}
 	}
 }

@@ -215,34 +215,36 @@ describe("bootstrap subprocess dispatch helpers", () => {
 	});
 
 	describe("runAsync dispatch", () => {
+		const noop = () => {};
+
 		it("runs a simple explicit-dispatch command and returns exit 0", async () => {
-			// 'true' is a POSIX no-op that exits 0 — no shell needed
-			const code = await runAsync("true", 5000);
+			const code = await runAsync("true", noop, 5000);
 			assert.equal(code, 0);
 		});
 
 		it("runs a shell-construct command and returns exit 0", async () => {
-			// echo with pipe requires shell; shell should handle it fine
-			const code = await runAsync("echo hello | cat", 5000);
+			const code = await runAsync("echo hello | cat", noop, 5000);
 			assert.equal(code, 0);
 		});
 
 		it("returns non-zero exit code for failing command", async () => {
-			const code = await runAsync("false", 5000);
+			const code = await runAsync("false", noop, 5000);
 			assert.notEqual(code, 0);
 		});
 
+		it("captures stdout lines through the onLine callback", async () => {
+			const lines: string[] = [];
+			await runAsync("echo hello_from_runasync", (l) => lines.push(l), 5000);
+			assert.ok(lines.some((l) => l.includes("hello_from_runasync")), `got: ${JSON.stringify(lines)}`);
+		});
+
 		it("returns 124 on timeout", async () => {
-			// Use a generous timeout (500 ms) so that spawn + SIGTERM delivery
-			// completes reliably even on heavily-loaded CI hosts.  The child
-			// sleeps for 60 s so the timeout always fires first.
-			const code = await runAsync("sleep 60", 500);
+			const code = await runAsync("sleep 60", noop, 500);
 			assert.equal(code, 124);
 		});
 
 		it("returns 1 on spawn error for nonexistent executable", async () => {
-			// A nonexistent command: explicit dispatch path will ENOENT → error handler
-			const code = await runAsync("__nonexistent_binary_xyz__", 5000);
+			const code = await runAsync("__nonexistent_binary_xyz__", noop, 5000);
 			assert.equal(code, 1);
 		});
 	});

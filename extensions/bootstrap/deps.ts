@@ -133,7 +133,9 @@ export const DEPS: Dep[] = [
 		tier: "recommended",
 		check: () => hasCmd("cargo"),
 		install: [
-			{ platform: "any", cmd: "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh" },
+			// -s -- -y passes -y to rustup-init, suppressing the interactive
+			// "1) Proceed / 2) Customise / 3) Cancel" prompt that otherwise hangs.
+			{ platform: "any", cmd: "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y" },
 		],
 		url: "https://rustup.rs",
 	},
