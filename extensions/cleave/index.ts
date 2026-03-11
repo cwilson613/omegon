@@ -316,8 +316,10 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 		changeName,
 		openspecContext,
 	});
-	const checkpointPlan = buildCheckpointPlan(classification, { changeName, openspecContext });
-	const summary = formatDirtyTreeSummary(classification, checkpointPlan.message);
+	// Compute initial checkpoint plan for the summary display only.
+	// The plan is rebuilt from currentClassification inside the loop on each attempt (C4).
+	const initialCheckpointPlan = buildCheckpointPlan(classification, { changeName, openspecContext });
+	const summary = formatDirtyTreeSummary(classification, initialCheckpointPlan.message);
 	options.onUpdate?.({ content: [{ type: "text", text: summary }], details: { phase: "preflight" } });
 
 	if (gitState.nonVolatile.length === 0) {
@@ -345,7 +347,10 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 		try {
 			switch (answer) {
 				case "checkpoint": {
-					await checkpointRelatedChanges(pi, options.repoPath, currentClassification, checkpointPlan.message, options.ui);
+					// Rebuild the checkpoint plan from the current (possibly refreshed) classification (C4).
+					const currentCheckpointPlan = buildCheckpointPlan(currentClassification, { changeName, openspecContext });
+					const committedFiles = new Set(currentClassification.checkpointFiles);
+					await checkpointRelatedChanges(pi, options.repoPath, currentClassification, currentCheckpointPlan.message, options.ui);
 					// Re-verify cleanliness after the checkpoint commit.
 					const postCheckpointStatus = await pi.exec("git", ["status", "--porcelain"], {
 						cwd: options.repoPath,
@@ -373,14 +378,18 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 						return "continue";
 					}
 
-					// Remaining dirty files — emit precise diagnosis (C3: classify per-path reason).
+					// Remaining dirty files — emit precise diagnosis (W1: distinguish committed-but-still-dirty vs excluded-from-scope).
 					const remainingPaths = postState.entries.map((e) => e.path);
 					const diagnosisLines = [
 						"Checkpoint committed successfully, but dirty files remain — cleave cannot continue yet:",
-						...currentClassification.related.map((f) => `  • ${f.path}  [related — may not have been staged/committed]`),
+						...currentClassification.related.map((f) =>
+							committedFiles.has(f.path)
+								? `  • ${f.path}  [was committed but remains dirty — file may have been modified after staging or only partially staged]`
+								: `  • ${f.path}  [related but excluded from checkpoint scope — confidence too low to commit automatically]`
+						),
 						...currentClassification.unrelated.map((f) => `  • ${f.path}  [unrelated: ${f.reason}]`),
-						...currentClassification.unknown.map((f) => `  • ${f.path}  [unknown — not in change scope]`),
-						...currentClassification.volatile.map((f) => `  • ${f.path}  [volatile artifact]`),
+						...currentClassification.unknown.map((f) => `  • ${f.path}  [unknown — not in change scope, was not checkpointed]`),
+						...currentClassification.volatile.map((f) => `  • ${f.path}  [volatile artifact — will be auto-stashed]`),
 						"",
 						"Choose another preflight action to resolve the remaining files.",
 					];
