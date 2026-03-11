@@ -226,7 +226,10 @@ describe("DashboardFooter raised mode polish", () => {
     }
   });
 
-  it("stats line uses leftRight layout — model name flush-right", () => {
+  it("raised mode meta line includes context gauge, model, and thinking (not a duplicate stats row)", () => {
+    // In raised mode the context/model/thinking info lives in the pinned meta line
+    // (buildRaisedMetaLine), not in a separate leftRight stats row. The meta line
+    // uses the "Context " prefix label rather than a bare percentage.
     (sharedState as any).cleave = { status: "idle", updatedAt: Date.now(), children: [] };
 
     const footer = new DashboardFooter(
@@ -238,14 +241,13 @@ describe("DashboardFooter raised mode polish", () => {
     footer.setContext(makeContext() as any);
 
     const lines = footer.render(100);
-    // The stats line is the renderFooterData line 2: context usage left, model flush-right.
-    // It starts with the context percentage (no "Context" label prefix) and ends with the model name.
-    const statsLine = lines.find((l) => l.includes("31%/272k") && l.includes("gpt-5.4") && !l.includes("Context "));
-    assert.ok(statsLine, `expected stats line with context usage and model name; got:\n${lines.join("\n")}`);
-    // The right side ends with the thinking badge (model has reasoning:true → "○ off").
-    // Confirm the line is exactly `width` visible chars wide (leftRight pads correctly).
-    const vw = visibleWidth(statsLine!);
-    assert.equal(vw, 100, `stats line visible width should equal terminal width (100), got ${vw}`);
+    // The meta line includes "Context", "gpt-5.4", and the context gauge percentage.
+    const metaLine = lines.find((l) => l.includes("Context") && l.includes("gpt-5.4"));
+    assert.ok(metaLine, `expected meta line with Context + gpt-5.4; got:\n${lines.join("\n")}`);
+    assert.ok(metaLine!.includes("31%"), `expected context percent in meta line: ${metaLine}`);
+    // There must NOT be a separate bare-percentage stats row (no "31%/272k" without "Context ").
+    const bareStatsLine = lines.find((l) => l.includes("31%/272k") && l.includes("gpt-5.4") && !l.includes("Context"));
+    assert.ok(!bareStatsLine, `raised mode must not emit a duplicate bare stats row:\n${lines.join("\n")}`);
   });
 
   it("narrow raised mode (<120) stays stacked — no │ divider rows", () => {
@@ -268,6 +270,140 @@ describe("DashboardFooter raised mode polish", () => {
       lines.every((l) => !l.includes("│")),
       `narrow mode must not use column divider:\n${lines.join("\n")}`,
     );
+  });
+
+  it("pinned bottom block always contains context/model/thinking in raised mode", () => {
+    // Populate several upper sections so there is content pressure above the footer zone.
+    (sharedState as any).cleave = {
+      status: "dispatching",
+      updatedAt: Date.now(),
+      children: [
+        { label: "child-a", status: "running" },
+        { label: "child-b", status: "running" },
+        { label: "child-c", status: "done" },
+      ],
+    };
+    (sharedState as any).openspec = {
+      changes: [
+        { name: "change-one", stage: "implementing", tasksDone: 3, tasksTotal: 10 },
+        { name: "change-two", stage: "specified", tasksDone: 0, tasksTotal: 5 },
+      ],
+    };
+
+    const footer = new DashboardFooter(
+      {} as any,
+      makeTheme() as any,
+      makeFooterData() as any,
+      { mode: "raised", turns: 0 } satisfies DashboardState,
+    );
+    footer.setContext(makeContext() as any);
+
+    const lines = footer.render(140);
+
+    // The pinned bottom block must include context gauge info (percent visible)
+    assert.ok(
+      lines.some((l) => l.includes("31%") || l.includes("Context")),
+      `expected context info in pinned block;\n${lines.join("\n")}`,
+    );
+    // Model name must appear
+    assert.ok(
+      lines.some((l) => l.includes("gpt-5.4")),
+      `expected model name in pinned block;\n${lines.join("\n")}`,
+    );
+    // Compact/raise hint must appear
+    assert.ok(
+      lines.some((l) => l.includes("/dash to compact") || l.includes("compact")),
+      `expected compact hint in pinned block;\n${lines.join("\n")}`,
+    );
+  });
+
+  it("raised mode does not duplicate context/model stats as a second footer row", () => {
+    (sharedState as any).cleave = { status: "idle", updatedAt: Date.now(), children: [] };
+
+    const footer = new DashboardFooter(
+      {} as any,
+      makeTheme() as any,
+      makeFooterData() as any,
+      { mode: "raised", turns: 0 } satisfies DashboardState,
+    );
+    footer.setContext(makeContext() as any);
+
+    const lines = footer.render(140);
+
+    // The model name must not appear more than once (no duplicate stats row)
+    const modelLines = lines.filter((l) => l.includes("gpt-5.4"));
+    assert.ok(
+      modelLines.length <= 1,
+      `model name appeared ${modelLines.length} times — raised mode emitted a duplicate stats row:\n${lines.join("\n")}`,
+    );
+
+    // context% also must not appear more than once
+    const ctxLines = lines.filter((l) => l.includes("31%"));
+    assert.ok(
+      ctxLines.length <= 1,
+      `context% appeared ${ctxLines.length} times — raised mode emitted duplicate context rows:\n${lines.join("\n")}`,
+    );
+  });
+
+  it("compact hint appears in the pinned footer zone, not below duplicate generic rows", () => {
+    (sharedState as any).cleave = {
+      status: "dispatching",
+      updatedAt: Date.now(),
+      children: [{ label: "x", status: "running" }],
+    };
+
+    const footer = new DashboardFooter(
+      {} as any,
+      makeTheme() as any,
+      makeFooterData() as any,
+      { mode: "raised", turns: 0 } satisfies DashboardState,
+    );
+    footer.setContext(makeContext() as any);
+
+    const lines = footer.render(140);
+
+    const hintIdx = lines.findIndex((l) => l.includes("compact") || l.includes("/dash"));
+    assert.ok(hintIdx !== -1, `compact hint not found in output:\n${lines.join("\n")}`);
+
+    // The hint must appear before the pwd line (⌂) — it is in the pinned zone
+    // above the footer data, not pushed below a duplicate stats block.
+    const pwdIdx = lines.findIndex((l) => l.includes("⌂"));
+    if (pwdIdx !== -1) {
+      assert.ok(
+        hintIdx < pwdIdx,
+        `hint (line ${hintIdx}) appeared after pwd line (line ${pwdIdx}) — hint may be displaced:\n${lines.join("\n")}`,
+      );
+    }
+  });
+
+  it("openspec rows use compact separator — no double-punctuation in progress+stage", () => {
+    (sharedState as any).cleave = { status: "idle", updatedAt: Date.now(), children: [] };
+    (sharedState as any).openspec = {
+      changes: [
+        { name: "my-change", stage: "implementing", tasksDone: 3, tasksTotal: 10, path: undefined },
+      ],
+    };
+
+    const footer = new DashboardFooter(
+      {} as any,
+      makeTheme() as any,
+      makeFooterData() as any,
+      { mode: "raised", turns: 0 } satisfies DashboardState,
+    );
+    footer.setContext(makeContext() as any);
+
+    const lines = footer.render(140);
+    const specRow = lines.find((l) => l.includes("my-change"));
+    assert.ok(specRow, `expected openspec row for my-change;\n${lines.join("\n")}`);
+
+    // Must NOT contain " ·  · " or "· ·" (the double-separator artifact)
+    assert.ok(
+      !specRow!.includes(" ·  · ") && !specRow!.includes("· ·"),
+      `openspec row has double-separator noise: ${specRow}`,
+    );
+    // Progress and stage should be present
+    assert.ok(specRow!.includes("3/10"), `expected progress in row: ${specRow}`);
+    assert.ok(specRow!.includes("impl"), `expected stage label in row: ${specRow}`);
   });
 
   it("truncates raised rows by dropping metadata before the primary label", () => {
