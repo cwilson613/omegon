@@ -3,7 +3,8 @@ id: dash-visual-sugar
 title: Raised Dashboard Visual Polish — Box Layout + Memory Consolidation
 status: exploring
 parent: unified-dashboard
-open_questions: []
+open_questions:
+  - "Should raised mode reserve a fixed bottom block for meta/footer rows (driver/model/thinking) and truncate only the upper dashboard sections, or continue with the current append-at-bottom approach?"
 ---
 
 # Raised Dashboard Visual Polish — Box Layout + Memory Consolidation
@@ -14,4 +15,4 @@ Raised mode visual improvements: wrap layout in corner-bounded box (╭╰├│
 
 ## Open Questions
 
-*No open questions.*
+- Should raised mode reserve a fixed bottom block for meta/footer rows (driver/model/thinking) and truncate only the upper dashboard sections, or continue with the current append-at-bottom approach?

@@ -4,9 +4,8 @@ title: "Raised Dashboard: Horizontal Split Layout"
 status: implemented
 related: [dashboard-cleanup]
 tags: [dashboard, tui, layout]
-open_questions:
-  - "Should raised mode reserve a fixed bottom block for meta/footer rows and truncate only the upper dashboard sections, or should it switch to a split render where only the bottom block is always visible?"
-branches: ["feature/dash-raised-layout"]
+open_questions: []
+branches: []
 openspec_change: dash-raised-layout
 ---
 
