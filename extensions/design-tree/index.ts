@@ -584,44 +584,48 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 		},
 
 		renderCall(args, theme) {
-			let text = theme.fg("toolTitle", theme.bold("design_tree "));
+			let text = theme.fg("toolTitle", "◈ query ");
 			text += theme.fg("accent", args.action);
 			if (args.node_id) text += " " + theme.fg("dim", args.node_id);
 			return new Text(text, 0, 0);
 		},
 
-		renderResult(result, { expanded }, theme) {
+		renderResult(result, { expanded, isPartial }, theme) {
+			if (isPartial) {
+				return new Text(theme.fg("dim", "◈ loading…"), 0, 0);
+			}
 			if ((result as any).isError) {
 				const first = result.content?.[0];
-				return new Text(theme.fg("error", (first && 'text' in first ? first.text : "Error")), 0, 0);
+				const errLine = (first && 'text' in first ? first.text : "Error") ?? "Error";
+				return new Text(theme.fg("error", "✕ ") + theme.fg("dim", errLine.split("\n")[0].slice(0, 80)), 0, 0);
 			}
+
+			if (expanded) {
+				const first = result.content?.[0];
+				const fullText = (first && 'text' in first ? first.text : null) ?? "";
+				return new Text(fullText, 0, 0);
+			}
+
 			const details = (result.details || {}) as Record<string, any>;
 			let text = "";
 
 			if (details.nodes) {
 				const nodes = details.nodes as Array<{ id: string; status: string; open_questions: number }>;
-				text = theme.fg("success", `${nodes.length} nodes`) + "\n";
-				if (expanded) {
-					for (const n of nodes) {
-						const icon = STATUS_ICONS[n.status as NodeStatus] || "?";
-						const color = STATUS_COLORS[n.status as NodeStatus] || "muted";
-						text += theme.fg(color as Parameters<typeof theme.fg>[0], `  ${icon} ${n.id}`) +
-							(n.open_questions > 0 ? theme.fg("dim", ` [${n.open_questions}?]`) : "") + "\n";
-					}
-				}
+				text = theme.fg("toolTitle", "◈ ") + theme.fg("success", `${nodes.length} nodes`);
 			} else if (details.node) {
 				const n = details.node as { title: string; status: NodeStatus; sections?: { openQuestions?: string[] } };
-				text = theme.fg("accent", `${STATUS_ICONS[n.status]} ${n.title}`) +
+				text = theme.fg("toolTitle", "◈ ") + theme.fg("accent", `${STATUS_ICONS[n.status]} ${n.title}`) +
 					theme.fg("muted", ` (${n.status})`);
 				const qCount = n.sections?.openQuestions?.length || 0;
 				if (qCount > 0) text += theme.fg("dim", ` — ${qCount} questions`);
 			} else if (details.questions) {
 				const q = details.questions as Record<string, string[]>;
 				const total = Object.values(q).flat().length;
-				text = theme.fg("warning", `${total} open questions`);
+				text = theme.fg("toolTitle", "◈ ") + theme.fg("warning", `${total} open questions`);
 			} else {
 				const first = result.content?.[0];
-				text = (first && 'text' in first ? first.text?.slice(0, 100) : null) || "Done";
+				const firstLine = ((first && 'text' in first ? first.text : null) ?? "Done").split("\n")[0];
+				text = theme.fg("toolTitle", "◈ ") + firstLine.slice(0, 80);
 			}
 
 			return new Text(text, 0, 0);
@@ -1199,22 +1203,116 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 		},
 
 		renderCall(args, theme) {
-			let text = theme.fg("toolTitle", theme.bold("design_tree_update "));
-			text += theme.fg("warning", args.action);
-			if (args.node_id) text += " " + theme.fg("dim", args.node_id);
-			return new Text(text, 0, 0);
+			const icon = theme.fg("toolTitle", "◈ ");
+			const action = theme.fg("warning", args.action);
+			const nid = args.node_id ? " " + theme.fg("dim", args.node_id) : "";
+
+			switch (args.action) {
+				case "set_status": {
+					const arrow = args.status ? " " + theme.fg("accent", `→ ${args.status}`) : "";
+					return new Text(icon + action + nid + arrow, 0, 0);
+				}
+				case "add_question":
+				case "remove_question": {
+					const q = args.question ? " " + theme.fg("dim", `"${String(args.question).slice(0, 50)}"`) : "";
+					return new Text(icon + action + nid + q, 0, 0);
+				}
+				case "add_decision": {
+					const d = args.decision_title ? " " + theme.fg("dim", `"${String(args.decision_title).slice(0, 45)}"`) : "";
+					return new Text(icon + action + nid + d, 0, 0);
+				}
+				case "add_research": {
+					const h = args.heading ? " " + theme.fg("dim", `"${String(args.heading).slice(0, 45)}"`) : "";
+					return new Text(icon + action + nid + h, 0, 0);
+				}
+				case "create": {
+					const t = args.title ? " " + theme.fg("dim", `"${String(args.title).slice(0, 45)}"`) : "";
+					return new Text(icon + action + nid + t, 0, 0);
+				}
+				case "unfocus":
+					return new Text(icon + action, 0, 0);
+				default:
+					return new Text(icon + action + nid, 0, 0);
+			}
 		},
 
-		renderResult(result, _opts, theme) {
-			if ((result as any).isError) {
-				const first = result.content?.[0];
-				return new Text(theme.fg("error", (first && 'text' in first ? first.text : "Error")), 0, 0);
+		renderResult(result, { expanded, isPartial }, theme) {
+			if (isPartial) {
+				return new Text(theme.fg("dim", "◈ updating…"), 0, 0);
 			}
+
+			const isErr = (result as any).isError;
 			const first = result.content?.[0];
-			const text = (first && 'text' in first ? first.text : null) || "Done";
-			// Show first line only in collapsed view
-			const firstLine = text.split("\n")[0];
-			return new Text(theme.fg("success", firstLine), 0, 0);
+			const firstLine = ((first && 'text' in first ? first.text : null) ?? "Done").split("\n")[0];
+
+			if (isErr || firstLine.startsWith("Error") || firstLine.startsWith("Cannot")) {
+				return new Text(theme.fg("error", "✕ ") + theme.fg("dim", firstLine.slice(0, 80)), 0, 0);
+			}
+
+			if (expanded) {
+				const fullText = (first && 'text' in first ? first.text : null) ?? "";
+				return new Text(fullText, 0, 0);
+			}
+
+			// Collapsed: action-specific one-liners from result.details
+			const details = (result.details ?? {}) as Record<string, unknown>;
+			const icon = theme.fg("toolTitle", "◈ ");
+
+			// Determine action from details fields
+			if ("newStatus" in details && "id" in details) {
+				// set_status result
+				const ns = details.newStatus as string;
+				const statusColor =
+					ns === "decided" || ns === "implemented" ? "success" :
+					ns === "exploring" ? "accent" :
+					ns === "blocked" ? "error" :
+					ns === "deferred" ? "dim" : "muted";
+				const arrow = theme.fg(statusColor as Parameters<typeof theme.fg>[0], `→ ${ns}`);
+				return new Text(icon + arrow + "  " + theme.fg("dim", String(details.id)), 0, 0);
+			}
+			if ("totalQuestions" in details && "question" in details) {
+				// add_question
+				const q = String(details.question).slice(0, 50);
+				const total = String(details.totalQuestions);
+				return new Text(icon + theme.fg("success", "+ question") + "  " + theme.fg("dim", `"${q}"`) + "  " + theme.fg("muted", `(${total} total)`), 0, 0);
+			}
+			if ("remainingQuestions" in details && "question" in details) {
+				// remove_question
+				const q = String(details.question).slice(0, 50);
+				const rem = String(details.remainingQuestions);
+				return new Text(icon + theme.fg("warning", "− question") + "  " + theme.fg("dim", `"${q}"`) + "  " + theme.fg("muted", `(${rem} remaining)`), 0, 0);
+			}
+			if ("decision" in details && "status" in details) {
+				// add_decision
+				const d = String(details.decision).slice(0, 45);
+				const ds = String(details.status);
+				return new Text(icon + theme.fg("success", "+ decision") + "  " + theme.fg("dim", `"${d}"`) + "  " + theme.fg("muted", ds), 0, 0);
+			}
+			if ("heading" in details) {
+				// add_research
+				const h = String(details.heading).slice(0, 45);
+				return new Text(icon + theme.fg("success", "+ research") + "  " + theme.fg("dim", `"${h}"`), 0, 0);
+			}
+			if ("changePath" in details) {
+				// implement
+				const cp = String(details.changePath ?? "").replace(/^.*openspec\//, "openspec/");
+				return new Text(icon + theme.fg("success", "✓ scaffolded") + "  " + theme.fg("dim", cp), 0, 0);
+			}
+			if ("node" in details && typeof details.node === "object" && details.node !== null) {
+				// create
+				const n = details.node as { id: string; status: string };
+				return new Text(icon + theme.fg("success", "✓ created") + "  " + theme.fg("dim", n.id) + "  " + theme.fg("muted", n.status), 0, 0);
+			}
+			if ("focusedNode" in details) {
+				const fid = details.focusedNode as string | null;
+				if (fid) {
+					return new Text(icon + theme.fg("accent", "→ focused") + "  " + theme.fg("dim", fid), 0, 0);
+				}
+				return new Text(icon + theme.fg("dim", "focus cleared"), 0, 0);
+			}
+
+			// Fallback: first line of content text
+			return new Text(icon + theme.fg("success", firstLine.slice(0, 80)), 0, 0);
 		},
 	});
 
