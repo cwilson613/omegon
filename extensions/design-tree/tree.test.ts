@@ -41,7 +41,14 @@ import {
 	writeNodeDocument,
 } from "./tree.ts";
 
-import { VALID_STATUSES, STATUS_ICONS, STATUS_COLORS, type DesignNode } from "./types.ts";
+import {
+	VALID_STATUSES,
+	STATUS_ICONS,
+	STATUS_COLORS,
+	ISSUE_TYPE_ICONS,
+	PRIORITY_LABELS,
+	type DesignNode,
+} from "./types.ts";
 
 // ─── Test Helpers ────────────────────────────────────────────────────────────
 
@@ -1460,5 +1467,164 @@ describe("transitionDesignNodesOnArchive", () => {
 		const transitioned = transitionDesignNodesOnArchive(emptyDir, "anything");
 		assert.deepEqual(transitioned, []);
 		fs.rmSync(emptyDir, { recursive: true, force: true });
+	});
+});
+
+// ─── priority + issue_type round-trip tests ───────────────────────────────────
+
+describe("priority and issue_type frontmatter round-trip", () => {
+	let tmpDir: string;
+	before(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dt-priority-"));
+	});
+	after(() => {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("generateFrontmatter serializes issue_type and priority", () => {
+		const node = {
+			id: "rt-1",
+			title: "Round Trip One",
+			status: "seed" as const,
+			dependencies: [],
+			related: [],
+			tags: [],
+			open_questions: [],
+			branches: [],
+			issue_type: "feature" as const,
+			priority: 2 as const,
+		};
+		const fm = generateFrontmatter(node);
+		assert.ok(fm.includes("issue_type: feature"), "should include issue_type");
+		assert.ok(fm.includes("priority: 2"), "should include priority");
+	});
+
+	it("generateFrontmatter omits issue_type and priority when not set", () => {
+		const node = {
+			id: "rt-2",
+			title: "Round Trip Two",
+			status: "seed" as const,
+			dependencies: [],
+			related: [],
+			tags: [],
+			open_questions: [],
+			branches: [],
+		};
+		const fm = generateFrontmatter(node);
+		assert.ok(!fm.includes("issue_type"), "should not include issue_type");
+		assert.ok(!fm.includes("priority"), "should not include priority");
+	});
+
+	it("scanDesignDocs parses issue_type and priority from frontmatter", () => {
+		const docsDir = path.join(tmpDir, "docs-scan");
+		const node = createNode(docsDir, {
+			id: "rt-3",
+			title: "Scan Test",
+			issue_type: "bug",
+			priority: 1,
+		});
+		// The file was written by createNode; verify scan reads it back
+		const tree = scanDesignDocs(docsDir);
+		const scanned = tree.nodes.get("rt-3")!;
+		assert.equal(scanned.issue_type, "bug");
+		assert.equal(scanned.priority, 1);
+	});
+
+	it("scanDesignDocs ignores invalid issue_type values", () => {
+		const docsDir = path.join(tmpDir, "docs-invalid");
+		fs.mkdirSync(docsDir, { recursive: true });
+		const content = `---\nid: rt-4\ntitle: Invalid Type\nstatus: seed\ndependencies: []\nrelated: []\ntags: []\nopen_questions: []\nbranches: []\nissue_type: invalid-type\n---\n# Invalid Type\n\n## Overview\n\ntest.\n`;
+		fs.writeFileSync(path.join(docsDir, "rt-4.md"), content);
+		const tree = scanDesignDocs(docsDir);
+		assert.equal(tree.nodes.get("rt-4")!.issue_type, undefined);
+	});
+
+	it("scanDesignDocs ignores out-of-range priority values", () => {
+		const docsDir = path.join(tmpDir, "docs-badpriority");
+		fs.mkdirSync(docsDir, { recursive: true });
+		const content = `---\nid: rt-5\ntitle: Bad Priority\nstatus: seed\ndependencies: []\nrelated: []\ntags: []\nopen_questions: []\nbranches: []\npriority: 9\n---\n# Bad Priority\n\n## Overview\n\ntest.\n`;
+		fs.writeFileSync(path.join(docsDir, "rt-5.md"), content);
+		const tree = scanDesignDocs(docsDir);
+		assert.equal(tree.nodes.get("rt-5")!.priority, undefined);
+	});
+
+	it("createNode accepts issue_type and priority opts", () => {
+		const docsDir = path.join(tmpDir, "docs-create");
+		const node = createNode(docsDir, {
+			id: "rt-6",
+			title: "Create With Fields",
+			issue_type: "epic",
+			priority: 3,
+		});
+		assert.equal(node.issue_type, "epic");
+		assert.equal(node.priority, 3);
+		// Verify persisted to disk
+		const content = fs.readFileSync(node.filePath, "utf-8");
+		assert.ok(content.includes("issue_type: epic"));
+		assert.ok(content.includes("priority: 3"));
+	});
+
+	it("ISSUE_TYPE_ICONS and PRIORITY_LABELS are exported from types with expected values", () => {
+		assert.ok(ISSUE_TYPE_ICONS, "ISSUE_TYPE_ICONS should be exported");
+		assert.ok(PRIORITY_LABELS, "PRIORITY_LABELS should be exported");
+		assert.equal(ISSUE_TYPE_ICONS["epic"], "⬡");
+		assert.equal(PRIORITY_LABELS[1], "critical");
+		assert.equal(PRIORITY_LABELS[5], "trivial");
+	});
+
+	it("parseFrontmatter strips inline YAML comments from priority and issue_type", () => {
+		// W3: a line like `priority: 3 # comment` must not produce NaN
+		const content = [
+			"---",
+			"id: rt-7",
+			"title: Comment Test",
+			"status: seed",
+			"dependencies: []",
+			"related: []",
+			"tags: []",
+			"open_questions: []",
+			"branches: []",
+			"priority: 3 # high-ish",
+			"issue_type: bug # tracked in jira",
+			"---",
+			"# Comment Test",
+			"",
+			"## Overview",
+			"",
+			"test.",
+		].join("\n");
+		const fm = parseFrontmatter(content);
+		assert.ok(fm, "should parse frontmatter");
+		assert.equal(fm!.priority, "3", "priority should be the bare string '3', not '3 # high-ish'");
+		assert.equal(fm!.issue_type, "bug", "issue_type should be bare 'bug'");
+	});
+
+	it("scanDesignDocs correctly parses priority with inline comment", () => {
+		const docsDir = path.join(tmpDir, "docs-inline-comment");
+		fs.mkdirSync(docsDir, { recursive: true });
+		const content = [
+			"---",
+			"id: rt-8",
+			"title: Inline Comment Node",
+			"status: seed",
+			"dependencies: []",
+			"related: []",
+			"tags: []",
+			"open_questions: []",
+			"branches: []",
+			"priority: 2 # medium",
+			"issue_type: feature # new feature",
+			"---",
+			"# Inline Comment Node",
+			"",
+			"## Overview",
+			"",
+			"test.",
+		].join("\n");
+		fs.writeFileSync(path.join(docsDir, "rt-8.md"), content);
+		const tree = scanDesignDocs(docsDir);
+		const node = tree.nodes.get("rt-8")!;
+		assert.equal(node.priority, 2, "priority should be 2 (not NaN from inline comment)");
+		assert.equal(node.issue_type, "feature");
 	});
 });
