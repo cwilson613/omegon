@@ -360,19 +360,34 @@ export class DashboardFooter implements Component {
    * Reads local branches from .git/refs/heads/ (no shell spawn).
    */
   private buildBranchTree(width: number): string[] {
+    const MAX_BRANCHES = 8;
     const cwd = process.cwd();
     const repoName = cwd.split("/").pop() ?? cwd;
     const currentBranch = this.footerData.getGitBranch();
     const allBranches = readLocalBranches(cwd);
+    // Cap branches fed to the tree renderer; append a hint if truncated
+    const truncatedBranches = allBranches.length > MAX_BRANCHES
+      ? allBranches.slice(0, MAX_BRANCHES)
+      : allBranches;
+    const hiddenCount = allBranches.length > MAX_BRANCHES
+      ? allBranches.length - MAX_BRANCHES
+      : 0;
     const designNodes = sharedState.designTree?.nodes?.map((n) => ({
       branches: n.branches ?? [],
       title: n.title,
     }));
     const lines = buildBranchTreeLines(
-      { repoName, currentBranch, allBranches, designNodes },
+      { repoName, currentBranch, allBranches: truncatedBranches, designNodes },
       this.theme,
     );
-    return lines.map((l) => truncateToWidth(l, width, "…"));
+    const result = lines.map((l) => truncateToWidth(l, width, "…"));
+    if (hiddenCount > 0) {
+      result.push(
+        this.theme.fg("dim", `  … ${hiddenCount} more branches`) +
+        this.theme.fg("dim", " — /dashboard to expand"),
+      );
+    }
+    return result;
   }
 
   /**
@@ -403,7 +418,7 @@ export class DashboardFooter implements Component {
 
     const separator = b(BOX.vr) + b(BOX.h.repeat(width - 2)) + b(BOX.vl);
 
-    const dashHint = " /dash to compact ";
+    const dashHint = " /dash to compact · /dashboard to expand ";
     const botPad = Math.max(0, width - 2 - visibleWidth(dashHint));
     const bottomBorder = b(BOX.bl) + theme.fg("dim", dashHint) + b(BOX.h.repeat(botPad)) + b(BOX.br);
 
@@ -640,8 +655,9 @@ export class DashboardFooter implements Component {
     }
 
     // Implementing nodes (if no focused node)
+    const MAX_IMPL_NODES = 4;
     if (dt.implementingNodes && dt.implementingNodes.length > 0 && !dt.focusedNode) {
-      for (const n of dt.implementingNodes.slice(0, 3)) {
+      for (const n of dt.implementingNodes.slice(0, MAX_IMPL_NODES)) {
         const branchSuffix = n.branch ? theme.fg("dim", n.branch) : "";
         const linkedTitle = linkDashboardFile(n.title, n.filePath);
         lines.push(composePrimaryMetaLine(
@@ -650,12 +666,18 @@ export class DashboardFooter implements Component {
           [branchSuffix],
         ));
       }
+      if (dt.implementingNodes.length > MAX_IMPL_NODES) {
+        lines.push(
+          theme.fg("dim", `  … ${dt.implementingNodes.length - MAX_IMPL_NODES} more`) +
+          theme.fg("dim", " — /dashboard to expand"),
+        );
+      }
     }
 
-    // If no focused node and no implementing nodes, show all nodes (up to 4)
+    // If no focused node and no implementing nodes, show all nodes (up to MAX_NODES)
     if (!dt.focusedNode && (!dt.implementingNodes || dt.implementingNodes.length === 0) && dt.nodes) {
-      const maxShow = 4;
-      for (const n of dt.nodes.slice(0, maxShow)) {
+      const MAX_NODES = 6;
+      for (const n of dt.nodes.slice(0, MAX_NODES)) {
         const icon = this.nodeStatusIcon(n.status);
         const linkedId = linkDashboardFile(theme.fg("dim", n.id), n.filePath);
         const qSuffix = n.questionCount > 0 ? theme.fg("dim", ` (${n.questionCount}?)`) : "";
@@ -665,8 +687,11 @@ export class DashboardFooter implements Component {
           [qSuffix],
         ));
       }
-      if (dt.nodes.length > maxShow) {
-        lines.push(theme.fg("dim", `  +${dt.nodes.length - maxShow} more`));
+      if (dt.nodes.length > MAX_NODES) {
+        lines.push(
+          theme.fg("dim", `  … ${dt.nodes.length - MAX_NODES} more`) +
+          theme.fg("dim", " — /dashboard to expand"),
+        );
       }
     }
 
@@ -708,7 +733,8 @@ export class DashboardFooter implements Component {
       aggregateProgress,
     );
 
-    for (const c of active.slice(0, 3)) {
+    const MAX_CHANGES = 5;
+    for (const c of active.slice(0, MAX_CHANGES)) {
       const done = c.tasksTotal > 0 && c.tasksDone >= c.tasksTotal;
       const icon = done ? theme.fg("success", "✓") : theme.fg("dim", "◦");
 
@@ -735,6 +761,12 @@ export class DashboardFooter implements Component {
         `  ${icon} ${linkedName}`,
         meta ? [meta] : [],
       ));
+    }
+    if (active.length > MAX_CHANGES) {
+      lines.push(
+        theme.fg("dim", `  … ${active.length - MAX_CHANGES} more`) +
+        theme.fg("dim", " — /dashboard to expand"),
+      );
     }
 
     return lines;
