@@ -31,7 +31,7 @@
 - [ ] 3.5 Add tool descriptions documenting the Satori CSS subset (Flexbox only, no Grid, no box-shadow, no CSS animations, props-based frame injection)
 
 ## 4. Smoke test
-- [ ] 4.1 Write a minimal composition `extensions/render/composition/test-comp.tsx` — a progress bar animating from 0→100% over 30 frames using Verdant colors
-- [ ] 4.2 Run `node render.mjs --composition test-comp.tsx --mode still --frame 15 --width 800 --height 200 --output /tmp/test-still.png` — verify PNG written
-- [ ] 4.3 Run `node render.mjs --composition test-comp.tsx --mode gif --fps 30 --duration 30 --width 800 --height 200 --output /tmp/test.gif` — verify animated GIF written and opens correctly
-- [ ] 4.4 Verify `render_composition_still` tool works end-to-end from the extension (inline return for ≤1MB)
+- [x] 4.1 Write a minimal composition `extensions/render/composition/test-comp.tsx` — a progress bar animating from 0→100% over 30 frames using Verdant colors
+- [x] 4.2 Run `node render.mjs --composition test-comp.tsx --mode still --frame 15 --width 800 --height 200 --output /tmp/test-still.png` — verify PNG written
+- [x] 4.3 Run `node render.mjs --composition test-comp.tsx --mode gif --fps 30 --duration 30 --width 800 --height 200 --output /tmp/test.gif` — verify animated GIF written and opens correctly
+- [x] 4.4 Verify `render_composition_still` tool works end-to-end from the extension (inline return for ≤1MB)
