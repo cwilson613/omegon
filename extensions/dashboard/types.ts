@@ -79,6 +79,8 @@ export interface DesignTreeDashboardState {
     acSummary?: AcSummary | null;
     /** Last /assess spec result (undefined if no assessment.json) */
     assessmentResult?: DesignAssessmentResult | null;
+    /** Name of linked openspec implementation change (set by design-tree on emit) */
+    openspecChange?: string | null;
   }>;
   /** Implementing nodes shown in raised mode with branch associations */
   implementingNodes?: Array<{ id: string; title: string; branch?: string; filePath?: string }>;
