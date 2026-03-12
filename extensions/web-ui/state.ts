@@ -190,14 +190,52 @@ function readAssessmentResult(repoRoot: string, nodeId: string): AssessmentResul
   return null;
 }
 
-function buildDesignTree(repoRoot: string): DesignTreeSnapshot {
+/**
+ * Scan docs/ once and build the enriched DesignNodeSummary list.
+ * Called at most once per request; the result is shared between
+ * buildDesignTree and buildDesignPipeline to avoid duplicate scans.
+ */
+function scanDesignNodes(repoRoot: string): DesignNodeSummary[] {
+  const docsDir = path.join(repoRoot, "docs");
+  if (!fs.existsSync(docsDir)) return [];
+  try {
+    const tree = scanDesignDocs(docsDir);
+    const out: DesignNodeSummary[] = [];
+    for (const [, node] of tree.nodes) {
+      const acRaw = countAcceptanceCriteria(node);
+      const acSummary: ACSummary | null = acRaw
+        ? { scenarios: acRaw.scenarios, falsifiability: acRaw.falsifiability, constraints: acRaw.constraints }
+        : null;
+      const designSpec       = resolveDesignSpecBinding(repoRoot, node.id);
+      const assessmentResult = readAssessmentResult(repoRoot, node.id);
+      out.push({
+        id: node.id,
+        title: node.title,
+        status: node.status,
+        parent: node.parent ?? null,
+        questionCount: node.open_questions.length,
+        questions: node.open_questions,
+        tags: node.tags,
+        openspecChange: node.openspec_change ?? null,
+        branch: node.branch ?? null,
+        designSpec,
+        acSummary,
+        assessmentResult,
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function buildDesignTree(repoRoot: string, scannedNodes?: DesignNodeSummary[]): DesignTreeSnapshot {
   // Use sharedState.designTree if available (populated by design-tree extension),
   // otherwise fall back to an on-demand file scan.
   const live = sharedState.designTree;
 
-  // On-demand scan for full node details (always)
-  const docsDir = path.join(repoRoot, "docs");
-  let nodes: DesignNodeSummary[] = [];
+  // Accept pre-scanned nodes (shared with buildDesignPipeline) or scan now.
+  let nodes: DesignNodeSummary[] = scannedNodes ?? scanDesignNodes(repoRoot);
   let focusedNodeId: string | null = null;
 
   if (live?.focusedNode) {
@@ -208,44 +246,21 @@ function buildDesignTree(repoRoot: string): DesignTreeSnapshot {
   let openQuestionCount = 0;
   let focusedNode: DesignNodeSummary | null = null;
 
-  let scanSucceeded = false;
-  if (fs.existsSync(docsDir)) {
+  let scanSucceeded = nodes.length > 0 || fs.existsSync(path.join(repoRoot, "docs"));
+  if (nodes.length > 0 || scannedNodes !== undefined) {
     try {
-      const tree = scanDesignDocs(docsDir);
-      for (const [, node] of tree.nodes) {
-        const acRaw   = countAcceptanceCriteria(node);
-        const acSummary: ACSummary | null = acRaw
-          ? { scenarios: acRaw.scenarios, falsifiability: acRaw.falsifiability, constraints: acRaw.constraints }
-          : null;
-        const designSpec    = resolveDesignSpecBinding(repoRoot, node.id);
-        const assessmentResult = readAssessmentResult(repoRoot, node.id);
-
-        const summary: DesignNodeSummary = {
-          id: node.id,
-          title: node.title,
-          status: node.status,
-          parent: node.parent ?? null,
-          questionCount: node.open_questions.length,
-          questions: node.open_questions,
-          tags: node.tags,
-          openspecChange: node.openspec_change ?? null,
-          branch: node.branch ?? null,
-          designSpec,
-          acSummary,
-          assessmentResult,
-        };
-        nodes.push(summary);
+      for (const node of nodes) {
         statusCounts[node.status] = (statusCounts[node.status] ?? 0) + 1;
-        openQuestionCount += node.open_questions.length;
-
-        if (node.id === focusedNodeId) {
-          focusedNode = summary;
-        }
+        openQuestionCount += node.questionCount;
+        if (node.id === focusedNodeId) focusedNode = node;
       }
       scanSucceeded = true;
     } catch {
-      // docs dir exists but scan failed — fall through to live state fallback
+      // fall through to live state fallback
     }
+  } else {
+    // No pre-scanned nodes and no docs dir — mark as not succeeded
+    scanSucceeded = false;
   }
 
   if (!scanSucceeded && live) {
@@ -340,7 +355,7 @@ function buildMemory(): MemorySnapshot {
   };
 }
 
-function buildDesignPipeline(repoRoot: string): DesignPipelineSnapshot {
+function buildDesignPipeline(repoRoot: string, scannedNodes?: DesignNodeSummary[]): DesignPipelineSnapshot {
   const raw = listDesignChanges(repoRoot);
 
   const changes: DesignChangeSummary[] = raw.map((c) => ({
@@ -358,28 +373,21 @@ function buildDesignPipeline(repoRoot: string): DesignPipelineSnapshot {
     archivedPath:   c.archivedPath ? path.relative(repoRoot, c.archivedPath) : undefined,
   }));
 
-  // Compute funnel counts from design tree (on-demand scan)
-  let total    = 0;
+  // Compute funnel counts from the already-scanned node list (shared with
+  // buildDesignTree to avoid a second full docs/ + openspec/design/ scan per request).
+  const nodes = scannedNodes ?? scanDesignNodes(repoRoot);
+  let total    = nodes.length;
   let bound    = 0;
   let tasksComplete = 0;
   let assessed = 0;
   const archived = raw.filter((c) => c.isArchived).length;
 
-  try {
-    const docsDir = path.join(repoRoot, "docs");
-    if (fs.existsSync(docsDir)) {
-      const tree = scanDesignDocs(docsDir);
-      for (const [, node] of tree.nodes) {
-        total++;
-        const binding = resolveDesignSpecBinding(repoRoot, node.id);
-        if (!binding) continue;
-        bound++;
-        if (binding.tasksTotal > 0 && binding.tasksDone >= binding.tasksTotal) tasksComplete++;
-        const ar = readAssessmentResult(repoRoot, node.id);
-        if (ar?.pass) assessed++;
-      }
-    }
-  } catch { /* design tree may not exist */ }
+  for (const node of nodes) {
+    if (!node.designSpec) continue;
+    bound++;
+    if (node.designSpec.tasksTotal > 0 && node.designSpec.tasksDone >= node.designSpec.tasksTotal) tasksComplete++;
+    if (node.assessmentResult?.pass) assessed++;
+  }
 
   const funnelCounts: DesignFunnelCounts = { total, bound, tasksComplete, assessed, archived };
 
@@ -410,17 +418,20 @@ export function buildControlPlaneState(
   repoRoot: string,
   startedAt: number
 ): ControlPlaneState {
+  // Scan design docs exactly once per request — result shared between
+  // buildDesignTree and buildDesignPipeline to avoid duplicate I/O.
+  const scannedNodes = scanDesignNodes(repoRoot);
   return {
     schemaVersion: SCHEMA_VERSION,
     session: buildSession(repoRoot),
     dashboard: buildDashboard(),
-    designTree: buildDesignTree(repoRoot),
+    designTree: buildDesignTree(repoRoot, scannedNodes),
     openspec: buildOpenSpec(repoRoot),
     cleave: buildCleave(),
     models: buildModels(),
     memory: buildMemory(),
     health: buildHealth(startedAt),
-    designPipeline: buildDesignPipeline(repoRoot),
+    designPipeline: buildDesignPipeline(repoRoot, scannedNodes),
   };
 }
 

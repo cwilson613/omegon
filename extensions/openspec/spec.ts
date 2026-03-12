@@ -1314,11 +1314,16 @@ export function listDesignChanges(repoRoot: string): DesignChangeInfo[] {
 
 			const proposalPath  = path.join(entryPath, "proposal.md");
 			const specPath      = path.join(entryPath, "spec.md");
+			const specsDir      = path.join(entryPath, "specs");
 			const tasksPath     = path.join(entryPath, "tasks.md");
 			const assessPath    = path.join(entryPath, "assessment.json");
 
 			const hasProposal   = fs.existsSync(proposalPath);
-			const hasSpec       = fs.existsSync(specPath);
+			// Accept both flat spec.md (task-spec convention) and the standard
+			// specs/ subdirectory layout used by real OpenSpec changes.
+			const hasSpec       = fs.existsSync(specPath) ||
+				(fs.existsSync(specsDir) && fs.statSync(specsDir).isDirectory() &&
+					fs.readdirSync(specsDir).some((f) => f.endsWith(".md")));
 			const hasTasks      = fs.existsSync(tasksPath);
 			const hasAssessment = fs.existsSync(assessPath);
 
@@ -1344,7 +1349,9 @@ export function listDesignChanges(repoRoot: string): DesignChangeInfo[] {
 						outcome?: string;
 						timestamp?: string;
 					};
-					assessmentPass = raw.outcome === "pass";
+					// Only assign a boolean when the outcome field is actually present;
+					// a malformed / empty JSON object should yield null, not false.
+					assessmentPass = "outcome" in raw ? raw.outcome === "pass" : null;
 					capturedAt = raw.timestamp ?? null;
 				} catch { /* leave null */ }
 			}
@@ -1361,8 +1368,11 @@ export function listDesignChanges(repoRoot: string): DesignChangeInfo[] {
 				tasksDone,
 				tasksTotal,
 				isArchived: archived,
+				// archivedPath is set only for archived entries and only when the
+				// archive location differs from path (i.e. if the caller passed a
+				// separate archive dir).  Since entryPath IS the archive dir here,
+				// we intentionally omit the field to avoid redundancy.
 			};
-			if (archived) info.archivedPath = entryPath;
 			results.push(info);
 		}
 	}
