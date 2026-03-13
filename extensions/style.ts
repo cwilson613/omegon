@@ -23,6 +23,7 @@ const CORE_PALETTE = {
 	surfaceBg:     "#131e2e",
 	borderColor:   "#1a3448",
 	borderDim:     "#0e1e30",
+	syntaxType:    "#5aa8e0", // sky-blue, distinct from primary teal
 };
 
 const SIGNALS = {
@@ -118,8 +119,8 @@ function quickRef(): string {
 		`surfaceBg:${CORE_PALETTE.surfaceBg}    primaryBr:  ${CORE_PALETTE.primaryBright}  orange: ${SIGNALS.orange}`,
 		`                                          yellow: ${SIGNALS.yellow}`,
 		"",
-		"TEXT                 BORDERS",
-		`fg:       ${CORE_PALETTE.fg}    border:     ${CORE_PALETTE.borderColor}`,
+		"TEXT                 BORDERS              SYNTAX",
+		`fg:       ${CORE_PALETTE.fg}    border:     ${CORE_PALETTE.borderColor}  syntaxType: ${CORE_PALETTE.syntaxType}`,
 		`mutedFg:  ${CORE_PALETTE.mutedFg}    borderDim:  ${CORE_PALETTE.borderDim}`,
 		`dimFg:    ${CORE_PALETTE.dimFg}`,
 		"",
