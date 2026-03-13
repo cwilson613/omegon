@@ -21,6 +21,10 @@ const AGENT_DIR = path.join(
 
 const SETTINGS_PATH = path.join(AGENT_DIR, "settings.json");
 const GLOBAL_AGENTS_PATH = path.join(AGENT_DIR, "AGENTS.md");
+const THEMES_DIR = path.join(AGENT_DIR, "themes");
+
+/** Themes shipped with Omegon — deployed to ~/.pi/agent/themes/ */
+const BUNDLED_THEMES = ["alpharius.json"] as const;
 
 /** Marker embedded in the deployed AGENTS.md to identify Omegon ownership */
 const PIKIT_MARKER = "<!-- managed by omegon -->";
@@ -66,6 +70,28 @@ export default function (pi: ExtensionAPI) {
         fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n", "utf8");
         if (ctx.hasUI) {
           ctx.ui.notify("Omegon: set theme to default (restart to apply)", "info");
+        }
+      }
+    } catch {
+      // Best effort
+    }
+
+    // --- Theme deployment ---
+    // Copy bundled themes to ~/.pi/agent/themes/, overwriting on every session start
+    // so updates in the repo propagate automatically.
+    try {
+      fs.mkdirSync(THEMES_DIR, { recursive: true });
+      for (const themeFile of BUNDLED_THEMES) {
+        const src = path.join(import.meta.dirname, "..", "themes", themeFile);
+        const dst = path.join(THEMES_DIR, themeFile);
+        if (!fs.existsSync(src)) continue;
+        const srcContent = fs.readFileSync(src, "utf8");
+        const dstContent = fs.existsSync(dst) ? fs.readFileSync(dst, "utf8") : null;
+        if (srcContent !== dstContent) {
+          fs.writeFileSync(dst, srcContent, "utf8");
+          if (ctx.hasUI) {
+            ctx.ui.notify(`Omegon: updated theme ${themeFile} (restart to apply)`, "info");
+          }
         }
       }
     } catch {
