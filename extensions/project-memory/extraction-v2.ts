@@ -540,6 +540,21 @@ export interface EpisodeOutput {
 }
 
 /**
+ * Session telemetry collected during a session — used to build template episodes
+ * when all model-based generation fails.
+ */
+export interface SessionTelemetry {
+  /** ISO date string for the session */
+  date: string;
+  /** Total tool calls made during the session */
+  toolCallCount: number;
+  /** Files that were written (via Write tool) */
+  filesWritten: string[];
+  /** Files that were edited (via Edit tool) */
+  filesEdited: string[];
+}
+
+/**
  * Generate a session episode via direct Ollama HTTP API call.
  * ~10x faster than spawning a pi subprocess — no process startup overhead.
  * Falls back to subprocess-based generation if Ollama is unreachable.
@@ -624,4 +639,124 @@ export async function generateEpisode(
   } catch {
     return null;
   }
+}
+
+/**
+ * Build a minimum viable episode from raw session telemetry.
+ * Zero I/O — assembled deterministically from already-collected data.
+ * This is the guaranteed floor: always emitted when every model in the fallback chain fails.
+ */
+export function buildTemplateEpisode(telemetry: SessionTelemetry): EpisodeOutput {
+  const allModified = [...new Set([...telemetry.filesWritten, ...telemetry.filesEdited])];
+
+  // Infer topics from file paths (directory names)
+  const skipDirs = new Set([".", "..", "src", "lib", "dist", "extensions", "tests"]);
+  const topics = new Set<string>();
+  for (const f of allModified) {
+    const parts = f.replace(/\\/g, "/").split("/");
+    for (const p of parts.slice(0, -1)) {
+      if (p && !skipDirs.has(p) && !p.startsWith(".")) topics.add(p);
+    }
+  }
+
+  const topicStr = topics.size > 0
+    ? `Work touched: ${[...topics].slice(0, 4).join(", ")}.`
+    : "";
+
+  const fileList = allModified.length > 0
+    ? allModified.slice(0, 5).map(f => f.split("/").pop() ?? f).join(", ") +
+      (allModified.length > 5 ? ` (+${allModified.length - 5} more)` : "")
+    : "no files modified";
+
+  const title = allModified.length > 0
+    ? `Session ${telemetry.date}: modified ${allModified.length} file${allModified.length !== 1 ? "s" : ""}`
+    : `Session ${telemetry.date}`;
+
+  const narrative =
+    `Session on ${telemetry.date} — ${telemetry.toolCallCount} tool calls. ` +
+    `Files modified: ${fileList}. ${topicStr}` +
+    ` (Template episode — model generation unavailable for this session.)`;
+
+  return { title, narrative };
+}
+
+/**
+ * Generate a session episode with a full fallback chain:
+ *   1. Ollama (direct HTTP, fast)
+ *   2. Cloud primary model (config.episodeModel) via subprocess
+ *   3. Cloud retribution tier (haiku) via subprocess
+ *   4. Template episode (deterministic, zero I/O) — always succeeds
+ *
+ * Step timeouts are taken from config.episodeStepTimeout, capped so the total
+ * chain fits within config.shutdownExtractionTimeout.
+ */
+export async function generateEpisodeWithFallback(
+  recentConversation: string,
+  telemetry: SessionTelemetry,
+  config: MemoryConfig,
+  cwd: string,
+): Promise<EpisodeOutput> {
+  const stepTimeout = Math.min(
+    config.episodeStepTimeout,
+    Math.floor(config.shutdownExtractionTimeout / 3),
+  );
+
+  if (config.episodeFallbackChain) {
+    // Step 1: Ollama (direct HTTP — fastest, no subprocess overhead)
+    try {
+      const result = await generateEpisodeDirect(recentConversation, config);
+      if (result) return result;
+    } catch {
+      // Fall through
+    }
+
+    // Step 2: Cloud primary (episodeModel — codex-spark by default)
+    try {
+      const raw = await spawnExtraction({
+        cwd,
+        model: config.episodeModel,
+        systemPrompt: EPISODE_PROMPT,
+        userMessage: `Session conversation:\n\n${recentConversation}\n\nOutput the episode JSON.`,
+        timeout: stepTimeout,
+        label: "Episode generation (primary)",
+      });
+      if (raw.trim()) {
+        const cleaned = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```\s*$/, "").trim();
+        const parsed = JSON.parse(cleaned);
+        if (parsed.title && parsed.narrative) return parsed as EpisodeOutput;
+      }
+    } catch {
+      // Fall through
+    }
+
+    // Step 3: Retribution tier (haiku — fast, cheap)
+    try {
+      const raw = await spawnExtraction({
+        cwd,
+        model: "claude-haiku-4-5",
+        systemPrompt: EPISODE_PROMPT,
+        userMessage: `Session conversation:\n\n${recentConversation}\n\nOutput the episode JSON.`,
+        timeout: stepTimeout,
+        label: "Episode generation (retribution fallback)",
+      });
+      if (raw.trim()) {
+        const cleaned = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```\s*$/, "").trim();
+        const parsed = JSON.parse(cleaned);
+        if (parsed.title && parsed.narrative) return parsed as EpisodeOutput;
+      }
+    } catch {
+      // Fall through to template
+    }
+  } else {
+    // Chain disabled — try direct Ollama only
+    try {
+      const result = await generateEpisodeDirect(recentConversation, config);
+      if (result) return result;
+    } catch {
+      // Fall through
+    }
+  }
+
+  // Step 4: Template episode — guaranteed floor, zero I/O
+  return buildTemplateEpisode(telemetry);
 }

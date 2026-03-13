@@ -22,6 +22,9 @@ _Code style, project conventions, common approaches_
 
 ## Specs
 _Active specifications, acceptance criteria, and design contracts driving current work_
+
+## Recent Work
+_What was done this week — ephemeral session receipts, decays within a business week_
 `;
 
 export const SECTIONS = [
@@ -31,6 +34,7 @@ export const SECTIONS = [
   "Known Issues",
   "Patterns & Conventions",
   "Specs",
+  "Recent Work",
 ] as const;
 
 export type SectionName = (typeof SECTIONS)[number];

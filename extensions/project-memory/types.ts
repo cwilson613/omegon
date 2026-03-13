@@ -65,6 +65,12 @@ export interface MemoryConfig {
   compactionRetryLimit: number;
   /** Enable Phase 2 global extraction (generalizes project facts to user-level store) */
   globalExtractionEnabled: boolean;
+  /** Model to use for episode generation (first cloud attempt in fallback chain) */
+  episodeModel: string;
+  /** Per-attempt timeout for each step in the episode fallback chain (ms) */
+  episodeStepTimeout: number;
+  /** Enable fallback chain for episode generation: Ollama → cloud primary → cloud retribution → template */
+  episodeFallbackChain: boolean;
 }
 
 export const DEFAULT_CONFIG: MemoryConfig = {
@@ -89,5 +95,8 @@ export const DEFAULT_CONFIG: MemoryConfig = {
   compactionHaikuTimeout: 30_000,
   compactionRetryLimit: 3,
   globalExtractionEnabled: false,
+  episodeModel: "gpt-5.3-codex-spark",
+  episodeStepTimeout: 8_000,
+  episodeFallbackChain: true,
 };
 

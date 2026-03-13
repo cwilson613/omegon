@@ -64,7 +64,7 @@ import {
   createTriggerState,
   shouldExtract,
 } from "./triggers.ts";
-import { runExtractionV2, runGlobalExtraction, killActiveExtraction, killAllSubprocesses, generateEpisode, generateEpisodeDirect } from "./extraction-v2.ts";
+import { runExtractionV2, runGlobalExtraction, killActiveExtraction, killAllSubprocesses, generateEpisode, generateEpisodeDirect, generateEpisodeWithFallback, buildTemplateEpisode, type SessionTelemetry } from "./extraction-v2.ts";
 import { migrateToFactStore, needsMigration, markMigrated } from "./migration.ts";
 import { SECTIONS } from "./template.ts";
 import { serializeConversation, convertToLlm } from "@cwilson613/pi-coding-agent";
@@ -358,6 +358,16 @@ export default function (pi: ExtensionAPI) {
   let exitEpisodeDone = false;
   let consecutiveExtractionFailures = 0;
   let memoryDir = "";
+
+  // --- Session Telemetry (for task-completion facts + template episode fallback) ---
+  /** Files written this session (Write tool calls that succeeded) */
+  const sessionFilesWritten: string[] = [];
+  /** Files edited this session (Edit tool calls that succeeded) */
+  const sessionFilesEdited: string[] = [];
+  /** Pending write/edit args, keyed by toolCallId, collected from tool_call events */
+  const pendingWriteEditArgs = new Map<string, { toolName: string; path: string }>();
+  /** Proactive startup payload — injected on firstTurn before semantic retrieval */
+  let startupInjectionPayload: string | null = null;
   const globalMemoryDir = path.join(os.homedir(), ".pi", "memory");
 
   // --- Context Pressure State ---
@@ -603,6 +613,10 @@ export default function (pi: ExtensionAPI) {
     compactionWarned = false;
     autoCompacted = false;
     workingMemory.clear();
+    sessionFilesWritten.length = 0;
+    sessionFilesEdited.length = 0;
+    pendingWriteEditArgs.clear();
+    startupInjectionPayload = null;
 
     // Apply effort-tier overrides to extraction and compaction config.
     // sharedState.effort is written by the effort extension's session_start,
@@ -655,6 +669,79 @@ export default function (pi: ExtensionAPI) {
       }
     } catch {
       embeddingAvailable = false;
+    }
+
+    // --- Proactive startup injection (session-continuity) ---
+    // Inject three layers before the user's first message so continuation
+    // questions work without waiting for semantic retrieval.
+    // Layer 1: last 3 session episodes (what was worked on recently)
+    // Layer 2: top-20 recently-reinforced facts (recency window, cross-section)
+    // Layer 3: Architecture + Decisions sections always (structural context)
+    //
+    // This runs asynchronously so it doesn't block the TUI from appearing.
+    // The payload is injected as a pre-prompt system message on the first turn.
+    if (store) {
+      try {
+        const mind = activeMind();
+        const recentEpisodes = store.getEpisodes(mind, 3);
+        const allFacts = store.getActiveFacts(mind);
+
+        // Recency window: top 20 by last_reinforced (any section)
+        const recentFacts = [...allFacts]
+          .sort((a, b) => new Date(b.last_reinforced).getTime() - new Date(a.last_reinforced).getTime())
+          .slice(0, 20);
+
+        // Core structural facts: Architecture + Decisions always loaded
+        const coreFacts = allFacts.filter(f =>
+          f.section === "Architecture" || f.section === "Decisions"
+        );
+
+        // Merge: recent episodes + recency window + core sections (deduplicated)
+        const startupFactIds = new Set<string>();
+        const startupFacts: typeof allFacts = [];
+        for (const f of [...coreFacts, ...recentFacts]) {
+          if (!startupFactIds.has(f.id)) {
+            startupFacts.push(f);
+            startupFactIds.add(f.id);
+          }
+        }
+
+        if (recentEpisodes.length > 0 || startupFacts.length > 0) {
+          const lines: string[] = ["<!-- Startup Context — recent sessions and structural memory -->", ""];
+
+          if (recentEpisodes.length > 0) {
+            lines.push("## Recent Sessions");
+            lines.push("_Episodic memory — what happened and why_");
+            lines.push("");
+            for (const ep of recentEpisodes) {
+              lines.push(`### ${ep.date}: ${ep.title}`);
+              lines.push(ep.narrative);
+              lines.push("");
+            }
+          }
+
+          if (startupFacts.length > 0) {
+            const factsBySection = new Map<string, typeof startupFacts>();
+            for (const f of startupFacts) {
+              const sec = factsBySection.get(f.section) ?? [];
+              sec.push(f);
+              factsBySection.set(f.section, sec);
+            }
+            for (const [section, facts] of factsBySection) {
+              lines.push(`## ${section}`);
+              lines.push("");
+              for (const f of facts) {
+                lines.push(`- ${f.content}`);
+              }
+              lines.push("");
+            }
+          }
+
+          startupInjectionPayload = lines.join("\n");
+        }
+      } catch {
+        // Best effort — don't block startup
+      }
     }
 
     updateStatus(ctx);
@@ -835,7 +922,8 @@ export default function (pi: ExtensionAPI) {
     }
 
     // Episode generation: skip if /exit already did it (fast path).
-    // For non-/exit shutdowns (ctrl-c, /reload), do a quick direct attempt only.
+    // For non-/exit shutdowns (ctrl-c, /reload), use the fallback chain so we
+    // always emit at least a template episode. Guaranteed, never null.
     if (!exitEpisodeDone && store) {
       try {
         const mind = activeMind();
@@ -848,23 +936,28 @@ export default function (pi: ExtensionAPI) {
           const recentMessages = messages.slice(-20);
           const serialized = serializeConversation(convertToLlm(recentMessages));
           const sessionFactIds = [...workingMemory];
+          const today = new Date().toISOString().split("T")[0];
 
-          // Direct Ollama only — no subprocess spawn during shutdown
-          const episodeOutput = await generateEpisodeDirect(serialized, config);
-          if (episodeOutput) {
-            const today = new Date().toISOString().split("T")[0];
-            const episodeId = store.storeEpisode({
-              mind,
-              title: episodeOutput.title,
-              narrative: episodeOutput.narrative,
-              date: today,
-              factIds: sessionFactIds.filter(id => store!.getFact(id)?.status === "active"),
-            });
+          const telemetry: SessionTelemetry = {
+            date: today,
+            toolCallCount: triggerState.toolCallsSinceExtract,
+            filesWritten: [...sessionFilesWritten],
+            filesEdited: [...sessionFilesEdited],
+          };
 
-            if (embeddingAvailable) {
-              const vec = await embedText(`${episodeOutput.title} ${episodeOutput.narrative}`);
-              if (vec) store.storeEpisodeVector(episodeId, vec, embeddingModel!);
-            }
+          // Use fallback chain — always returns an episode (template at worst)
+          const episodeOutput = await generateEpisodeWithFallback(serialized, telemetry, config, ctx.cwd);
+          const episodeId = store.storeEpisode({
+            mind,
+            title: episodeOutput.title,
+            narrative: episodeOutput.narrative,
+            date: today,
+            factIds: sessionFactIds.filter(id => store!.getFact(id)?.status === "active"),
+          });
+
+          if (embeddingAvailable) {
+            const vec = await embedText(`${episodeOutput.title} ${episodeOutput.narrative}`);
+            if (vec) store.storeEpisodeVector(episodeId, vec, embeddingModel!);
           }
         }
       } catch {
@@ -1205,7 +1298,9 @@ export default function (pi: ExtensionAPI) {
       const queryVec = await embedText(userText);
       if (queryVec) {
         injectionMode = "semantic";
-        const CORE_SECTIONS = ["Constraints", "Specs"];
+        // Architecture + Decisions are the structural anchors — always load.
+        // Constraints and Specs are task-specific; retrieved semantically when relevant.
+        const CORE_SECTIONS = ["Architecture", "Decisions"];
         const allFacts = store.getActiveFacts(mind);
         const coreFacts = allFacts.filter(f => CORE_SECTIONS.includes(f.section));
         const coreIds = new Set(coreFacts.map(f => f.id));
@@ -1317,10 +1412,18 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
+    // Proactive startup payload — prepend on firstTurn if available.
+    // Already consumed (firstTurn is now false), cleared after use.
+    const startupSection = startupInjectionPayload
+      ? `\n\n${startupInjectionPayload}`
+      : "";
+    startupInjectionPayload = null; // consume once
+
     const injectionContent = [
       `Project memory available${mindLabel} (${factCount} facts from this and previous sessions).${injectionNote}`,
       memoryTools + "\n\n",
       rendered,
+      startupSection,
       episodeSection,
       globalSection,
       pressureWarning,
@@ -1384,12 +1487,61 @@ export default function (pi: ExtensionAPI) {
     pendingInjectionCalibration = null;
   });
 
+  // --- Task-Completion Facts: capture write/edit args before execution ---
+  // We listen to tool_call (pre-execution) to grab the file path from input,
+  // then use tool_execution_end to confirm success and store the "Recent Work" fact.
+
+  pi.on("tool_call", (event, _ctx) => {
+    const name = (event as any).toolName as string | undefined;
+    if (name === "write" || name === "edit") {
+      const input = (event as any).input as Record<string, unknown> | undefined;
+      const filePath = (input?.path ?? input?.file_path) as string | undefined;
+      const toolCallId = (event as any).toolCallId as string | undefined;
+      if (filePath && toolCallId) {
+        pendingWriteEditArgs.set(toolCallId, { toolName: name, path: filePath });
+      }
+    }
+  });
+
   // --- Background Extraction Triggers ---
 
   pi.on("tool_execution_end", async (event, ctx) => {
     if (!store) return;
 
     triggerState.toolCallsSinceExtract++;
+
+    // --- Task-completion facts (Recent Work section) ---
+    // Fire-and-forget, non-blocking. Only file writes/edits that succeed.
+    if (!event.isError && (event.toolName === "write" || event.toolName === "edit")) {
+      const pending = pendingWriteEditArgs.get(event.toolCallId);
+      const filePath = pending?.path;
+      if (filePath) {
+        pendingWriteEditArgs.delete(event.toolCallId);
+        const action = event.toolName === "write" ? "Wrote" : "Edited";
+        const shortPath = filePath.replace(process.cwd() + "/", "").replace(process.cwd(), "");
+        const factContent = `${action} ${shortPath}`;
+
+        // Track for session telemetry
+        if (event.toolName === "write") {
+          sessionFilesWritten.push(shortPath);
+        } else {
+          sessionFilesEdited.push(shortPath);
+        }
+
+        // Store as "Recent Work" fact (fire-and-forget, decay in ≤5 days)
+        const mind = activeMind();
+        try {
+          store.storeFact({
+            mind,
+            section: "Recent Work" as any,
+            content: factContent,
+            source: "tool-call",
+          });
+        } catch {
+          // Best effort — non-blocking
+        }
+      }
+    }
 
     if (event.toolName === "memory_store" && !event.isError) {
       triggerState.manualStoresSinceExtract++;
@@ -2749,15 +2901,19 @@ export default function (pi: ExtensionAPI) {
         try {
           const recentMessages = messages.slice(-20);
           const serialized = serializeConversation(convertToLlm(recentMessages));
+          const today = new Date().toISOString().split("T")[0];
 
-          // Try direct Ollama HTTP first (~500ms), fall back to subprocess (~3s)
-          let episodeOutput = await generateEpisodeDirect(serialized, config);
-          if (!episodeOutput) {
-            episodeOutput = await generateEpisode(ctx.cwd, serialized, config);
-          }
+          const telemetry: SessionTelemetry = {
+            date: today,
+            toolCallCount: triggerState.toolCallsSinceExtract,
+            filesWritten: [...sessionFilesWritten],
+            filesEdited: [...sessionFilesEdited],
+          };
 
-          if (episodeOutput && store) {
-            const today = new Date().toISOString().split("T")[0];
+          // Fallback chain: Ollama → codex-spark → haiku → template (always succeeds)
+          const episodeOutput = await generateEpisodeWithFallback(serialized, telemetry, config, ctx.cwd);
+
+          if (store) {
             const sessionFactIds = [...workingMemory];
             const episodeId = store.storeEpisode({
               mind,

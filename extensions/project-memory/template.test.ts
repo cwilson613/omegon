@@ -9,8 +9,8 @@ import {
 } from "./template.ts";
 
 describe("SECTIONS and DEFAULT_TEMPLATE", () => {
-  it("exports 5 sections", () => {
-    assert.equal(SECTIONS.length, 6);
+  it("exports 7 sections including Recent Work", () => {
+    assert.equal(SECTIONS.length, 7);
     assert.deepEqual([...SECTIONS], [
       "Architecture",
       "Decisions",
@@ -18,6 +18,7 @@ describe("SECTIONS and DEFAULT_TEMPLATE", () => {
       "Known Issues",
       "Patterns & Conventions",
       "Specs",
+      "Recent Work",
     ]);
   });
 

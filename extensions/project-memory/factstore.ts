@@ -113,7 +113,7 @@ export interface Fact {
   supersedes: string | null;
   superseded_at: string | null;
   archived_at: string | null;
-  source: "manual" | "extraction" | "ingest" | "migration" | "lifecycle";
+  source: "manual" | "extraction" | "ingest" | "migration" | "lifecycle" | "tool-call";
   content_hash: string;
   confidence: number;
   last_reinforced: string;
@@ -213,13 +213,31 @@ export const GLOBAL_DECAY = {
 } as const;
 
 /**
+ * Recent Work decay — ephemeral session receipts.
+ * halfLifeDays=2 means a fact written Monday is gone by Wednesday at ~50% confidence.
+ * reinforcementFactor=1.0 means reinforcement does NOT extend half-life — these
+ * are breadcrumbs, not architecture. Gone within a business week regardless.
+ */
+export const RECENT_WORK_DECAY = {
+  baseRate: Math.LN2 / 2, // ln(2)/2 — half-life exactly 2 days
+  reinforcementFactor: 1.0, // reinforcement does not extend lifetime
+  minimumConfidence: 0.01, // lower floor — let them go stale faster
+  halfLifeDays: 2,
+} as const;
+
+/** Section-specific decay overrides — keyed by section name */
+const SECTION_DECAY_OVERRIDES: Partial<Record<string, typeof RECENT_WORK_DECAY>> = {
+  "Recent Work": RECENT_WORK_DECAY,
+};
+
+/**
  * Compute current confidence for a fact based on time since last reinforcement.
  * Uses exponential decay with reinforcement-adjusted half-life.
  *
  * halfLife = DECAY.halfLifeDays * (DECAY.reinforcementFactor ^ (reinforcement_count - 1))
  * confidence = e^(-ln(2) * daysSinceReinforced / halfLife)
  */
-export type DecayProfile = typeof DECAY | typeof GLOBAL_DECAY;
+export type DecayProfile = typeof DECAY | typeof GLOBAL_DECAY | typeof RECENT_WORK_DECAY;
 
 export function computeConfidence(
   daysSinceReinforced: number,
@@ -823,7 +841,10 @@ export class FactStore {
        ORDER BY section, created_at`
     ).all(mind) as Fact[];
 
-    // Apply time-based confidence decay (Specs are exempt — binary exist/not-exist)
+    // Apply time-based confidence decay.
+    // Specs are exempt (binary exist/not-exist).
+    // "Recent Work" uses a fast-decay profile (half-life 2d, no reinforcement extension).
+    // All other sections use the store's default decay profile.
     const NO_DECAY_SECTIONS: readonly string[] = ["Specs"];
     const now = Date.now();
     for (const fact of facts) {
@@ -832,7 +853,8 @@ export class FactStore {
       } else {
         const lastReinforced = new Date(fact.last_reinforced).getTime();
         const daysSince = (now - lastReinforced) / (1000 * 60 * 60 * 24);
-        fact.confidence = computeConfidence(daysSince, fact.reinforcement_count, this.decayProfile);
+        const profile = SECTION_DECAY_OVERRIDES[fact.section] ?? this.decayProfile;
+        fact.confidence = computeConfidence(daysSince, fact.reinforcement_count, profile);
       }
     }
 
