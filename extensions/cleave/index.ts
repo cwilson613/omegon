@@ -22,6 +22,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 
 import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
+import { sciCall, sciOk, sciErr, sciExpanded } from "../sci-ui.ts";
 import { debug } from "../debug.ts";
 import { emitOpenSpecState } from "../openspec/dashboard-state.ts";
 import { getSharedBridge, buildSlashCommandResult } from "../lib/slash-command-bridge.ts";
@@ -1778,9 +1779,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			const dir = args.directive.length > 55
 				? args.directive.slice(0, 52) + "…"
 				: args.directive;
-			let text = theme.fg("toolTitle", "◊ assess  ");
-			text += theme.fg("dim", dir);
-			return new Text(text, 0, 0);
+			return sciCall("cleave_assess", dir, theme);
 		},
 
 		renderResult(result, { expanded }, theme) {
@@ -1789,27 +1788,33 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			const decision = d?.decision;
 
 			if (expanded) {
-				const full = result.content?.[0];
-				return new Text((full && "text" in full ? full.text : null) ?? "", 0, 0);
+				const lines = ((result.content?.[0] && "text" in result.content[0] ? result.content[0].text : null) ?? "").split("\n");
+				const footer = decision ? `→ ${decision}` + (score != null ? ` (${score.toFixed(1)})` : "") : "";
+				return sciExpanded(lines, footer, theme);
 			}
 
 			if (!decision) {
 				const first = result.content?.[0];
 				const line = (first && "text" in first ? first.text : null) ?? "";
-				return new Text(theme.fg("toolTitle", "◊ ") + theme.fg("dim", line.split("\n")[0].slice(0, 80)), 0, 0);
+				return sciOk(line.split("\n")[0].slice(0, 80), theme);
 			}
 
-			const icon = "◊ ";
-			const scoreStr = score != null ? theme.fg("dim", `complexity ${score.toFixed(1)}  `) : "";
+			const scoreStr = score != null ? `complexity ${score.toFixed(1)}  ` : "";
 			let decisionStr: string;
 			if (decision === "execute") {
-				decisionStr = theme.fg("success", "→ execute");
+				decisionStr = "→ execute";
 			} else if (decision === "cleave") {
-				decisionStr = theme.fg("warning", "→ cleave");
+				decisionStr = "→ cleave";
 			} else {
-				decisionStr = theme.fg("muted", "→ " + decision);
+				decisionStr = "→ " + decision;
 			}
-			return new Text(theme.fg("toolTitle", icon) + scoreStr + decisionStr, 0, 0);
+			if (decision === "execute") {
+				return sciOk(scoreStr + decisionStr, theme);
+			} else if (decision === "cleave") {
+				return sciOk(scoreStr + decisionStr, theme);
+			} else {
+				return sciOk(scoreStr + decisionStr, theme);
+			}
 		},
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
@@ -2379,16 +2384,13 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			const dir = args.directive.length > 50
 				? args.directive.slice(0, 47) + "…"
 				: args.directive;
-			let text = theme.fg("toolTitle", "⚡ cleave  ");
-			text += theme.fg("accent", String(n) + " children  ");
-			text += theme.fg("dim", dir);
-			return new Text(text, 0, 0);
+			return sciCall("cleave_run", `${n} children · ${dir}`, theme);
 		},
 
 		renderResult(result, { expanded, isPartial }, theme) {
 			if (expanded) {
-				const first = result.content?.[0];
-				return new Text((first && "text" in first ? first.text : null) ?? "", 0, 0);
+				const lines = ((result.content?.[0] && "text" in result.content[0] ? result.content[0].text : null) ?? "").split("\n");
+				return sciExpanded(lines, "cleave_run", theme);
 			}
 
 			if (isPartial) {
@@ -2401,18 +2403,14 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 				if (children.length === 0) {
 					const msg = result.content?.[0];
 					const txt = (msg && "text" in msg ? msg.text : null) ?? "running…";
-					return new Text(theme.fg("toolTitle", "⚡ cleave  ") + theme.fg("dim", txt.split("\n")[0].slice(0, 70)), 0, 0);
+					return sciOk(txt.split("\n")[0].slice(0, 70), theme);
 				}
 				const done = children.filter((c) => c.status === "completed").length;
 				const failed = children.filter((c) => c.status === "failed").length;
 				const total = children.length;
-				const statusColor = failed > 0 ? "error" : done === total ? "success" : "warning";
-				let summary = theme.fg("toolTitle", "⚡ cleave  ");
-				summary += theme.fg(statusColor, `${done}/${total} done`);
-				if (failed > 0) summary += theme.fg("error", `  ${failed} failed`);
+				const footer = failed > 0 ? `${done}/${total} done  ${failed} failed` : `${done}/${total} done`;
 
-				const visible = children.slice(0, 8);
-				const rows = visible.map((c) => {
+				const rows = children.slice(0, 8).map((c) => {
 					const icon =
 						c.status === "completed" ? theme.fg("success", "✓")
 						: c.status === "running" ? theme.fg("warning", "⟳")
@@ -2421,12 +2419,12 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 					const label = c.status === "running"
 						? theme.fg("accent", c.label)
 						: theme.fg("dim", c.label);
-					return `  ${icon} ${label}`;
+					return `${icon} ${label}`;
 				});
 				if (children.length > 8) {
-					rows.push(theme.fg("muted", `  … ${children.length - 8} more`));
+					rows.push(theme.fg("muted", `… ${children.length - 8} more`));
 				}
-				return new Text([summary, ...rows].join("\n"), 0, 0);
+				return sciExpanded(rows, footer, theme);
 			}
 
 			// Final result — read from content text
@@ -2436,15 +2434,13 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			const hasConflicts = text.toLowerCase().includes("conflict");
 			const isError = (result as any).isError;
 
-			let line: string;
 			if (isError) {
-				line = theme.fg("toolTitle", "⚡ cleave  ") + theme.fg("error", "✕ " + firstLine.slice(0, 70));
+				return sciErr("✕ " + firstLine.slice(0, 70), theme);
 			} else if (hasConflicts) {
-				line = theme.fg("toolTitle", "⚡ cleave  ") + theme.fg("warning", "⚠ " + firstLine.slice(0, 70));
+				return sciOk("⚠ " + firstLine.slice(0, 70), theme);
 			} else {
-				line = theme.fg("toolTitle", "⚡ cleave  ") + theme.fg("success", "✓ ") + theme.fg("dim", firstLine.slice(0, 70));
+				return sciOk("✓ " + firstLine.slice(0, 70), theme);
 			}
-			return new Text(line, 0, 0);
 		},
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {

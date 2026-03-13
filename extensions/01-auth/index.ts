@@ -28,6 +28,7 @@
 import type { ExtensionAPI } from "@cwilson613/pi-coding-agent";
 import { Text } from "@cwilson613/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { sciCall, sciOk, sciErr, sciExpanded } from "../sci-ui.ts";
 
 // Import domain logic from auth.ts (testable without pi-tui dependency)
 import {
@@ -82,24 +83,34 @@ export default function authExtension(pi: ExtensionAPI) {
 		},
 
 		renderCall(_args, theme) {
-			return new Text(theme.fg("toolTitle", theme.bold("whoami")), 0, 0);
+			return sciCall("whoami", "", theme);
 		},
 
-		renderResult(result, _options, theme) {
+		renderResult(result, { expanded }, theme) {
 			if ((result as any).isError) {
 				const first = result.content?.[0];
-				return new Text(theme.fg("error", (first && 'text' in first ? first.text : "Error")), 0, 0);
+				return sciErr(first && 'text' in first ? first.text : "Error", theme);
 			}
 			const checks = ((result.details as any)?.checks || []) as Array<{ provider: string; status: string; detail: string }>;
-			const parts = checks.map(c => {
+			const summary = checks.map(c => {
 				const icon = STATUS_ICONS[c.status as AuthStatus] || "?";
-				const color = c.status === "ok" ? "success"
-					: c.status === "expired" ? "warning"
-					: c.status === "missing" ? "muted"
-					: "error";
-				return theme.fg(color as Parameters<typeof theme.fg>[0], `${icon} ${c.provider}`);
-			});
-			return new Text(parts.join(theme.fg("dim", " · ")), 0, 0);
+				return `${icon} ${c.provider}`;
+			}).join(" · ");
+			const hasError = checks.some(c => c.status !== "ok" && c.status !== "missing");
+
+			if (expanded) {
+				const lines = checks.map(c => {
+					const icon = STATUS_ICONS[c.status as AuthStatus] || "?";
+					const color = c.status === "ok" ? "success"
+						: c.status === "expired" ? "warning"
+						: c.status === "missing" ? "muted"
+						: "error";
+					return theme.fg(color as Parameters<typeof theme.fg>[0], `${icon} ${c.provider}`) + (c.detail ? theme.fg("dim", `  ${c.detail}`) : "");
+				});
+				return sciExpanded(lines, summary, theme);
+			}
+
+			return hasError ? sciErr(summary, theme) : sciOk(summary, theme);
 		},
 	});
 
