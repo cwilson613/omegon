@@ -152,6 +152,42 @@ If it reports untracked lifecycle artifacts, either:
 - `git add` the durable files under `docs/` / `openspec/`, or
 - move transient scratch material elsewhere.
 
+## Pi Fork Development
+
+Omegon maintains a fork of `pi` at `~/workspace/ai/pi-mono`. Changes to pi's core (TUI rendering, tool execution, theme system) are committed there and flow into the running `pi` binary via a one-time symlink setup.
+
+### Three Change Categories
+
+| Category | What changed | Update step |
+|---|---|---|
+| **A — omegon only** | extensions, alpharius.json, docs | Restart pi (theme auto-deploys on session_start) |
+| **B — pi-mono only** | tool-execution.ts, diff.ts, bash.ts, theme.ts, etc. | `npm run build:pi` → restart pi |
+| **C — cross-cutting** | new theme vars AND new rendering code | `npm run build:pi` → restart pi |
+
+Category C must update pi-mono **before** restarting pi — the new theme color names must exist in the compiled theme.js before alpharius.json references them.
+
+### One-Time Dev Setup
+
+Replace the dist directory in the global pi install with a symlink to pi-mono's built dist:
+
+```bash
+npm run deploy:pi-dev
+```
+
+This is idempotent — safe to re-run. After this, `npm run build:pi` is the entire update step for any pi-mono change. No manual file copying.
+
+**How the symlink works:** Node resolves `@cwilson613/pi-ai`, `@cwilson613/pi-tui`, etc. by walking up from the real path of the symlink target — which lands in `pi-mono/node_modules/` where all workspace packages are built. The global pi binary at `/opt/homebrew/bin/pi` continues to work normally.
+
+### Iterative Pi-Mono Dev Loop
+
+```bash
+# 1. Make changes in pi-mono/packages/coding-agent/src/...
+# 2. Rebuild
+npm run build:pi
+
+# 3. Restart pi session — changes are live
+```
+
 ### `pi update` and `bin/deploy` Safety
 
 Both `pi update` and `bin/deploy` run `git clean -fdx` as part of their pull-and-reinstall cycle. This removes **all** untracked and gitignored files, including:
