@@ -400,13 +400,14 @@ export function buildCleaveItems(
         },
       });
 
-      // Running: show lastLine inline (always visible, no expand needed)
-      if (isRunning && child.lastLine) {
+      // Running: show last 3 ring-buffer lines (falls back to lastLine)
+      const activityLines = child.recentLines?.slice(-3) ?? (child.lastLine ? [child.lastLine] : []);
+      if (isRunning && activityLines.length > 0) {
         items.push({
           key: `cl-activity-${child.label}`,
           depth: 1,
           expandable: false,
-          lines: (th) => [th("dim", child.lastLine!.slice(0, 72))],
+          lines: (th) => activityLines.map(l => th("dim", l.slice(0, 72))),
         });
       }
 

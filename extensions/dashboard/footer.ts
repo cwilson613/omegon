@@ -1018,18 +1018,45 @@ export class DashboardFooter implements Component {
     const statusColor: ThemeColor = cl.status === "done" ? "success"
       : cl.status === "failed" ? "error"
       : "warning";
+
+    // ── Header: ⚡ Cleave  dispatching  2/4 ✓ ──────────────────
+    const children = cl.children ?? [];
+    const doneCount = children.filter(c => c.status === "done").length;
+    const failCount = children.filter(c => c.status === "failed").length;
+    const countSuffix = children.length > 0
+      ? [
+          theme.fg("dim", `${doneCount}/${children.length}`),
+          ...(failCount > 0 ? [theme.fg("error", `${failCount}✕`)] : []),
+        ]
+      : [];
     lines.push(composePrimaryMetaLine(
       width,
       theme.fg("accent", "⚡ Cleave"),
-      [theme.fg(statusColor, cl.status)],
+      [theme.fg(statusColor, cl.status), ...countSuffix],
     ));
 
-    if (cl.children && cl.children.length > 0) {
-      const doneCount = cl.children.filter(c => c.status === "done").length;
-      const failCount = cl.children.filter(c => c.status === "failed").length;
-      const summary = `  ${doneCount}/${cl.children.length} ✓`;
-      const failSuffix = failCount > 0 ? theme.fg("error", ` ${failCount} ✕`) : "";
-      lines.push(theme.fg("dim", summary) + failSuffix);
+    // ── Per-child rows + activity ────────────────────────────────
+    for (const child of children) {
+      const isRunning = child.status === "running";
+      const icon = child.status === "done"    ? theme.fg("success", "✓")
+                 : child.status === "failed"  ? theme.fg("error",   "✕")
+                 : isRunning                  ? theme.fg("warning",  "⟳")
+                 :                              theme.fg("dim",      "○");
+
+      const elapsedSec = isRunning && child.startedAt
+        ? Math.round((Date.now() - child.startedAt) / 1000)
+        : (child.elapsed != null ? Math.round(child.elapsed / 1000) : null);
+      const elapsed = elapsedSec != null ? theme.fg("dim", ` ${elapsedSec}s`) : "";
+
+      lines.push(truncateToWidth(`  ${icon} ${theme.fg("muted", child.label)}${elapsed}`, width, "…"));
+
+      // Show last 2 ring-buffer lines for running children
+      if (isRunning && child.recentLines && child.recentLines.length > 0) {
+        const tail = child.recentLines.slice(-2);
+        for (const l of tail) {
+          lines.push(truncateToWidth(`    ${theme.fg("dim", l)}`, width, "…"));
+        }
+      }
     }
 
     return lines;
