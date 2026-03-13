@@ -44,7 +44,7 @@ const ansiColors: Record<number, string> = {
   3:  v.yellow!,        // yellow — warning / numbers
   4:  v.primaryMuted!,  // blue   — secondary accent / links
   5:  "#6060c0",        // magenta — ai/purple (no direct var)
-  6:  "#4aa8c0",        // cyan   — syntaxType (no direct var)
+  6:  v.syntaxType!,    // cyan   — syntaxType
   7:  v.mutedFg!,       // white  — muted foreground
 
   8:  v.dimFg!,         // bright-black — dim text
@@ -77,7 +77,7 @@ const lines: string[] = [
   `cursor_text_color     ${v.bg}`,
   ``,
   `# ── Selection ────────────────────────────────────────────────────────────`,
-  `selection_background  #102030`,
+  `selection_background  ${v.selectedBg}`,
   `selection_foreground  ${v.fg}`,
   ``,
   `# ── URL underline colour ─────────────────────────────────────────────────`,
