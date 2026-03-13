@@ -1,7 +1,7 @@
 ---
 id: memory-session-continuity
 title: "Memory: Session Continuity — Proactive startup injection and recency window"
-status: implementing
+status: implemented
 parent: memory-system-overhaul
 open_questions: []
 branches: ["feature/memory-session-continuity"]
@@ -32,3 +32,9 @@ openspec_change: memory-session-continuity
 ## Open Questions
 
 *No open questions.*
+
+## Implementation Notes
+
+### File Scope
+
+- `extensions/project-memory/index.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes

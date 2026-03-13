@@ -1,14 +1,14 @@
 ---
 id: memory-task-completion-facts
-title: "Memory: Task-Completion Facts — Mid-term \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"what was done\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\" layer with fast decay"
-status: implementing
+title: "Memory: Task-Completion Facts — Mid-term \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"what was done\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\" layer with fast decay"
+status: implemented
 parent: memory-system-overhaul
 open_questions: []
 branches: ["feature/memory-task-completion-facts"]
 openspec_change: memory-task-completion-facts
 ---
 
-# Memory: Task-Completion Facts — Mid-term \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"what was done\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\" layer with fast decay
+# Memory: Task-Completion Facts — Mid-term \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"what was done\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\" layer with fast decay
 
 ## Overview
 
@@ -37,3 +37,10 @@ openspec_change: memory-task-completion-facts
 ## Open Questions
 
 *No open questions.*
+
+## Implementation Notes
+
+### File Scope
+
+- `extensions/project-memory/index.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/project-memory/factstore.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes

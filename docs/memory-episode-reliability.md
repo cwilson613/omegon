@@ -1,7 +1,7 @@
 ---
 id: memory-episode-reliability
 title: "Memory: Episode Generation Reliability — Cloud fallback and guaranteed per-session narrative"
-status: implementing
+status: implemented
 parent: memory-system-overhaul
 open_questions: []
 branches: ["feature/memory-episode-reliability"]
