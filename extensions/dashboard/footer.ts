@@ -564,7 +564,7 @@ export class DashboardFooter implements Component {
       let bar = "";
       if (gaugeModel.memoryBlocks > 0) bar += theme.fg("accent", "▓".repeat(gaugeModel.memoryBlocks));
       if (gaugeModel.otherBlocks > 0)  bar += theme.fg(otherColor, "█".repeat(gaugeModel.otherBlocks));
-      if (gaugeModel.freeBlocks > 0)   bar += theme.fg("dim", "░".repeat(gaugeModel.freeBlocks));
+      if (gaugeModel.freeBlocks > 0)   bar += theme.fg("border", "░".repeat(gaugeModel.freeBlocks));
 
       const pctNum = Math.round(percent);
       const pctColor: ThemeColor = percent > 70 ? "error" : percent > 45 ? "warning" : "dim";
@@ -836,7 +836,7 @@ export class DashboardFooter implements Component {
     const statusParts: string[] = [];
     if (dt.decidedCount > 0) statusParts.push(theme.fg("success", `${dt.decidedCount} decided`));
     if (dt.implementingCount > 0) statusParts.push(theme.fg("accent", `${dt.implementingCount} implementing`));
-    if (dt.exploringCount > 0) statusParts.push(theme.fg("accent", `${dt.exploringCount} exploring`));
+    if (dt.exploringCount > 0) statusParts.push(theme.fg("muted", `${dt.exploringCount} exploring`));
     if (dt.blockedCount > 0) statusParts.push(theme.fg("error", `${dt.blockedCount} blocked`));
     if (dt.deferredCount > 0) statusParts.push(theme.fg("dim", `${dt.deferredCount} deferred`));
     if (dt.openQuestionCount > 0) statusParts.push(theme.fg("dim", `${dt.openQuestionCount}?`));
@@ -939,8 +939,8 @@ export class DashboardFooter implements Component {
       case "exploring": return theme.fg("accent", "◐");
       case "blocked": return theme.fg("error", "✕");
       case "deferred": return theme.fg("dim", "⊘");
-      case "seed": return theme.fg("dim", "○");
-      default: return theme.fg("dim", "○");
+      case "seed": return theme.fg("muted", "○");
+      default: return theme.fg("muted", "○");
     }
   }
 
@@ -1066,7 +1066,7 @@ export class DashboardFooter implements Component {
     let bar = "";
     if (model.memoryBlocks > 0) bar += theme.fg("accent", "▓".repeat(model.memoryBlocks));
     if (model.otherBlocks > 0) bar += theme.fg(otherColor, "█".repeat(model.otherBlocks));
-    if (model.freeBlocks > 0) bar += theme.fg("dim", "░".repeat(model.freeBlocks));
+    if (model.freeBlocks > 0) bar += theme.fg("border", "░".repeat(model.freeBlocks));
 
     const pctStr = `${Math.round(percent)}%`;
     const pctColored = percent > 70 ? theme.fg("error", pctStr)
