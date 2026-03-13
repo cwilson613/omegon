@@ -681,11 +681,16 @@ export function buildTemplateEpisode(telemetry: SessionTelemetry): EpisodeOutput
 }
 
 /**
- * Generate a session episode with a full fallback chain:
- *   1. Ollama (direct HTTP, fast)
- *   2. Cloud primary model (config.episodeModel) via subprocess
- *   3. Cloud retribution tier (haiku) via subprocess
+ * Generate a session episode with a reliability-ordered fallback chain:
+ *   1. Cloud primary (config.episodeModel — codex-spark by default)
+ *   2. Cloud retribution tier (haiku — fast, cheap, always available)
+ *   3. Ollama (direct HTTP — only if user has LOCAL_EPISODE_MODEL configured)
  *   4. Template episode (deterministic, zero I/O) — always succeeds
+ *
+ * Cloud is first because: (1) it's always available if pi is configured at all,
+ * (2) retribution-tier cost is negligible (~$0.0001/call), (3) model quality
+ * is substantially better than typical local models for narrative generation.
+ * Ollama is tried last as an optional local preference, not a dependency.
  *
  * Step timeouts are taken from config.episodeStepTimeout, capped so the total
  * chain fits within config.shutdownExtractionTimeout.
@@ -702,15 +707,8 @@ export async function generateEpisodeWithFallback(
   );
 
   if (config.episodeFallbackChain) {
-    // Step 1: Ollama (direct HTTP — fastest, no subprocess overhead)
-    try {
-      const result = await generateEpisodeDirect(recentConversation, config);
-      if (result) return result;
-    } catch {
-      // Fall through
-    }
-
-    // Step 2: Cloud primary (episodeModel — codex-spark by default)
+    // Step 1: Cloud primary (episodeModel — codex-spark by default)
+    // Always available if the user has a provider configured.
     try {
       const raw = await spawnExtraction({
         cwd,
@@ -729,7 +727,7 @@ export async function generateEpisodeWithFallback(
       // Fall through
     }
 
-    // Step 3: Retribution tier (haiku — fast, cheap)
+    // Step 2: Cloud retribution tier (haiku — fast, cheap, independent model)
     try {
       const raw = await spawnExtraction({
         cwd,
@@ -745,13 +743,34 @@ export async function generateEpisodeWithFallback(
         if (parsed.title && parsed.narrative) return parsed as EpisodeOutput;
       }
     } catch {
-      // Fall through to template
+      // Fall through
+    }
+
+    // Step 3: Ollama (optional — only meaningful if user has a local model running)
+    if (process.env.LOCAL_EPISODE_MODEL || process.env.LOCAL_INFERENCE_URL) {
+      try {
+        const result = await generateEpisodeDirect(recentConversation, config);
+        if (result) return result;
+      } catch {
+        // Fall through to template
+      }
     }
   } else {
-    // Chain disabled — try direct Ollama only
+    // Chain disabled — try cloud primary only, no Ollama
     try {
-      const result = await generateEpisodeDirect(recentConversation, config);
-      if (result) return result;
+      const raw = await spawnExtraction({
+        cwd,
+        model: config.episodeModel,
+        systemPrompt: EPISODE_PROMPT,
+        userMessage: `Session conversation:\n\n${recentConversation}\n\nOutput the episode JSON.`,
+        timeout: stepTimeout,
+        label: "Episode generation",
+      });
+      if (raw.trim()) {
+        const cleaned = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```\s*$/, "").trim();
+        const parsed = JSON.parse(cleaned);
+        if (parsed.title && parsed.narrative) return parsed as EpisodeOutput;
+      }
     } catch {
       // Fall through
     }
