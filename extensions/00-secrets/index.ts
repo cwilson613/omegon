@@ -597,6 +597,30 @@ export default function (pi: ExtensionAPI) {
         "error"
       );
     }
+
+    // Warn about secrets resolved from bare env vars (no recipe — set in
+    // .bashrc/.zshrc or shell profile). These are insecure: visible in
+    // /proc/*/environ, inherited by every child process, persisted in
+    // dotfile repos and shell history. A keychain-backed recipe resolves
+    // at runtime with biometric/password auth and doesn't leak on disk.
+    //
+    // Skip in CI environments where env vars are the expected mechanism.
+    const isCI = !!(process.env.CI || process.env.GITHUB_ACTIONS || process.env.GITLAB_CI);
+    if (!isCI) {
+      const bareEnvSecrets = Object.keys(KNOWN_SECRETS).filter(name =>
+        resolvedCache.has(name) && !recipes[name]
+      );
+      if (bareEnvSecrets.length > 0) {
+        // Show at most 3 names to avoid wall-of-text, never show values
+        const examples = bareEnvSecrets.slice(0, 3).join(", ");
+        const more = bareEnvSecrets.length > 3 ? ` (+${bareEnvSecrets.length - 3} more)` : "";
+        ctx.ui.notify(
+          `🔓 ${bareEnvSecrets.length} secret${bareEnvSecrets.length !== 1 ? "s" : ""} loaded from plain env vars: ${examples}${more}\n` +
+          `Run \`/secrets configure <name>\` to migrate to Keychain (macOS) or 1Password.`,
+          "warning"
+        );
+      }
+    }
   });
 
   // ──────────────────────────────────────────────────────────────
@@ -851,7 +875,7 @@ export default function (pi: ExtensionAPI) {
                   ? "⚠️  literal value (insecure — run /secrets configure to migrate)"
                   : `env: ${recipe}`
               : resolved
-                ? "env (auto-detected)"
+                ? "🔓 plain env var (insecure — run /secrets configure to use Keychain)"
                 : "not configured";
 
             const status = resolved ? "✅" : "❌";
