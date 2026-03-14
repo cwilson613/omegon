@@ -75,7 +75,7 @@ export function emitDesignTreeState(pi: ExtensionAPI, dt: DesignTree, focused: D
 
 	const enrichedNodes = nodes.map((n) => {
 		const isSeedLike = n.status === "seed";
-		const isActivePhase = ["exploring", "decided", "implementing"].includes(n.status);
+		const isActivePhase = ["exploring", "resolved", "decided", "implementing"].includes(n.status);
 		// W3 fix: deferred/blocked also receive the neutral sentinel (not undefined)
 		const isPassive = n.status === "deferred" || n.status === "blocked";
 
@@ -97,7 +97,7 @@ export function emitDesignTreeState(pi: ExtensionAPI, dt: DesignTree, focused: D
 
 		// Accumulate pipeline counts
 		// C3 fix: deferred/blocked fall into needsSpec so funnel totals reconcile
-		if (n.status === "decided") {
+		if (n.status === "decided" || n.status === "resolved") {
 			pipelineCounts.decided++;
 		} else if (n.status === "implementing") {
 			pipelineCounts.implementing++;
