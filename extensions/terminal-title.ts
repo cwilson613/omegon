@@ -65,7 +65,7 @@ export default function (pi: ExtensionAPI) {
   function render() {
     if (!ctx?.ui?.setTitle) return;
 
-    const parts: string[] = [`π ${project}`];
+    const parts: string[] = [`Ω ${project}`];
 
     // Cleave dispatch — takes priority when active
     const cleaveActive = cleaveStatus !== "idle" && cleaveStatus !== "done" && cleaveStatus !== "failed";
