@@ -349,7 +349,7 @@ export default function (pi: ExtensionAPI) {
       // Remediation hints for unconfigured providers that could improve coverage
       const impairedTiers = summary.tiers.filter(t => t.status === "unavailable" || t.status === "degraded");
       if (impairedTiers.length > 0 && summary.unauthProviders.length > 0) {
-        lines.push("**To configure providers:**");
+        const hintLines: string[] = [];
         const shown = new Set<string>();
         for (const provider of summary.unauthProviders) {
           if (shown.size >= 5) break;
@@ -358,10 +358,14 @@ export default function (pi: ExtensionAPI) {
             shown.add(provider);
             const entry = PROVIDER_ENV_VARS[provider];
             const desc = entry?.description ?? provider;
-            lines.push(`  ${provider} (${desc}): ${hint}`);
+            hintLines.push(`  ${provider} (${desc}): ${hint}`);
           }
         }
-        lines.push("");
+        if (hintLines.length > 0) {
+          lines.push("**To configure providers:**");
+          lines.push(...hintLines);
+          lines.push("");
+        }
       }
 
       lines.push(`**Headline:** ${summary.headline}`);

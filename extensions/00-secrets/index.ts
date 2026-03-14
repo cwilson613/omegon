@@ -874,36 +874,60 @@ export default function (pi: ExtensionAPI) {
         case "list": {
           const lines: string[] = ["Secret recipes (~/.pi/agent/secrets.json):", ""];
 
+          function describeSource(name: string, recipe: string | undefined, resolved: boolean): string {
+            if (recipe) {
+              if (recipe.startsWith("!")) return `command: ${recipe.slice(1, 40)}${recipe.length > 41 ? "..." : ""}`;
+              if (recipe.startsWith("literal:")) return "⚠️  literal value (insecure — run /secrets configure to migrate)";
+              return `env: ${recipe}`;
+            }
+            if (resolved) return "🔓 plain env var (run /secrets configure to use a secure backend)";
+            return "not configured";
+          }
+
+          // Split into resolved and unresolved for cleaner display
+          const resolvedEntries: Array<[string, string]> = [];
+          const unresolvedEntries: Array<[string, string]> = [];
           for (const [name, desc] of Object.entries(KNOWN_SECRETS)) {
+            const resolved = resolvedCache.has(name);
+            if (resolved || recipes[name]) {
+              resolvedEntries.push([name, desc]);
+            } else {
+              unresolvedEntries.push([name, desc]);
+            }
+          }
+
+          // Show resolved/configured secrets first
+          for (const [name, desc] of resolvedEntries) {
             const recipe = recipes[name];
             const resolved = resolvedCache.has(name);
-            const source = recipe
-              ? recipe.startsWith("!")
-                ? `command: ${recipe.slice(1, 40)}${recipe.length > 41 ? "..." : ""}`
-                : recipe.startsWith("literal:")
-                  ? "⚠️  literal value (insecure — run /secrets configure to migrate)"
-                  : `env: ${recipe}`
-              : resolved
-                ? "🔓 plain env var (run /secrets configure to use a secure backend)"
-                : "not configured";
-
             const status = resolved ? "✅" : "❌";
             lines.push(`  ${status} ${name}`);
             lines.push(`     ${desc}`);
-            lines.push(`     Source: ${source}`);
+            lines.push(`     Source: ${describeSource(name, recipe, resolved)}`);
             lines.push("");
           }
 
-          // Show any non-known secrets
+          // Show any non-known custom secrets
           for (const name of Object.keys(recipes)) {
             if (name in KNOWN_SECRETS) continue;
             const recipe = recipes[name];
             const resolved = resolvedCache.has(name);
             const status = resolved ? "✅" : "❌";
             lines.push(`  ${status} ${name} (custom)`);
-            lines.push(
-              `     Source: ${recipe.startsWith("!") ? `command: ${recipe.slice(1, 40)}` : recipe.startsWith("literal:") ? "⚠️  literal (insecure)" : `env: ${recipe}`}`
-            );
+            lines.push(`     Source: ${describeSource(name, recipe, resolved)}`);
+            lines.push("");
+          }
+
+          // Unconfigured secrets: collapsed summary instead of a wall
+          if (unresolvedEntries.length > 0) {
+            const names = unresolvedEntries.map(([n]) => n);
+            if (names.length <= 5) {
+              lines.push(`  Not configured: ${names.join(", ")}`);
+            } else {
+              const shown = names.slice(0, 5).join(", ");
+              lines.push(`  Not configured: ${shown} (+${names.length - 5} more)`);
+            }
+            lines.push(`  Run /secrets configure <name> to set up any of these.`);
             lines.push("");
           }
 
@@ -1082,14 +1106,34 @@ export default function (pi: ExtensionAPI) {
           saveRecipes(recipes);
 
           // Verify it actually resolves — this is the moment of truth
+          // Note: resolveSecret checks process.env FIRST (for CI compat), so if the
+          // env var is still set from the user's shell profile, it shadows the recipe.
+          // We detect this and warn the user to remove the export.
           resolvedCache.delete(secretName);
-          const value = resolveSecret(secretName);
+          const envShadowed = !!process.env[secretName];
+          // Temporarily clear env to test the recipe in isolation
+          const savedEnv = process.env[secretName];
+          if (envShadowed) delete process.env[secretName];
+          const recipeValue = resolveSecret(secretName);
+          // Restore env (it'll be the active source until user removes it)
+          if (savedEnv !== undefined) {
+            process.env[secretName] = savedEnv;
+            resolvedCache.delete(secretName);
+            resolvedCache.set(secretName, savedEnv);
+          }
+          const value = recipeValue || savedEnv;
           if (value) {
             process.env[secretName] = value;
             const masked = value.length > 8
               ? value.slice(0, 4) + "•".repeat(Math.min(value.length - 4, 16)) + ` (${value.length} chars)`
               : "•".repeat(value.length) + ` (${value.length} chars)`;
-            ctx.ui.notify(`✅ ${secretName} configured and verified: ${masked}`, "info");
+            let msg = `✅ ${secretName} configured and verified: ${masked}`;
+            if (envShadowed && recipeValue) {
+              msg += `\n\n⚠️  Note: \$${secretName} is also set in your shell environment.` +
+                `\nRemove the \`export ${secretName}=...\` from your shell profile` +
+                `\nso the secure backend is used instead of the plain env var.`;
+            }
+            ctx.ui.notify(msg, "info");
           } else {
             // Don't just warn — this is a failure. Remove the broken recipe.
             delete recipes[secretName];
