@@ -25,7 +25,7 @@ import type { RecoveryEvent, RecoveryFailureClassification } from "./shared-stat
 import type { RecoveryAction, RecoveryCooldownSummary, RecoveryDashboardState, RecoveryTarget } from "./dashboard/types.ts";
 import { tierConfig } from "./effort/tiers.ts";
 import type { EffortLevel } from "./effort/types.ts";
-import { clampThinkingLevel, classifyUpstreamFailure, getDefaultPolicy, getTierDisplayLabel, resolveTier, type CapabilityRuntimeState, type ModelTier, type RegistryModel, type UpstreamFailureClassification } from "./lib/model-routing.ts";
+import { clampThinkingLevel, classifyUpstreamFailure, getDefaultPolicy, getViableModels, getTierDisplayLabel, resolveTier, type CapabilityRuntimeState, type ModelTier, type RegistryModel, type UpstreamFailureClassification } from "./lib/model-routing.ts";
 import { writeLastUsedModel } from "./lib/model-preferences.ts";
 import { loadOperatorRuntimeState, readOperatorProfile, toCapabilityProfile, toCapabilityRuntimeState } from "./lib/operator-profile.ts";
 import { buildFallbackGuidance, explainTierResolutionFailure, planRecoveryForModel, recordTransientFailureForModel, type RecoveryPlan } from "./lib/operator-fallback.ts";
@@ -420,7 +420,7 @@ async function applyRecoveryPlan(
 }
 
 async function switchTo(tier: TierName, pi: ExtensionAPI, ctx: ExtensionContext): Promise<RegistryModel | null> {
-  const all = ctx.modelRegistry.getAll() as unknown as RegistryModel[];
+  const all = getViableModels(ctx.modelRegistry);
   const { policy, profile, runtimeState } = getResolverInputs(ctx);
   const resolved = resolveTier(tier, all, policy, runtimeState, profile);
   if (!resolved) return null;
@@ -443,7 +443,7 @@ function currentTierName(ctx: ExtensionContext): TierName | null {
   const model = ctx.model;
   if (!model) return null;
   // Resolve the current model against the registry using the shared resolver
-  const all = ctx.modelRegistry.getAll() as unknown as RegistryModel[];
+  const all = getViableModels(ctx.modelRegistry);
   const { policy, profile, runtimeState } = getResolverInputs(ctx);
   for (const tier of ["gloriana", "victory", "retribution", "local"] as TierName[]) {
     const resolved = resolveTier(tier, all, policy, runtimeState, profile);
@@ -498,7 +498,7 @@ export default function (pi: ExtensionAPI) {
 
     const persistedRuntimeState = recordTransientFailureForModel(ctx.cwd, ctx.model, errorMessage);
     const { policy, profile } = getResolverInputs(ctx);
-    const models = ctx.modelRegistry.getAll() as unknown as RegistryModel[];
+    const models = getViableModels(ctx.modelRegistry);
     const runtimeState = persistedRuntimeState ?? toCapabilityRuntimeState(loadOperatorRuntimeState(ctx.cwd));
     const plan = planRecoveryForModel(ctx.model, errorMessage, models, policy, profile, runtimeState ?? {}, Date.now());
     const guidance = buildFallbackGuidance(ctx.model, models, policy, profile, runtimeState ?? {}, Date.now());
@@ -659,7 +659,7 @@ export default function (pi: ExtensionAPI) {
       const { policy, profile, runtimeState } = getResolverInputs(ctx);
       const failure = explainTierResolutionFailure(
         tier,
-        ctx.modelRegistry.getAll() as unknown as RegistryModel[],
+        getViableModels(ctx.modelRegistry),
         policy,
         profile,
         runtimeState,
@@ -739,7 +739,7 @@ export default function (pi: ExtensionAPI) {
           const { policy, profile, runtimeState } = getResolverInputs(ctx);
           const failure = explainTierResolutionFailure(
             tier,
-            ctx.modelRegistry.getAll() as unknown as RegistryModel[],
+            getViableModels(ctx.modelRegistry),
             policy,
             profile,
             runtimeState,

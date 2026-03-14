@@ -25,7 +25,7 @@ import type { ChildState, CleaveState, ModelTier } from "./types.ts";
 import { computeDispatchWaves } from "./planner.ts";
 import { executeWithReview, type ReviewConfig, type ReviewExecutor, DEFAULT_REVIEW_CONFIG } from "./review.ts";
 import { saveState } from "./workspace.ts";
-import { resolveTier, getDefaultPolicy, type ProviderRoutingPolicy, type RegistryModel } from "../lib/model-routing.ts";
+import { resolveTier, getDefaultPolicy, getViableModels, type ProviderRoutingPolicy, type RegistryModel } from "../lib/model-routing.ts";
 
 // ─── Large-run threshold ────────────────────────────────────────────────────
 
@@ -678,14 +678,14 @@ async function dispatchSingleChild(
 	try {
 		const registry = (pi as any).modelRegistry;
 		if (registry != null) {
-			registryModels = registry.getAll();
+			registryModels = getViableModels(registry);
 		}
 		// If modelRegistry is absent (e.g. test environment), registryModels stays []
 		// and resolveTier will use policy-based fallbacks.
 	} catch (err) {
-		// getAll() threw — log and continue with empty registry so resolver can still
+		// getViableModels() threw — log and continue with empty registry so resolver can still
 		// apply policy-based fallbacks rather than silently passing no --model flag.
-		console.warn("[cleave] modelRegistry.getAll() threw:", err);
+		console.warn("[cleave] getViableModels() threw:", err);
 	}
 	const modelFlag = resolveModelIdForTier(effectiveTier, registryModels, activePolicy, localModel);
 	child.backend = child.executeModel === "local" ? "local" : "cloud";

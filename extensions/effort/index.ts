@@ -28,6 +28,7 @@ import {
   resolveTier,
   getTierDisplayLabel,
   getDefaultPolicy,
+  getViableModels,
   clampThinkingLevel,
   type ModelTier,
   type RegistryModel,
@@ -72,7 +73,7 @@ async function switchDriverModel(
   driver: EffortModelTier,
 ): Promise<{ model: RegistryModel; maxThinking?: ThinkingLevel } | null> {
   // Snapshot the registry once; both resolveTier and the model lookup use it
-  const all = ctx.modelRegistry.getAll() as unknown as RegistryModel[];
+  const all = getViableModels(ctx.modelRegistry);
   // Build O(1) index over the same snapshot — no second linear scan (C3)
   const byKey = new Map(all.map((m) => [`${m.provider}/${m.id}`, m]));
   const { policy, profile, runtimeState } = getResolverInputs(ctx);
@@ -113,7 +114,7 @@ function resolveExtractionTier(
   ctx: ExtensionContext,
 ): { displayTier: string; resolvedModelId?: string } {
   const { policy, profile, runtimeState } = getResolverInputs(ctx);
-  const all = ctx.modelRegistry.getAll() as unknown as RegistryModel[];
+  const all = getViableModels(ctx.modelRegistry);
 
   // Determine effective tier: upgrade local→retribution when policy prefers cheap cloud
   const effectiveTier: ModelTier =

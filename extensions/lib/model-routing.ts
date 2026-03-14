@@ -187,6 +187,28 @@ const DEPRECATED_MODELS = new Set([
 
 // o3 is a specialized reasoning model — not suitable as a general-purpose
 // archmagos candidate. It belongs in a dedicated "reasoning" role if needed.
+
+/**
+ * Filter deprecated models from a registry snapshot.
+ *
+ * Call this on `getAvailable()` output before passing to `resolveTier()`.
+ * Centralizes deprecation logic so callsites don't need to know the list.
+ */
+export function filterDeprecated(models: RegistryModel[]): RegistryModel[] {
+  return models.filter((m) => !DEPRECATED_MODELS.has(m.id));
+}
+
+/**
+ * Get the viable model pool: auth'd + non-deprecated.
+ *
+ * Single entry point for all routing callsites. Uses `getAvailable()` (only
+ * models with configured auth) then strips deprecated models.
+ *
+ * Pass the result to `resolveTier()`, `getDefaultCapabilityProfile()`, etc.
+ */
+export function getViableModels(registry: { getAvailable(): { id: string; provider: string }[] }): RegistryModel[] {
+  return filterDeprecated(registry.getAvailable() as unknown as RegistryModel[]);
+}
 const OPENAI_TIER_MODELS: Record<Exclude<ModelTier, "local">, string[]> = {
   retribution: ["gpt-5.1-codex", "gpt-5.1"],
   victory: ["gpt-5.3-codex-spark", "gpt-5.3", "gpt-5.2-codex", "gpt-5.2"],

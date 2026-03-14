@@ -81,6 +81,7 @@ import {
   resolveTier, 
   getTierDisplayLabel, 
   getDefaultPolicy,
+  getViableModels,
   type ModelTier, 
   type RegistryModel 
 } from "../lib/model-routing.ts";
@@ -1067,7 +1068,7 @@ export default function (pi: ExtensionAPI) {
         return await tryLocalCompaction(localModel, prep, customInstructions, combinedSignal);
       } else {
         // Use cloud model via model registry
-        const all = ctx.modelRegistry.getAll() as unknown as RegistryModel[];
+        const all = getViableModels(ctx.modelRegistry);
         const policy = sharedState.routingPolicy ?? getDefaultPolicy();
         const resolved = resolveTier(tier, all, policy);
         

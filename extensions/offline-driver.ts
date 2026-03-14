@@ -8,6 +8,7 @@ import {
   PREFERRED_ORDER,
   PREFERRED_ORDER_CODE,
 } from "./lib/local-models.ts";
+import { filterDeprecated, type RegistryModel } from "./lib/model-routing.ts";
 
 // Re-export so existing importers (effort, cleave) continue to work.
 export { PREFERRED_ORDER, PREFERRED_ORDER_CODE };
@@ -204,7 +205,7 @@ export async function restoreCloudDriver(
 
   // If no saved model, find the best available gloriana-class model by prefix
   if (!modelId) {
-    const all = ctx.modelRegistry.getAll();
+    const all = filterDeprecated(ctx.modelRegistry.getAvailable() as unknown as RegistryModel[]);
     const topTier = all
       .filter((m: any) => m.provider === "anthropic" && m.id.startsWith("claude-opus"))
       .sort((a: any, b: any) => b.id.localeCompare(a.id));
