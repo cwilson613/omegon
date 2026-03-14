@@ -122,6 +122,12 @@ export interface Fact {
   last_reinforced: string;
   reinforcement_count: number;
   decay_rate: number;
+  /** Decay profile discriminant — stored per-fact for correct read-time decay. */
+  decay_profile: DecayProfileName;
+  /** Lamport logical timestamp — incremented on every mutation. Higher version wins on git-sync. */
+  version: number;
+  /** Last time this fact was returned by semanticSearch. Null if never accessed. */
+  last_accessed: string | null;
 }
 
 export interface MindRecord {
@@ -147,6 +153,8 @@ export interface StoreFactOptions {
   confidence?: number;
   reinforcement_count?: number;
   decay_rate?: number;
+  /** Decay profile discriminant — stored per-fact so read-time decay uses the correct profile. */
+  decayProfile?: DecayProfileName;
 }
 
 export interface ReinforcementResult {
@@ -223,7 +231,7 @@ export class FactStore {
   }
 
   /** Current schema version — bump when adding migrations */
-  static readonly SCHEMA_VERSION = 2;
+  static readonly SCHEMA_VERSION = 3;
 
   private getSchemaVersion(): number {
     try {
@@ -300,6 +308,46 @@ export class FactStore {
         );
       `);
       this.setSchemaVersion(2);
+    }
+
+    // Migration 2→3: Correctness and Rust-migration prerequisites
+    //
+    // decay_profile: fixes the wrong-profile decay bug — stores which decay
+    //   profile was used at write time so read-time computeConfidence uses the
+    //   correct profile. Existing facts get 'standard' (matches the effective
+    //   behaviour since DECAY was always the default).
+    //
+    // version (Lamport timestamp): fixes git-sync conflict resolution bug where
+    //   archived facts could be resurrected by concurrent reinforcement on
+    //   another machine. Higher version always wins on import. Existing facts
+    //   get version=0; new mutations start at MAX(version)+1.
+    //
+    // last_accessed: enables access-pattern reinforcement — decay timer resets
+    //   when a fact is retrieved by memory_recall, independent of explicit
+    //   memory_store reinforcement. Nullable; null means "never accessed".
+    //
+    // embedding_metadata: versions the embedding model + dimension in the DB.
+    //   Dimension mismatch is now a detectable error rather than a silent skip.
+    //   facts_vec gains model_name FK so multi-model coexistence is tracked.
+    if (current < 3) {
+      this.db.exec(`
+        ALTER TABLE facts ADD COLUMN decay_profile TEXT NOT NULL DEFAULT 'standard';
+        ALTER TABLE facts ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE facts ADD COLUMN last_accessed TEXT;
+
+        CREATE INDEX IF NOT EXISTS idx_facts_version
+          ON facts(version DESC);
+
+        CREATE TABLE IF NOT EXISTS embedding_metadata (
+          model_name  TEXT PRIMARY KEY,
+          dims        INTEGER NOT NULL,
+          inserted_at TEXT NOT NULL
+        );
+
+        ALTER TABLE facts_vec ADD COLUMN model_name TEXT NOT NULL DEFAULT '';
+        ALTER TABLE episodes_vec ADD COLUMN model_name TEXT NOT NULL DEFAULT '';
+      `);
+      this.setSchemaVersion(3);
     }
   }
 
@@ -473,18 +521,27 @@ export class FactStore {
 
     const id = nanoid();
 
-    // If superseding, mark old fact
+    // Lamport timestamp: MAX(version)+1 ensures this mutation is always "newer"
+    // than any existing fact, even on import from another machine.
+    const versionRow = this.db.prepare(`SELECT COALESCE(MAX(version), 0) + 1 AS v FROM facts`).get();
+    const version = versionRow?.v ?? 1;
+
+    // Decay profile discriminant — stored so read-time computeConfidence
+    // uses the correct profile regardless of which profile is currently active.
+    const decayProfileName: DecayProfileName = opts.decayProfile ?? "standard";
+
+    // If superseding, mark old fact and record its version for conflict detection
     if (opts.supersedes) {
       this.db.prepare(
-        `UPDATE facts SET status = 'superseded', superseded_at = ? WHERE id = ?`
-      ).run(now, opts.supersedes);
+        `UPDATE facts SET status = 'superseded', superseded_at = ?, version = ? WHERE id = ?`
+      ).run(now, version, opts.supersedes);
     }
 
     this.db.prepare(`
       INSERT INTO facts (id, mind, section, content, status, created_at, created_session,
                          supersedes, source, content_hash, confidence, last_reinforced,
-                         reinforcement_count, decay_rate)
-      VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         reinforcement_count, decay_rate, decay_profile, version)
+      VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, mind, opts.section, content, now,
       opts.session ?? null,
@@ -494,6 +551,8 @@ export class FactStore {
       now,
       opts.reinforcement_count ?? 1,
       opts.decay_rate ?? this.decayProfile.baseRate,
+      decayProfileName,
+      version,
     );
 
     return { id, duplicate: false };
@@ -501,16 +560,30 @@ export class FactStore {
 
   /**
    * Reinforce a fact — bump confidence, extend half-life.
+   * Updates last_reinforced and increments version (Lamport clock).
    */
   reinforceFact(id: string): void {
     const now = new Date().toISOString();
+    const versionRow = this.db.prepare(`SELECT COALESCE(MAX(version), 0) + 1 AS v FROM facts`).get();
+    const version = versionRow?.v ?? 1;
     this.db.prepare(`
       UPDATE facts
       SET confidence = 1.0,
           last_reinforced = ?,
-          reinforcement_count = reinforcement_count + 1
+          reinforcement_count = reinforcement_count + 1,
+          version = ?
       WHERE id = ?
-    `).run(now, id);
+    `).run(now, version, id);
+  }
+
+  /**
+   * Update last_accessed for access-pattern reinforcement.
+   * Resets the effective decay timer without incrementing reinforcement_count.
+   * Called by memory_recall after returning a fact to the agent.
+   */
+  touchFact(id: string): void {
+    const now = new Date().toISOString();
+    this.db.prepare(`UPDATE facts SET last_accessed = ? WHERE id = ?`).run(now, id);
   }
 
   /**
@@ -594,9 +667,11 @@ export class FactStore {
   /** Archive a fact and clean up its vector embedding */
   archiveFact(id: string): void {
     const now = new Date().toISOString();
+    const versionRow = this.db.prepare(`SELECT COALESCE(MAX(version), 0) + 1 AS v FROM facts`).get();
+    const version = versionRow?.v ?? 1;
     this.db.prepare(
-      `UPDATE facts SET status = 'archived', archived_at = ? WHERE id = ?`
-    ).run(now, id);
+      `UPDATE facts SET status = 'archived', archived_at = ?, version = ? WHERE id = ?`
+    ).run(now, version, id);
     // Clean up orphaned vector (CASCADE only fires on DELETE, not status change)
     this.db.prepare(`DELETE FROM facts_vec WHERE fact_id = ?`).run(id);
   }
@@ -1533,14 +1608,31 @@ export class FactStore {
   // Vector Embeddings — Semantic Retrieval
   // ---------------------------------------------------------------------------
 
-  /** Store an embedding for a fact */
+  /** Register an embedding model in the metadata table (idempotent). */
+  registerEmbeddingModel(model: string, dims: number): void {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      INSERT OR IGNORE INTO embedding_metadata (model_name, dims, inserted_at)
+      VALUES (?, ?, ?)
+    `).run(model, dims, now);
+  }
+
+  /** Return the active embedding model metadata, or null if no vectors stored. */
+  getActiveEmbeddingModel(): { model_name: string; dims: number } | null {
+    return this.db.prepare(
+      `SELECT model_name, dims FROM embedding_metadata ORDER BY inserted_at DESC LIMIT 1`
+    ).get() ?? null;
+  }
+
+  /** Store an embedding for a fact — also registers the model. */
   storeFactVector(factId: string, embedding: Float32Array, model: string): void {
+    this.registerEmbeddingModel(model, embedding.length);
     const blob = vectorToBlob(embedding);
     const now = new Date().toISOString();
     this.db.prepare(`
-      INSERT OR REPLACE INTO facts_vec (fact_id, embedding, model, dims, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(factId, blob, model, embedding.length, now);
+      INSERT OR REPLACE INTO facts_vec (fact_id, embedding, model, dims, created_at, model_name)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(factId, blob, model, embedding.length, now, model);
   }
 
   /** Get embedding for a fact */
@@ -1615,23 +1707,35 @@ export class FactStore {
     const now = Date.now();
     const scored: (Fact & { similarity: number; score: number })[] = [];
 
+    let dimMismatchCount = 0;
+
     for (const row of rows) {
-      // Skip vectors with mismatched dimensions (stale model)
-      if (row.dims !== queryDims) continue;
+      // Dimension mismatch: log warning instead of silently skipping.
+      // This happens when the embedding model changes (e.g., 384-dim → 1024-dim).
+      if (row.dims !== queryDims) {
+        dimMismatchCount++;
+        continue;
+      }
 
       const factVec = blobToVector(row.embedding);
       const similarity = cosineSimilarity(queryVec, factVec);
 
       if (similarity < minSim) continue;
 
-      // Apply confidence decay
+      // Apply confidence decay using the fact's stored decay profile (not the
+      // store-wide default). This fixes the wrong-profile decay bug where a
+      // "recent_work" fact was decayed with the "standard" profile.
       let confidence: number;
       if (NO_DECAY_SECTIONS.includes(row.section)) {
         confidence = 1.0;
       } else {
+        // Use access reinforcement: effective last-active is max(last_reinforced, last_accessed)
         const lastReinforced = new Date(row.last_reinforced).getTime();
-        const daysSince = (now - lastReinforced) / (1000 * 60 * 60 * 24);
-        confidence = computeConfidence(daysSince, row.reinforcement_count, this.decayProfile);
+        const lastAccessed = row.last_accessed ? new Date(row.last_accessed).getTime() : 0;
+        const effectiveLastActive = Math.max(lastReinforced, lastAccessed);
+        const daysSince = (now - effectiveLastActive) / (1000 * 60 * 60 * 24);
+        const profile = resolveDecayProfile(row.decay_profile);
+        confidence = computeConfidence(daysSince, row.reinforcement_count, profile);
       }
 
       // Remove embedding from returned object
@@ -1644,9 +1748,25 @@ export class FactStore {
       });
     }
 
+    if (dimMismatchCount > 0) {
+      console.warn(
+        `[project-memory] semanticSearch: ${dimMismatchCount} vectors skipped due to dimension mismatch ` +
+        `(query=${queryDims}d, stored vectors have different dims). ` +
+        `Re-embed with the current model to fix.`
+      );
+    }
+
     // Sort by combined score descending, return top-k
     scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, k);
+    const results = scored.slice(0, k);
+
+    // Access reinforcement: touch returned facts so their effective decay timer
+    // resets. Fire-and-forget — don't block the search response.
+    for (const fact of results) {
+      try { this.touchFact(fact.id); } catch { /* non-critical */ }
+    }
+
+    return results;
   }
 
   /**
