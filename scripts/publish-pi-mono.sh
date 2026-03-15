@@ -62,7 +62,7 @@ for i in "${!PACKAGES[@]}"; do
     echo "✓ $name@$local_ver already published"
   else
     echo "→ Publishing $name@$local_ver (registry has $npm_ver)"
-    (cd "$dir" && npm publish --access public)
+    (cd "$dir" && npm publish --access public --provenance)
   fi
 done
 
