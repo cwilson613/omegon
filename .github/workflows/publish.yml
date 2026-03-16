@@ -80,17 +80,15 @@ jobs:
           VERSION=${{ steps.check.outputs.version }}
           TARBALL_URL="https://registry.npmjs.org/omegon/-/omegon-${VERSION}.tgz"
           echo "Verifying tarball at $TARBALL_URL"
-          # 41MB+ tarball needs time to propagate across npm CDN
-          for i in $(seq 1 12); do
+          # 41MB+ tarball takes 4-5min to propagate across npm CDN
+          for i in $(seq 1 20); do
             STATUS=$(curl -sI "$TARBALL_URL" -o /dev/null -w "%{http_code}")
             if [ "$STATUS" = "200" ]; then
               echo "✓ Tarball verified (attempt $i)"
               exit 0
             fi
-            echo "Attempt $i/12: HTTP $STATUS — waiting 15s for CDN propagation..."
+            echo "Attempt $i/20: HTTP $STATUS — waiting 15s for CDN propagation..."
             sleep 15
           done
-          echo "✗ Tarball still not available after 3 minutes. Unpublishing phantom version."
-          npm unpublish "omegon@${VERSION}"
-          echo "::error::npm publish reported success but tarball never propagated to CDN. Version ${VERSION} has been unpublished. Re-run this workflow to retry."
+          echo "::error::Tarball not available after 5 minutes. npm CDN may be degraded. Check https://registry.npmjs.org/omegon/-/omegon-${VERSION}.tgz manually — it may appear later."
           exit 1
