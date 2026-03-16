@@ -492,9 +492,19 @@ function restartOmegon(): never {
 	// (and the user) aren't stuck with raw-mode terminal if something goes wrong.
 	try {
 		// RIS (Reset to Initial State) — the only reliable way to ensure ALL
-		// terminal protocol state is cleared. Selective escape sequences are
-		// fragile and miss features we don't know about.
-		process.stdout.write("\x1bc");
+		// terminal protocol state is cleared. Write directly to the TTY fd
+		// to bypass pi's TUI layer which intercepts process.stdout and would
+		// mangle the escape sequence into visible ANSI garbage.
+		const { openSync, writeSync, closeSync } = require("fs") as typeof import("fs");
+		let ttyFd = -1;
+		try {
+			ttyFd = openSync("/dev/tty", "w");
+			writeSync(ttyFd, "\x1bc");
+			closeSync(ttyFd);
+		} catch {
+			// Fallback if /dev/tty isn't available (shouldn't happen on macOS/Linux)
+			process.stdout.write("\x1bc");
+		}
 		// Pause stdin to prevent buffered input from being re-interpreted
 		// after raw mode is disabled (prevents Ctrl+D from closing parent shell).
 		process.stdin.pause();
