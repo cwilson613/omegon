@@ -582,6 +582,12 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    // Report to splash
+    try {
+      const { splashUpdate } = await import("../lib/splash-state.js");
+      splashUpdate("secrets", "done");
+    } catch {}
+
     const resolved = Array.from(resolvedCache.keys());
     const failed = Object.keys(recipes).filter(k => !resolvedCache.has(k));
 

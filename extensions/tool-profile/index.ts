@@ -51,9 +51,14 @@ export default function (pi: ExtensionAPI) {
 
     // Only apply if we'd actually disable something.
     // If pi-dev profile detected, everything stays on anyway.
-    if (currentDetected.includes("pi-dev")) return;
+    if (!currentDetected.includes("pi-dev")) {
+      applyProfile(ctx);
+    }
 
-    applyProfile(ctx);
+    try {
+      const { splashUpdate } = await import("../lib/splash-state.js");
+      splashUpdate("tools", "done");
+    } catch {}
   });
 
   // ── /profile Command ────────────────────────────────────────

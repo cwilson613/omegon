@@ -232,6 +232,11 @@ export default function (pi: ExtensionAPI) {
   // ── Session Start: resolve and apply effort tier ──
 
   pi.on("session_start", async (_event, ctx) => {
+    try {
+      const { splashUpdate } = await import("../lib/splash-state.js");
+      splashUpdate("providers", "active");
+    } catch {}
+
     const level = resolveInitialLevel(ctx.cwd);
     const state = buildEffortState(level);
 
@@ -322,6 +327,11 @@ export default function (pi: ExtensionAPI) {
     } catch {
       // Non-critical — don't break startup
     }
+
+    try {
+      const { splashUpdate } = await import("../lib/splash-state.js");
+      splashUpdate("providers", "done");
+    } catch {}
   });
 
   // ── /providers command ──

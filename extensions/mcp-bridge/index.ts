@@ -395,6 +395,11 @@ export default async function (pi: ExtensionAPI) {
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
+    try {
+      const { splashUpdate } = await import("../lib/splash-state.js");
+      splashUpdate("mcp", connectionErrors.length > 0 ? "failed" : "done");
+    } catch {}
+
     // Report connection outcomes (connections already established in factory)
     for (const err of connectionErrors) {
       ctx.ui.notify(`[mcp-bridge] ${err.name}: ${err.message}`, "error");

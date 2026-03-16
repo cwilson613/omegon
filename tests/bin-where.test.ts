@@ -86,7 +86,7 @@ describe("omegon startup state migration", () => {
 			});
 			assert.equal(result.status, 0, result.stderr);
 			assert.deepEqual(JSON.parse(readFileSync(join(sharedStateDir, "auth.json"), "utf8")), { provider: "anthropic" });
-			assert.deepEqual(JSON.parse(readFileSync(join(sharedStateDir, "settings.json"), "utf8")), { theme: "alpharius" });
+			assert.deepEqual(JSON.parse(readFileSync(join(sharedStateDir, "settings.json"), "utf8")), { theme: "alpharius", quietStartup: true, collapseChangelog: true });
 			const data = JSON.parse(result.stdout);
 			assert.equal(data.agentDir, sharedStateDir);
 			assert.ok(data.argv.includes("--extension"));

@@ -561,6 +561,11 @@ export default function (pi: ExtensionAPI) {
   // --- Lifecycle ---
 
   pi.on("session_start", async (_event, ctx) => {
+    try {
+      const { splashUpdate } = await import("../lib/splash-state.js");
+      splashUpdate("memory", "active");
+    } catch {}
+
     drainLifecycleCandidateQueue(ctx);
     drainFactArchiveQueue();
     memoryDir = path.join(ctx.cwd, ".pi", "memory");
@@ -830,6 +835,11 @@ export default function (pi: ExtensionAPI) {
     // to avoid loading all facts twice (once here, once in the injection pipeline).
 
     updateStatus(ctx);
+
+    try {
+      const { splashUpdate } = await import("../lib/splash-state.js");
+      splashUpdate("memory", "done");
+    } catch {}
   });
 
   // ---------------------------------------------------------------------------

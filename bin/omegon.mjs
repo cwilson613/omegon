@@ -86,6 +86,34 @@ migrateLegacyStatePath("auth.json");
 migrateLegacyStatePath("settings.json");
 migrateLegacyStatePath("sessions", "directory");
 
+// Force quiet startup — the splash extension provides the branded header.
+// This suppresses the built-in keybinding hints, expanded changelog, and
+// resource listing that pi's interactive mode normally renders before
+// extensions have a chance to set a custom header.
+function forceQuietStartup() {
+  try {
+    const settingsPath = join(stateDir, "settings.json");
+    mkdirSync(stateDir, { recursive: true });
+    let settings = {};
+    if (existsSync(settingsPath)) {
+      settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+    }
+    let changed = false;
+    if (settings.quietStartup === undefined) {
+      settings.quietStartup = true;
+      changed = true;
+    }
+    if (settings.collapseChangelog === undefined) {
+      settings.collapseChangelog = true;
+      changed = true;
+    }
+    if (changed) {
+      writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
+    }
+  } catch { /* best effort */ }
+}
+forceQuietStartup();
+
 function purgeSelfReferentialPackages() {
   try {
     const settingsPath = join(stateDir, "settings.json");
@@ -109,4 +137,49 @@ purgeSelfReferentialPackages();
 
 process.argv = injectBundledResourceArgs(process.argv);
 
-await import(cli);
+// ---------------------------------------------------------------------------
+// Pre-import splash — show a simple loading indicator while the module graph
+// resolves. The TUI takes over once interactive mode starts.
+// ---------------------------------------------------------------------------
+const isInteractive = process.stdout.isTTY &&
+  !process.argv.includes("-p") &&
+  !process.argv.includes("--print") &&
+  !process.argv.includes("--help") &&
+  !process.argv.includes("-h");
+
+let preImportCleanup;
+if (isInteractive) {
+  const PRIMARY = "\x1b[38;2;42;180;200m";
+  const DIM = "\x1b[38;2;64;88;112m";
+  const RST = "\x1b[0m";
+  const HIDE_CURSOR = "\x1b[?25l";
+  const SHOW_CURSOR = "\x1b[?25h";
+  const spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  let frame = 0;
+
+  // Safety net: restore cursor on any exit path (crash, SIGTERM, etc.)
+  const restoreCursor = () => { try { process.stdout.write(SHOW_CURSOR); } catch {} };
+  process.on('exit', restoreCursor);
+
+  process.stdout.write(HIDE_CURSOR);
+  process.stdout.write(`\n  ${PRIMARY}omegon${RST} ${DIM}loading…${RST}`);
+
+  const spinTimer = setInterval(() => {
+    const s = spinner[frame % spinner.length];
+    process.stdout.write(`\r  ${PRIMARY}${s} omegon${RST} ${DIM}loading…${RST}`);
+    frame++;
+  }, 80);
+
+  preImportCleanup = () => {
+    clearInterval(spinTimer);
+    process.removeListener('exit', restoreCursor);
+    // Clear the loading line and restore cursor
+    process.stdout.write(`\r\x1b[2K${SHOW_CURSOR}`);
+  };
+}
+
+try {
+  await import(cli);
+} finally {
+  preImportCleanup?.();
+}
