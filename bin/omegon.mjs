@@ -63,6 +63,12 @@ function injectBundledResourceArgs(argv) {
   return injected;
 }
 
+if (process.argv.includes("--version") || process.argv.includes("-v")) {
+  const pkg = JSON.parse(readFileSync(join(omegonRoot, "package.json"), "utf8"));
+  process.stdout.write(pkg.version + "\n");
+  process.exit(0);
+}
+
 if (process.argv.includes("--where")) {
   process.stdout.write(JSON.stringify({
     omegonRoot,
