@@ -90,3 +90,22 @@ jobs:
 
       - name: Publish omegon
         run: npm publish --access public --provenance
+
+      - name: Verify tarball is downloadable
+        run: |
+          VERSION=${{ steps.check.outputs.version }}
+          TARBALL_URL="https://registry.npmjs.org/omegon/-/omegon-${VERSION}.tgz"
+          echo "Verifying tarball at $TARBALL_URL"
+          for i in 1 2 3 4 5 6; do
+            STATUS=$(curl -sI "$TARBALL_URL" -o /dev/null -w "%{http_code}")
+            if [ "$STATUS" = "200" ]; then
+              echo "✓ Tarball verified (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $STATUS — waiting 10s for CDN propagation..."
+            sleep 10
+          done
+          echo "✗ Tarball still not available after 60s. Unpublishing phantom version."
+          npm unpublish "omegon@${VERSION}"
+          echo "::error::npm publish reported success but tarball never propagated to CDN. Version ${VERSION} has been unpublished. Re-run this workflow to retry."
+          exit 1
