@@ -16,6 +16,9 @@ import {
   LOGO_LINES,
   WORDMARK_LINES,
   LINE_WIDTH,
+  COMPACT_LOGO_LINES,
+  COMPACT_LINE_WIDTH,
+  COMPACT_MARK_ROWS,
   FRAME_INTERVAL_MS,
   TOTAL_FRAMES,
   HOLD_FRAMES,
@@ -109,10 +112,15 @@ class SplashHeader implements Component {
   private cachedLines: string[] | undefined;
   private cachedWidth: number | undefined;
 
-  constructor(tui: TUI, onTransition: () => void, lines: string[]) {
+  private markRows: number;
+  private logoWidth: number;
+
+  constructor(tui: TUI, onTransition: () => void, lines: string[], markRows: number, logoWidth: number) {
     this.tui = tui;
     this.onTransition = onTransition;
     this.lines = lines;
+    this.markRows = markRows;
+    this.logoWidth = logoWidth;
     this.frameMap = assignUnlockFrames(lines, TOTAL_FRAMES, Date.now() & 0xffff);
   }
 
@@ -151,14 +159,14 @@ class SplashHeader implements Component {
     const lines: string[] = [];
 
     // Centre the logo horizontally
-    const logoW = LINE_WIDTH;
+    const logoW = this.logoWidth;
     const pad = Math.max(0, Math.floor((width - logoW) / 2));
     const padStr = " ".repeat(pad);
 
     // Render logo frame
     const logoFrame = this.transitioned
-      ? renderFrame(TOTAL_FRAMES + 1, this.lines, this.frameMap, this.noiseSeed)
-      : renderFrame(Math.min(this.frame, TOTAL_FRAMES), this.lines, this.frameMap, this.noiseSeed);
+      ? renderFrame(TOTAL_FRAMES + 1, this.lines, this.frameMap, this.noiseSeed, this.markRows)
+      : renderFrame(Math.min(this.frame, TOTAL_FRAMES), this.lines, this.frameMap, this.noiseSeed, this.markRows);
 
     lines.push(""); // top spacer
     for (const row of logoFrame) {
@@ -301,23 +309,40 @@ export default function splashExtension(pi: ExtensionAPI): void {
     const termWidth = process.stdout.columns ?? 80;
     const termRows = process.stdout.rows ?? 24;
 
-    // Three tiers based on terminal size:
-    //   Full (sigil + wordmark): needs ~46 rows and LINE_WIDTH+4 cols
-    //   Compact (wordmark only): needs ~14 rows and LINE_WIDTH+4 cols
-    //   Minimal (no animation):  everything else
+    // Four tiers based on terminal size:
+    //   Full (sigil + wordmark): needs ~46 rows and LINE_WIDTH+4 cols (~84 cols)
+    //   Compact (smaller sigil + wordmark): needs ~34 rows and COMPACT_LINE_WIDTH+4 cols (~58 cols)
+    //   Wordmark only: needs ~14 rows and LINE_WIDTH+4 cols
+    //   Minimal (no animation): everything else
     const canFitFull = termWidth >= LINE_WIDTH + 4 && termRows >= LOGO_LINES.length + 6;
+    const canFitCompact = termWidth >= COMPACT_LINE_WIDTH + 4 && termRows >= COMPACT_LOGO_LINES.length + 6;
     const canFitWordmark = termWidth >= LINE_WIDTH + 4 && termRows >= WORDMARK_LINES.length + 6;
 
-    if (!canFitWordmark) {
+    if (!canFitCompact && !canFitWordmark) {
       // Too small for any animation — minimal branded header
       ctx.ui.setHeader(() => new BrandedHeader(version));
     } else {
-      const artLines = canFitFull ? LOGO_LINES : WORDMARK_LINES;
+      let artLines: string[];
+      let markRows: number;
+      let logoWidth: number;
+      if (canFitFull) {
+        artLines = LOGO_LINES;
+        markRows = 31; // MARK_ROWS
+        logoWidth = LINE_WIDTH;
+      } else if (canFitCompact) {
+        artLines = COMPACT_LOGO_LINES;
+        markRows = COMPACT_MARK_ROWS;
+        logoWidth = COMPACT_LINE_WIDTH;
+      } else {
+        artLines = WORDMARK_LINES;
+        markRows = 0; // all wordmark
+        logoWidth = LINE_WIDTH;
+      }
       ctx.ui.setHeader((tui, _theme) => {
         const splash = new SplashHeader(tui, () => {
           // Transition to minimal branded header
           ctx.ui.setHeader((_, _t) => new BrandedHeader(version));
-        }, artLines);
+        }, artLines, markRows, logoWidth);
         splash.start();
         return splash;
       });

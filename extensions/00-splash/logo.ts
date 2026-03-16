@@ -139,6 +139,7 @@ export function renderFrame(
   lines: string[],
   frameMap: FrameMap,
   noiseSeed: number,
+  markRows: number = MARK_ROWS,
 ): string[] {
   const rng = new SimpleRNG(noiseSeed + frame * 997);
   const output: string[] = [];
@@ -162,7 +163,7 @@ export function renderFrame(
         buf += " ";
       } else if (frame >= unlock) {
         // Resolved — final glyph
-        const color = y >= MARK_ROWS + 2 ? `${BOLD}${BRIGHT}` : PRIMARY;
+        const color = y >= markRows + 1 ? `${BOLD}${BRIGHT}` : PRIMARY;
         if (color !== lastColor) { buf += color; lastColor = color; }
         buf += ch;
       } else {
@@ -197,5 +198,49 @@ for (let i = 0; i < WORDMARK_LINES.length; i++) {
   WORDMARK_LINES[i] = WORDMARK_LINES[i].padEnd(LINE_WIDTH);
 }
 
+// ---------------------------------------------------------------------------
+// Compact logo — sigil + wordmark for mid-size terminals (~56 cols)
+// ---------------------------------------------------------------------------
+const COMPACT_MARK_ROWS = 23;
+
+const COMPACT_LOGO_LINES: string[] = [
+  "            *                      ```     #`          ",
+  "     ` ```##`                   ``````##` .#`          ",
+  "````##`#########             `############`##`         ",
+  "*`*##############           `##################`       ",
+  "##:````*`   `####`         `#########` *#######:##     ",
+  "`            #####        ``#######       ######`#`    ",
+  "            `#####         #######.        #########`  ",
+  "            ####``   ``*@@@@@@@@@@`*          `## #### ",
+  "           #####  `@@@@@@@@@@@@@@@@@@@          `#@ :` ",
+  "           #####`@@@@@@@@@@@@@@@@@@@@@@@@`        `#`  ",
+  "            ##*@@@@@@@@@@@@@@@@@@@@@@@@@@@`            ",
+  "             :@@@@@@@@@@@``##```@@@@@@@@@@@``          ",
+  "             @@@@@@@@*#:`  `#######`@@@@@@@@`  `   `   ",
+  "             @@@@@@@#####`  `########`@@@@@@@`####`#`  ",
+  "             @@@@@@ ######    `#`#####`@@@@@@########` ",
+  "             @@@@@  ######      `::``#*@@@@@`##`  #### ",
+  "             `@@@@@#######            `@@@@@`###` `*## ",
+  "        ``#`  .@@@@`#####            `@@@@@` ``###` `**",
+  "    ``:######```@@@@@#`            `.@@@@.   `#.##`    ",
+  "   ######`####`* `@@@@@@        ``@@@@@`  ``#####`     ",
+  "   #*       .@@@@@@@@@@@@@@   :@@@@@@@@@@@@@@##        ",
+  "   `        .@@@@@@@@@@@@@@   :@@@@@@@@@@@@@@`         ",
+  "         .@  `                              `          ",
+  // spacer
+  "                                                       ",
+  // wordmark (4 rows)
+  "   @@@@@@@ @@@` `@@@ @@@@@@``@@@@@@ `@@@@@@@`@@@` @@  ",
+  "   @@   @@ @@@@`@@@@ @@```` `@@`    `@@   @@ @@@@ @@  ",
+  "   @@   @@ @@ @*@`@@ @@@@`  `@@`@@@ `@@   @@ @@ *@@@  ",
+  "   @@@@@@@ @@ `@``@@ @@@@@@``@@@@@@ `@@@@@@@`@@  `@@  ",
+];
+
+const COMPACT_LINE_WIDTH = Math.max(...COMPACT_LOGO_LINES.map(l => l.length));
+for (let i = 0; i < COMPACT_LOGO_LINES.length; i++) {
+  COMPACT_LOGO_LINES[i] = COMPACT_LOGO_LINES[i].padEnd(COMPACT_LINE_WIDTH);
+}
+
 export { LOGO_LINES, WORDMARK_LINES, LINE_WIDTH, MARK_ROWS };
+export { COMPACT_LOGO_LINES, COMPACT_LINE_WIDTH, COMPACT_MARK_ROWS };
 export { PRIMARY, PRIMARY_DIM, DIM, BRIGHT, SUCCESS, ERROR_CLR, RESET, BOLD };
