@@ -727,6 +727,19 @@ async function spawnChildRpc(
 		};
 
 		// Parse stdout exclusively via RPC event stream (no competing data listener)
+		let escalationTimer: ReturnType<typeof setTimeout> | undefined;
+		const scheduleEscalation = () => {
+			escalationTimer = setTimeout(() => {
+				if (!proc.killed) {
+					try {
+						if (proc.pid) process.kill(-proc.pid, "SIGKILL");
+					} catch {
+						try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+					}
+				}
+			}, 5_000);
+		};
+
 		let eventsFinished: Promise<void> = Promise.resolve();
 		if (proc.stdout) {
 			eventsFinished = (async () => {
@@ -745,13 +758,23 @@ async function spawnChildRpc(
 								scheduleEscalation();
 							}
 						}
-						// When the agent loop finishes, close stdin so the child
-						// process exits cleanly instead of waiting for more commands.
-						// Without this, the child sits idle until the idle timeout
-						// kills it ~3min later, which gets misreported as a pipe break.
+						// When the agent loop finishes, close stdin and kill after
+						// a brief grace period. The RPC mode's process stays alive
+						// on `new Promise(() => {})` even after stdin closes — it has
+						// no shutdown command. Without the kill, the child sits idle
+						// until the 3min idle timeout, which gets misreported as a
+						// pipe break.
 						if (event.type === "agent_end") {
 							sawAgentEnd = true;
 							try { proc.stdin?.end(); } catch { /* already closed */ }
+							// Grace period: let the process flush stdout, then kill
+							setTimeout(() => {
+								if (!killed && !proc.killed) {
+									killed = true;
+									killCleaveProc(proc);
+									scheduleEscalation();
+								}
+							}, 2_000);
 						}
 						onEvent?.(event);
 					}
@@ -761,19 +784,6 @@ async function spawnChildRpc(
 				}
 			})();
 		}
-
-		let escalationTimer: ReturnType<typeof setTimeout> | undefined;
-		const scheduleEscalation = () => {
-			escalationTimer = setTimeout(() => {
-				if (!proc.killed) {
-					try {
-						if (proc.pid) process.kill(-proc.pid, "SIGKILL");
-					} catch {
-						try { proc.kill("SIGKILL"); } catch { /* already dead */ }
-					}
-				}
-			}, 5_000);
-		};
 
 		// Start the idle timer now — if the child never emits an event, it's
 		// caught within the idle window rather than waiting for the full wall clock.
