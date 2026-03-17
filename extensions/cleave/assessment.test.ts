@@ -71,6 +71,15 @@ describe("matchPattern", () => {
 		assert.equal(m, null);
 	});
 
+	it("does not match 'improve X' as Refactor (vague intent, not structural change)", () => {
+		const m = matchPattern("improve the auth module");
+		// Should either not match or not match as Refactor — "improve" is vague
+		if (m) {
+			assert.notEqual(m.name, "Refactor",
+				"'improve X' is ambiguous intent, not a concrete refactor operation");
+		}
+	});
+
 	it("returns null for empty-ish directives (no required keyword)", () => {
 		const m = matchPattern("review the current state of the codebase");
 		assert.equal(m, null);
@@ -127,6 +136,16 @@ describe("matchPattern", () => {
 		);
 		assert.ok(m, "Should match greenfield pattern");
 		assert.equal(m.name, "Greenfield Project");
+	});
+
+	it("does not match infrastructure pattern on general directives mentioning common words", () => {
+		// "model", "memory", "context" were removed from infra keywords to prevent false positives
+		const m = matchPattern("fix memory leak in the auth provider");
+		// If it matches, it should be Bug Fix (via "fix"), not Infrastructure
+		if (m) {
+			assert.notEqual(m.name, "Infrastructure & Tooling",
+				"General directive mentioning 'provider' should not falsely match Infrastructure pattern");
+		}
 	});
 
 	it("is consistent when called with different directives in sequence", () => {

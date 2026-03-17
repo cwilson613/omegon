@@ -199,8 +199,8 @@ export const PATTERNS: Record<string, PatternDefinition> = {
 		description: "Code cleanup, renaming, restructuring, or replacing implementations while preserving behavior",
 		keywords: [
 			"refactor", "rename", "reorganize", "cleanup", "extract", "inline", "move",
-			"restructure", "mechanical", "no functional", "replace", "rewrite", "improve",
-			"clean", "swap", "substitute", "modernize",
+			"restructure", "mechanical", "no functional", "replace", "rewrite",
+			"swap", "substitute", "modernize",
 		],
 		requiredAny: ["refactor", "rename", "cleanup", "extract", "reorganize", "replace", "rewrite", "swap", "substitute"],
 		expectedComponents: {
@@ -290,8 +290,8 @@ export const PATTERNS: Record<string, PatternDefinition> = {
 			"extension", "plugin", "tool", "command", "cli", "config", "configuration",
 			"pipeline", "build", "deploy", "ci", "cd", "workflow", "script", "hook",
 			"provider", "routing", "dispatch", "handler", "registry", "loader",
-			"prompt", "agent", "model", "inference", "memory", "context",
-			"dashboard", "status", "diagnostic", "telemetry", "logging",
+			"prompt", "agent", "inference",
+			"dashboard", "diagnostic", "telemetry", "logging",
 			"skill", "template", "scaffold", "generate", "emit",
 		],
 		requiredAny: ["extension", "plugin", "provider", "routing",
