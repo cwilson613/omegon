@@ -3,11 +3,11 @@
   "changeName": "directive-branch-lifecycle",
   "assessmentKind": "spec",
   "outcome": "pass",
-  "timestamp": "2026-03-17T05:23:12.310Z",
-  "summary": "All 14/14 tasks complete, 1681 tests pass, typecheck clean. No code changes since heuristic fixes.",
+  "timestamp": "2026-03-17T05:24:27.023Z",
+  "summary": "14/14 tasks complete, 1681 tests pass. Assessment fingerprint bug fixed — gitHead excluded from seed.",
   "snapshot": {
-    "gitHead": "67efba252c60da86bbad50a4e85e2b5a79899e03",
-    "fingerprint": "56f7e45245ebcd2118b547bfdf67d028ff8ce3f3a3af0ecbc35cf06ae00638d2",
+    "gitHead": "ed3d924c032e8ebc9dbe646170d93ba395c853e0",
+    "fingerprint": "bb0c04207b8315d7d40698d9bbf6ae66188e9914cce729bf42f970caa18f0394",
     "dirty": false,
     "scopedPaths": [],
     "files": [
@@ -39,7 +39,9 @@
   },
   "reconciliation": {
     "reopen": false,
-    "changedFiles": [],
+    "changedFiles": [
+      "extensions/openspec/spec.ts"
+    ],
     "constraints": [],
     "recommendedAction": null
   }

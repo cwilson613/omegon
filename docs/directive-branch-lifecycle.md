@@ -1,7 +1,7 @@
 ---
 id: directive-branch-lifecycle
 title: Directive-Branch Lifecycle — git branch as the unified task boundary
-status: decided
+status: implemented
 tags: [architecture, lifecycle, git, workflow, design-tree, openspec, cleave]
 open_questions: []
 issue_type: feature
@@ -191,6 +191,7 @@ The current state produces stale branches, assessment gaps, and work-on-main dri
 
 - `extensions/cleave/assessment.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
 - `extensions/cleave/assessment.test.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/openspec/spec.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
 
 ### Constraints
 
