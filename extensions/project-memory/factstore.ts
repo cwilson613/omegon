@@ -555,10 +555,13 @@ export class FactStore {
     const source = opts.source ?? "manual";
     const content = opts.content.replace(/^-\s*/, "").trim();
 
-    // Dedup check — same mind, same hash, still active
+    // Dedup check — same mind (or parent chain), same hash, still active.
+    // Check the full chain so directive minds don't duplicate parent facts.
+    const chain = this.resolveMindChain(mind);
+    const dedup_placeholders = chain.map(() => "?").join(", ");
     const existing = this.db.prepare(
-      `SELECT id FROM facts WHERE mind = ? AND content_hash = ? AND status = 'active'`
-    ).get(mind, hash);
+      `SELECT id FROM facts WHERE mind IN (${dedup_placeholders}) AND content_hash = ? AND status = 'active'`
+    ).get(...chain, hash);
 
     if (existing) {
       // Reinforce the existing fact instead of duplicating
@@ -650,11 +653,13 @@ export class FactStore {
       for (const action of actions) {
         switch (action.type) {
           case "observe": {
-            // Fact observed in session — reinforce if exists, add if new
+            // Fact observed in session — reinforce if exists (in mind or parent chain), add if new
             const hash = contentHash(action.content ?? "");
+            const observeChain = this.resolveMindChain(mind);
+            const observePlaceholders = observeChain.map(() => "?").join(", ");
             const existing = this.db.prepare(
-              `SELECT id FROM facts WHERE mind = ? AND content_hash = ? AND status = 'active'`
-            ).get(mind, hash);
+              `SELECT id FROM facts WHERE mind IN (${observePlaceholders}) AND content_hash = ? AND status = 'active'`
+            ).get(...observeChain, hash);
 
             if (existing) {
               this.reinforceFact((existing as { id: string }).id);
@@ -743,7 +748,24 @@ export class FactStore {
    * the minimumConfidence threshold is consistent with the confidence computation.
    */
   sweepDecayedFacts(mind: string): number {
-    const facts = this.getActiveFacts(mind);
+    // Only sweep facts directly in this mind, not inherited from parents.
+    // Parent facts are managed by their own mind's sweep cycle.
+    const facts = this.db.prepare(
+      `SELECT * FROM facts WHERE mind = ? AND status = 'active' ORDER BY section, created_at`
+    ).all(mind) as Fact[];
+    // Apply decay (same logic as getActiveFacts)
+    const NO_DECAY_SECTIONS: readonly string[] = ["Specs"];
+    const now = Date.now();
+    for (const fact of facts) {
+      if (NO_DECAY_SECTIONS.includes(fact.section)) {
+        fact.confidence = 1.0;
+      } else {
+        const lastReinforced = new Date(fact.last_reinforced).getTime();
+        const daysSince = (now - lastReinforced) / (1000 * 60 * 60 * 24);
+        const profile = SECTION_DECAY_OVERRIDES[fact.section] ?? this.decayProfile;
+        fact.confidence = computeConfidence(daysSince, fact.reinforcement_count, profile);
+      }
+    }
     let swept = 0;
 
     for (const fact of facts) {
@@ -949,12 +971,18 @@ export class FactStore {
   // Queries
   // ---------------------------------------------------------------------------
 
+  private mindChainCache = new Map<string, string[]>();
+
   /**
    * Resolve the mind chain: [mind, parent, grandparent, ...].
    * Used to include inherited facts from parent minds.
    * Stops at 'default' or when no parent exists. Max depth 5 to prevent cycles.
+   * Cached per-mind since the parent chain is immutable within a session.
    */
   private resolveMindChain(mind: string): string[] {
+    const cached = this.mindChainCache.get(mind);
+    if (cached) return cached;
+
     const chain: string[] = [mind];
     let current = mind;
     for (let i = 0; i < 5; i++) {
@@ -963,7 +991,13 @@ export class FactStore {
       chain.push(rec.parent);
       current = rec.parent;
     }
+    this.mindChainCache.set(mind, chain);
     return chain;
+  }
+
+  /** Clear the mind chain cache (call after mind creation/deletion). */
+  private invalidateMindChainCache(): void {
+    this.mindChainCache.clear();
   }
 
   /**
@@ -1142,12 +1176,14 @@ export class FactStore {
 
     try {
       if (mind) {
+        const chain = this.resolveMindChain(mind);
+        const placeholders = chain.map(() => "?").join(", ");
         return this.db.prepare(`
           SELECT f.* FROM facts f
           JOIN facts_fts fts ON f.rowid = fts.rowid
-          WHERE facts_fts MATCH ? AND f.mind = ? AND f.status IN ('archived', 'superseded')
+          WHERE facts_fts MATCH ? AND f.mind IN (${placeholders}) AND f.status IN ('archived', 'superseded')
           ORDER BY f.created_at DESC
-        `).all(ftsQuery, mind) as Fact[];
+        `).all(ftsQuery, ...chain) as Fact[];
       }
 
       return this.db.prepare(`
@@ -1384,6 +1420,7 @@ export class FactStore {
       this.db.prepare(`DELETE FROM minds WHERE name = ?`).run(name);
     });
     tx();
+    this.invalidateMindChainCache();
   }
 
   /** Check if a mind exists */
@@ -1410,6 +1447,7 @@ export class FactStore {
    */
   forkMind(sourceName: string, newName: string, description: string): void {
     this.createMind(newName, description, { parent: sourceName });
+    this.invalidateMindChainCache();
   }
 
   /** Ingest facts from one mind into another */
@@ -1804,13 +1842,15 @@ export class FactStore {
     return rows.map(r => r.id);
   }
 
-  /** Count facts with vectors for a mind */
+  /** Count facts with vectors for a mind (including parent chain) */
   countFactVectors(mind: string): number {
+    const chain = this.resolveMindChain(mind);
+    const placeholders = chain.map(() => "?").join(", ");
     const row = this.db.prepare(`
       SELECT COUNT(*) as count FROM facts_vec v
       JOIN facts f ON v.fact_id = f.id
-      WHERE f.mind = ? AND f.status = 'active'
-    `).get(mind);
+      WHERE f.mind IN (${placeholders}) AND f.status = 'active'
+    `).get(...chain);
     return row?.count ?? 0;
   }
 
@@ -1943,12 +1983,14 @@ export class FactStore {
       const ftsQuery = buildSafeFtsQuery(queryText, "OR");
       if (ftsQuery) {
         try {
+          const ftsChain = this.resolveMindChain(mind);
+          const ftsPlaceholders = ftsChain.map(() => "?").join(", ");
           let query = `
             SELECT f.* FROM facts f
             JOIN facts_fts fts ON f.rowid = fts.rowid
-            WHERE facts_fts MATCH ? AND f.mind = ? AND f.status = 'active'
+            WHERE facts_fts MATCH ? AND f.mind IN (${ftsPlaceholders}) AND f.status = 'active'
           `;
-          const params: any[] = [ftsQuery, mind];
+          const params: any[] = [ftsQuery, ...ftsChain];
           if (opts?.section) {
             query += ` AND f.section = ?`;
             params.push(opts.section);
@@ -2207,9 +2249,11 @@ export class FactStore {
 
   /** Count episodes for a mind */
   countEpisodes(mind: string): number {
+    const chain = this.resolveMindChain(mind);
+    const placeholders = chain.map(() => "?").join(", ");
     const row = this.db.prepare(
-      `SELECT COUNT(*) as count FROM episodes WHERE mind = ?`
-    ).get(mind);
+      `SELECT COUNT(*) as count FROM episodes WHERE mind IN (${placeholders})`
+    ).get(...chain);
     return row?.count ?? 0;
   }
 
