@@ -731,17 +731,26 @@ async function spawnChildRpc(
 		if (proc.stdout) {
 			eventsFinished = (async () => {
 				try {
+					let sawAgentEnd = false;
 					for await (const event of parseRpcEventStream(proc.stdout!)) {
 						events.push(event);
 						resetIdleTimer(); // activity — push back the idle deadline
 						if (event.type === "pipe_closed") {
-							pipeBroken = true;
+							pipeBroken = !sawAgentEnd; // only a break if agent didn't finish cleanly
+							if (pipeBroken && !killed && !proc.killed) {
+								// Stdout died unexpectedly — kill immediately instead of
+								// waiting 3min for the idle timeout to notice.
+								killed = true;
+								killCleaveProc(proc);
+								scheduleEscalation();
+							}
 						}
 						// When the agent loop finishes, close stdin so the child
 						// process exits cleanly instead of waiting for more commands.
 						// Without this, the child sits idle until the idle timeout
 						// kills it ~3min later, which gets misreported as a pipe break.
 						if (event.type === "agent_end") {
+							sawAgentEnd = true;
 							try { proc.stdin?.end(); } catch { /* already closed */ }
 						}
 						onEvent?.(event);
