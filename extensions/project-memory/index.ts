@@ -566,6 +566,7 @@ export default function (pi: ExtensionAPI) {
       splashUpdate("memory", "active");
     } catch {}
 
+    drainMindLifecycleQueue(ctx);
     drainLifecycleCandidateQueue(ctx);
     drainFactArchiveQueue();
     memoryDir = path.join(ctx.cwd, ".pi", "memory");
@@ -1339,6 +1340,7 @@ export default function (pi: ExtensionAPI) {
   // --- Context Injection ---
 
   pi.on("before_agent_start", async (event, ctx) => {
+    drainMindLifecycleQueue(ctx);
     drainLifecycleCandidateQueue(ctx);
     drainFactArchiveQueue();
     if (!store) return;
@@ -1902,6 +1904,66 @@ export default function (pi: ExtensionAPI) {
         console.error("[project-memory] Failed to archive fact by prefix:", error);
       }
     }
+  }
+
+  function drainMindLifecycleQueue(ctx: ExtensionContext): void {
+    if (!store) return;
+    const queue = sharedState.mindLifecycleQueue ?? [];
+    if (queue.length === 0) return;
+
+    sharedState.mindLifecycleQueue = [];
+
+    for (const req of queue) {
+      try {
+        switch (req.action) {
+          case "fork": {
+            if (store.mindExists(req.mind)) {
+              // Already forked (e.g. resumed directive) — just skip
+              break;
+            }
+            store.forkMind("default", req.mind, req.detail ?? `Directive scope: ${req.mind}`);
+            if (ctx.hasUI) {
+              ctx.ui.notify(`[memory] Forked directive mind '${req.mind}'`, "info");
+            }
+            break;
+          }
+          case "activate": {
+            const target = req.mind === "default" ? null : req.mind;
+            if (target && !store.mindExists(target)) {
+              // Mind doesn't exist (e.g. abandoned before archive) — stay on default
+              break;
+            }
+            store.setActiveMind(target);
+            break;
+          }
+          case "ingest": {
+            const targetMind = req.detail ?? "default";
+            if (!store.mindExists(req.mind)) {
+              // Source mind doesn't exist — nothing to ingest
+              break;
+            }
+            const result = store.ingestMind(req.mind, targetMind);
+            if (ctx.hasUI) {
+              ctx.ui.notify(
+                `[memory] Merged '${req.mind}' → '${targetMind}': ${result.factsIngested} ingested, ${result.duplicatesSkipped} deduped`,
+                "info",
+              );
+            }
+            break;
+          }
+          case "delete": {
+            if (req.mind === "default") break; // Safety: never delete default
+            if (!store.mindExists(req.mind)) break;
+            store.deleteMind(req.mind);
+            break;
+          }
+        }
+      } catch (error) {
+        console.error(`[project-memory] Mind lifecycle '${req.action}' failed for '${req.mind}':`, error);
+      }
+    }
+
+    updateStatus(ctx);
   }
 
   // --- Tools ---

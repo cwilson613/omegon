@@ -135,6 +135,20 @@ interface SharedState {
   /** Set by bootstrap when first-run is detected. Other extensions should suppress
    *  redundant "no providers" warnings when this is true — bootstrap handles guidance. */
   bootstrapPending?: boolean;
+
+  /** Pending mind lifecycle operations from design-tree/openspec for project-memory to process.
+   *  Written by implement/archive flows, consumed by project-memory on next turn. */
+  mindLifecycleQueue?: MindLifecycleRequest[];
+}
+
+export type MindLifecycleAction = "fork" | "activate" | "ingest" | "delete";
+
+export interface MindLifecycleRequest {
+  action: MindLifecycleAction;
+  /** Mind name for fork target, activate, or delete. Source for ingest. */
+  mind: string;
+  /** Description for fork. Target mind for ingest. */
+  detail?: string;
 }
 
 // Initialize once on first import, reuse thereafter via global symbol.

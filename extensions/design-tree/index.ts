@@ -1180,6 +1180,16 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					reload(ctx.cwd);
 					emitCurrentState();
 
+					// Fork a directive-scoped memory mind so facts discovered during
+					// this work are isolated until archive merges them back.
+					if (implResult.ok) {
+						const mindName = `directive/${node.id}`;
+						(sharedState.mindLifecycleQueue ??= []).push(
+							{ action: "fork", mind: mindName, detail: `Memory scope for ${implResult.branch ?? node.id}` },
+							{ action: "activate", mind: mindName },
+						);
+					}
+
 					return {
 						content: [{ type: "text", text: implResult.message }],
 						details: implResult.ok

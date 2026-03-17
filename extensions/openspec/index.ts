@@ -764,6 +764,19 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 						);
 					}
 
+					// Merge directive-scoped memory mind back to default and clean up.
+					// The mind was forked at implement time; ingest merges discoveries
+					// back (deduplicating) and delete removes the scope.
+					{
+						const mindName = `directive/${params.change_name}`;
+						(sharedState.mindLifecycleQueue ??= []).push(
+							{ action: "ingest", mind: mindName, detail: "default" },
+							{ action: "activate", mind: "default" },
+							{ action: "delete", mind: mindName },
+						);
+						result.operations.push(`Merged directive memory scope '${mindName}' back to default`);
+					}
+
 					// Auto-delete merged feature branches from transitioned design nodes
 					const allBranches = resolveBoundDesignNodes(cwd, params.change_name)
 						.flatMap((n) => n.branches ?? []);
@@ -1761,6 +1774,17 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 				result.operations.push(
 					`Transitioned design node${transitioned.length > 1 ? "s" : ""} to implemented: ${transitioned.join(", ")}`,
 				);
+			}
+
+			// Merge directive-scoped memory mind back to default and clean up
+			{
+				const mindName = `directive/${changeName}`;
+				(sharedState.mindLifecycleQueue ??= []).push(
+					{ action: "ingest", mind: mindName, detail: "default" },
+					{ action: "activate", mind: "default" },
+					{ action: "delete", mind: mindName },
+				);
+				result.operations.push(`Merged directive memory scope '${mindName}' back to default`);
 			}
 
 			// Auto-delete merged feature branches from transitioned design nodes
