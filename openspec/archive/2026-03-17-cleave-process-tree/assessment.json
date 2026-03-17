@@ -3,11 +3,11 @@
   "changeName": "cleave-process-tree",
   "assessmentKind": "spec",
   "outcome": "pass",
-  "timestamp": "2026-03-17T13:03:59.148Z",
-  "summary": "All 9 spec scenarios verified: RPC spawn with --mode rpc, structured event parsing via parseRpcEventStream, task file contract preserved, review stays pipe mode, pipe-break degradation with pipe_closed event, structured dashboard progress via rpcProgress, no debounce for RPC children. 1709/1709 tests pass, typecheck clean.",
+  "timestamp": "2026-03-17T13:05:07.707Z",
+  "summary": "All tasks complete, merged to main. 1709 tests pass.",
   "snapshot": {
-    "gitHead": "f1bcbc0ecb3099ec145b8f015653cce2cb217acb",
-    "fingerprint": "f333b5c306a271235a569c315670168622103bc011ff0c2869ddceffe2430778",
+    "gitHead": "b671e5a2e8fd7a41cf6c4e8253198f5451229c8d",
+    "fingerprint": "c371ee3cda9a0d01eef0e21fe377ea02aba86dddb3766e8cad00d2037a02dc98",
     "dirty": false,
     "scopedPaths": [],
     "files": [
@@ -33,7 +33,7 @@
         "path": "openspec/changes/cleave-process-tree/tasks.md",
         "exists": true,
         "size": 3336,
-        "sha256": "b9aef65e00921fee0c037dbf7388ce46c26d49589a77ef0621194cb05d16601b"
+        "sha256": "13e4b93cea6636ee2b1a80ae9a024aaac0a35fc79162c43f4499ff278083e603"
       }
     ]
   },
