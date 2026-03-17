@@ -695,6 +695,11 @@ async function spawnChildRpc(
 				I_AM: "alpharius",
 			},
 		});
+		console.error(`[cleave-debug] RPC spawned pid=${proc.pid} cmd=${omegon.command} args=${JSON.stringify(args)} cwd=${cwd}`);
+		proc.on("error", (e) => console.error(`[cleave-debug] RPC spawn error pid=${proc.pid}:`, e.message));
+		proc.on("close", (code, sig) => console.error(`[cleave-debug] RPC close pid=${proc.pid} code=${code} sig=${sig} killed=${killed} sawAgentEnd=${sawAgentEnd} events=${events.length}`));
+		let rawStdoutBytes = 0;
+		proc.stdout?.on("data", (d) => { rawStdoutBytes += d.length; console.error(`[cleave-debug] RPC stdout pid=${proc.pid} total=${rawStdoutBytes} chunk=${d.toString().slice(0, 100)}`); });
 		registerCleaveProc(proc);
 
 		// Send prompt via RPC command on stdin — keep stdin open
