@@ -112,6 +112,14 @@ function forceQuietStartup() {
       settings.collapseChangelog = true;
       changed = true;
     }
+    // Belt-and-suspenders: force lastChangelogVersion to a sentinel that is always
+    // semver-greater than any upstream changelog entry. This prevents the upstream
+    // "Updated to vX.Y.Z" banner even if PI_SKIP_VERSION_CHECK is somehow not set.
+    const SENTINEL_VERSION = "999.0.0";
+    if (settings.lastChangelogVersion !== SENTINEL_VERSION) {
+      settings.lastChangelogVersion = SENTINEL_VERSION;
+      changed = true;
+    }
     if (changed) {
       writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
     }
