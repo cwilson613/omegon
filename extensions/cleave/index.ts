@@ -19,8 +19,8 @@ import { truncateTail, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "
 
 import { Text } from "@styrene-lab/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { spawn, execFile } from "node:child_process";
-import { registerCleaveProc, deregisterCleaveProc, killCleaveProc, killAllCleaveSubprocesses, cleanupOrphanedProcesses } from "./subprocess-tracker.ts";
+import { execFile } from "node:child_process";
+import { killAllCleaveSubprocesses, cleanupOrphanedProcesses } from "./subprocess-tracker.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { promisify } from "node:util";
@@ -32,7 +32,7 @@ import { debug } from "../lib/debug.ts";
 import { emitOpenSpecState } from "../openspec/dashboard-state.ts";
 import { getSharedBridge, buildSlashCommandResult, parseBridgedArgs } from "../lib/slash-command-bridge.ts";
 import { buildAssessBridgeResult } from "./bridge.ts";
-import { resolveOmegonSubprocess } from "../lib/omegon-subprocess.ts";
+
 import { scanDesignDocs, getNodeSections } from "../design-tree/tree.ts";
 import {
 	assessDirective,
@@ -659,29 +659,6 @@ function normalizeSpecAssessment(payload: AssessSpecAgentResult, expectedTotal: 
 	};
 }
 
-function extractJsonObject(text: string): string | null {
-	const fenced = text.match(/```json\s*([\s\S]*?)```/i);
-	if (fenced?.[1]) return fenced[1].trim();
-	const firstBrace = text.indexOf("{");
-	const lastBrace = text.lastIndexOf("}");
-	if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return null;
-	return text.slice(firstBrace, lastBrace + 1).trim();
-}
-
-function extractAssistantText(content: unknown): string {
-	if (typeof content === "string") return content.trim();
-	if (!Array.isArray(content)) return "";
-	return content
-		.map((item) => {
-			if (typeof item === "string") return item;
-			if (!item || typeof item !== "object") return "";
-			return typeof (item as { text?: unknown }).text === "string"
-				? (item as { text: string }).text
-				: "";
-		})
-		.join("\n")
-		.trim();
-}
 
 function formatSpecOutcomeLabel(outcome: AssessLifecycleOutcome): string {
 	switch (outcome) {
@@ -721,151 +698,6 @@ function buildSpecAssessmentHumanText(changeName: string, assessed: AssessSpecAg
 	return lines.join("\n");
 }
 
-async function runSpecAssessmentSubprocess(
-	input: SpecAssessmentRunnerInput,
-): Promise<SpecAssessmentRunnerOutput> {
-	const prompt = [
-		"You are performing a read-only OpenSpec compliance assessment.",
-		"Operate in read-only plan mode. Never call edit, write, or any workspace-mutating command.",
-		"Inspect the repository and determine whether the implementation satisfies every OpenSpec scenario below.",
-		"Return ONLY a JSON object with this exact shape:",
-		"{",
-		'  "summary": { "total": number, "pass": number, "fail": number, "unclear": number },',
-		'  "scenarios": [',
-		'    { "domain": string, "requirement": string, "scenario": string, "status": "PASS"|"FAIL"|"UNCLEAR", "evidence": string[], "notes"?: string }',
-		"  ],",
-		'  "changedFiles": string[],',
-		'  "constraints": string[],',
-		'  "overallNotes"?: string',
-		"}",
-		"Rules:",
-		`- Emit exactly ${input.expectedScenarioCount} scenario entries.`,
-		"- Use FAIL when the code clearly contradicts or omits the scenario.",
-		"- Use UNCLEAR only when code inspection cannot safely prove PASS or FAIL.",
-		"- Evidence must cite concrete files, symbols, or line references when possible.",
-		"- changedFiles should list files that would need modification if the result reopens work.",
-		"- constraints should list newly discovered implementation constraints.",
-		"- Do not wrap the JSON in explanatory prose.",
-		"",
-		`Change: ${input.changeName}`,
-		"",
-		"## Acceptance Criteria",
-		"",
-		input.scenarioText,
-		"",
-		...input.designContext,
-		...input.apiContractContext,
-		...(input.diffContent ? ["### Recent Changes", "", "```diff", input.diffContent, "```", ""] : []),
-	].join("\n");
-
-	const omegon = resolveOmegonSubprocess();
-	const args = [...omegon.argvPrefix, "--mode", "json", "--plan", "-p", "--no-session"];
-	if (input.modelId) args.push("--model", input.modelId);
-
-	return await new Promise<SpecAssessmentRunnerOutput>((resolve, reject) => {
-		const proc = spawn(omegon.command, args, {
-			cwd: input.repoPath,
-			shell: false,
-			stdio: ["pipe", "pipe", "pipe"],
-			detached: true,
-			env: {
-				...process.env,
-				PI_CHILD: "1",
-				TERM: process.env.TERM ?? "dumb",
-			},
-		});
-		registerCleaveProc(proc);
-		let stdout = "";
-		let stderr = "";
-		let buffer = "";
-		let assistantText = "";
-		let settled = false;
-		const settleReject = (error: Error) => {
-			if (settled) return;
-			settled = true;
-			clearTimeout(timer);
-			reject(error);
-		};
-		const settleResolve = (value: SpecAssessmentRunnerOutput) => {
-			if (settled) return;
-			settled = true;
-			clearTimeout(timer);
-			resolve(value);
-		};
-		let escalationTimer: ReturnType<typeof setTimeout> | undefined;
-		const timer = setTimeout(() => {
-			killCleaveProc(proc);
-			escalationTimer = setTimeout(() => {
-				if (!proc.killed) {
-					try {
-						if (proc.pid) process.kill(-proc.pid, "SIGKILL");
-					} catch {
-						try { proc.kill("SIGKILL"); } catch { /* already dead */ }
-					}
-				}
-			}, 5_000);
-			settleReject(new Error(`Timed out after 120s while assessing ${input.changeName}.`));
-		}, 120_000);
-
-		const processLine = (line: string) => {
-			if (!line.trim()) return;
-			stdout += line + "\n";
-			let event: unknown;
-			try {
-				event = JSON.parse(line);
-			} catch {
-				return;
-			}
-			if (!event || typeof event !== "object") return;
-			const typed = event as { type?: string; message?: { role?: string; content?: unknown } };
-			if (typed.type === "message_end" && typed.message?.role === "assistant") {
-				assistantText = extractAssistantText(typed.message.content);
-			}
-		};
-
-		proc.stdout.on("data", (data) => {
-			buffer += data.toString();
-			const lines = buffer.split("\n");
-			buffer = lines.pop() || "";
-			for (const line of lines) processLine(line);
-		});
-		proc.stderr.on("data", (data) => {
-			stderr += data.toString();
-		});
-		proc.on("error", (error) => {
-			deregisterCleaveProc(proc);
-			clearTimeout(escalationTimer);
-			settleReject(error);
-		});
-		proc.on("close", (code) => {
-			deregisterCleaveProc(proc);
-			clearTimeout(escalationTimer);
-			if (buffer.trim()) processLine(buffer.trim());
-			if ((code ?? 1) !== 0) {
-				settleReject(new Error(stderr.trim() || `Assessment subprocess exited with code ${code ?? 1}.`));
-				return;
-			}
-			const sourceText = assistantText || stdout;
-			const jsonText = extractJsonObject(sourceText);
-			if (!jsonText) {
-				settleReject(new Error(`Assessment subprocess did not return parseable JSON.\n${stderr || stdout}`));
-				return;
-			}
-			try {
-				const parsed = JSON.parse(jsonText) as AssessSpecAgentResult;
-				settleResolve({
-					assessed: normalizeSpecAssessment(parsed, input.expectedScenarioCount),
-				});
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				settleReject(new Error(`Assessment JSON was invalid: ${message}`));
-			}
-		});
-
-		proc.stdin.write(prompt);
-		proc.stdin.end();
-	});
-}
 
 function applyAssessEffects(pi: ExtensionAPI, result: AssessStructuredResult): void {
 	for (const effect of result.effects) {
@@ -1313,14 +1145,18 @@ async function executeAssessSpec(
 		...(diffContent ? ["", "### Recent Changes (for context)", "", "```diff", diffContent, "```"] : []),
 	].join("\n");
 
-	if (isInteractiveAssessContext(ctx)) {
+	// Use the follow-up pattern for any in-session context: return the prepared
+	// assessment prompt and let the current LLM session evaluate scenarios.
+	// The subprocess path below is retained only for programmatic callers that
+	// inject overrides.runSpecAssessment (e.g. tests).
+	if (isInteractiveAssessContext(ctx) || ctx.bridgeInvocation) {
 		const lifecycleRecord = await buildLifecycleRecord(pi, ctx.cwd, {
 			changeName: target.name,
 			assessmentKind: "spec",
 			outcome: "ambiguous",
 			recommendedAction: `Run openspec_manage reconcile_after_assess ${target.name} with outcome pass, reopen, or ambiguous after scenario evaluation completes.`,
 		});
-		return makeAssessResult({
+		const result = makeAssessResult({
 			subcommand: "spec",
 			args,
 			ok: true,
@@ -1343,9 +1179,22 @@ async function executeAssessSpec(
 			lifecycle,
 			lifecycleRecord,
 		});
+		// For bridge invocations, eagerly deliver effects so the follow-up prompt
+		// reaches the LLM even if the caller pipeline doesn't include a handler
+		// that calls applyAssessEffects. Clear effects after to prevent double-
+		// delivery (the agentHandler also calls applyAssessEffects).
+		// Interactive callers leave effects intact for interactiveHandler to apply.
+		if (ctx.bridgeInvocation) {
+			applyAssessEffects(pi, result);
+			result.effects = [];
+		}
+		return result;
 	}
 
-	const runSpecAssessment = overrides?.runSpecAssessment ?? runSpecAssessmentSubprocess;
+	if (!overrides?.runSpecAssessment) {
+		throw new Error("[assess spec] Unexpected code path: neither interactive nor bridge context, and no runSpecAssessment override provided.");
+	}
+	const runSpecAssessment = overrides.runSpecAssessment;
 	const completed = await runSpecAssessment({
 		repoPath,
 		changeName: target.name,

@@ -39,6 +39,8 @@ function runAssessSpecScenario(mode: "bridged" | "interactive" | "reopen") {
       if (args[0] === 'diff') return { code: 0, stdout: '', stderr: '' };
       return { code: 0, stdout: '', stderr: '' };
     },
+    sendMessage: () => {},
+    sendUserMessage: () => {},
   };
   const executors = createAssessStructuredExecutors(pi, {
     runSpecAssessment: async () => {
@@ -241,20 +243,18 @@ function runDirtyTreePreflightScenario(mode: "clean" | "volatile-only" | "checkp
 }
 
 describe("createAssessStructuredExecutors", () => {
-	it("returns a completed in-band result for bridged /assess spec", () => {
+	it("returns a follow-up driven result for bridged /assess spec", () => {
 		const result = runAssessSpecScenario("bridged");
 
-		assert.match(result.summary, /completed spec assessment/i);
+		assert.match(result.summary, /prepared spec assessment/i);
 		assert.deepEqual(result.completion, {
-			completed: true,
-			completedInBand: true,
-			requiresFollowUp: false,
-			outcome: "pass",
+			completed: false,
+			completedInBand: false,
+			requiresFollowUp: true,
 		});
-		assert.equal(result.lifecycleOutcome, "pass");
-		assert.deepEqual(result.effectTypes, ["reconcile_hint"]);
-		assert.equal(result.recommendedReconcileOutcome, "pass");
-		assert.equal(result.runnerCalled, true);
+		// Effects are eagerly applied and cleared before return
+		assert.deepEqual(result.effectTypes, []);
+		assert.equal(result.runnerCalled, false);
 	});
 
 	it("keeps interactive /assess spec follow-up driven", () => {
@@ -270,15 +270,18 @@ describe("createAssessStructuredExecutors", () => {
 		assert.equal(result.runnerCalled, false);
 	});
 
-	it("derives bridged lifecycle metadata from the completed assessment result", () => {
+	it("reopen scenario also uses follow-up pattern for bridged invocation", () => {
 		const result = runAssessSpecScenario("reopen");
 
-		assert.equal(result.completion.outcome, "reopen");
-		assert.equal(result.lifecycleOutcome, "reopen");
-		assert.equal(result.recommendedReconcileOutcome, "reopen");
-		assert.equal(result.reopen, true);
-		assert.deepEqual(result.changedFiles, ["extensions/cleave/index.ts"]);
-		assert.deepEqual(result.constraints, ["Lifecycle metadata must be derived after scenario evaluation"]);
+		// Bridge invocations now always use follow-up pattern — outcome is
+		// determined after the LLM evaluates scenarios, not in-band.
+		assert.match(result.summary, /prepared spec assessment/i);
+		assert.deepEqual(result.completion, {
+			completed: false,
+			completedInBand: false,
+			requiresFollowUp: true,
+		});
+		assert.equal(result.runnerCalled, false);
 	});
 });
 
