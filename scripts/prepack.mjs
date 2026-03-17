@@ -68,6 +68,21 @@ function copyDirSync(src, dest) {
 for (const [name, srcDir] of Object.entries(depMap)) {
 	const nmDir = join(root, "node_modules", ...name.split("/"));
 
+	// 0. Abort if dist/ is missing — never ship stale/empty vendor packages
+	const distDir = join(srcDir, "dist");
+	try {
+		const distEntries = readdirSync(distDir);
+		if (!distEntries.some((e) => e.endsWith(".js"))) {
+			throw new Error("no .js files");
+		}
+	} catch {
+		console.error(
+			`FATAL: ${name} has no built dist/ at ${distDir}\n` +
+				`Run: cd vendor/pi-mono && npm run build`,
+		);
+		process.exit(1);
+	}
+
 	// 1. Remove symlink (or stale real dir)
 	rmSync(nmDir, { recursive: true, force: true });
 

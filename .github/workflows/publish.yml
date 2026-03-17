@@ -55,12 +55,13 @@ jobs:
             git push origin --tags
           fi
 
-      - name: Install pi-mono publish dependencies
+      - name: Install and build pi-mono
         if: steps.check.outputs.skip == 'false'
         run: |
           cd vendor/pi-mono
           rm -f package-lock.json
           npm install --ignore-scripts
+          npm run build
 
       - name: Publish pi-mono fork packages
         if: steps.check.outputs.skip == 'false'
@@ -69,6 +70,10 @@ jobs:
       - name: Install Omegon publish dependencies
         if: steps.check.outputs.skip == 'false'
         run: npm install --ignore-scripts
+
+      - name: Verify vendor dist is fresh
+        if: steps.check.outputs.skip == 'false'
+        run: node scripts/check-vendor-dist.mjs
 
       - name: Publish omegon
         if: steps.check.outputs.skip == 'false'
