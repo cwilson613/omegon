@@ -2996,6 +2996,9 @@ export default function (pi: ExtensionAPI) {
 
     const theme = ctx.ui.theme;
     const mind = activeMind();
+
+    // Publish active mind for dashboard directive indicator
+    sharedState.activeMind = mind === "default" ? null : mind;
     const count = store.countActiveFacts(mind);
 
     // Label + fact count as a single unit: "Memory: 2 facts" or "Memory(mind): 2 facts"
