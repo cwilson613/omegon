@@ -1,12 +1,12 @@
 ---
 id: cleave-process-tree
 title: Cleave Process Tree — bidirectional parent↔child coordination
-status: exploring
+status: implementing
 related: [multi-instance-coordination, cleave-child-observability]
 tags: [architecture, cleave, subprocess, ipc, coordination, strategic]
-open_questions:
-  - "What is the steer throttling policy? Max steers per child? Only when scope overlaps? Only for published interfaces/decisions, not raw progress?"
-  - Does the review loop need to change for MVP, or can we defer review-over-RPC to Phase 2? (Review currently spawns a separate process — could continue using pipe mode even if primary execution uses RPC.)
+open_questions: []
+branches: ["feature/cleave-process-tree"]
+openspec_change: cleave-process-tree
 issue_type: feature
 priority: 2
 ---
@@ -221,7 +221,49 @@ RESOLVED: Yes — MVP is spawn children in RPC mode + parse JSON events instead 
 
 MVP scope: modify `spawnChild()` to use `--mode rpc`, replace stdout line parsing with JSON event parsing, emit structured progress to the dashboard. Everything else (steers, input proxying, sibling updates) is Phase 2.
 
+## Decisions
+
+### Decision: Use pi's built-in RPC mode as the cleave child coordination channel
+
+**Status:** decided
+**Rationale:** Pi's --mode rpc provides bidirectional JSON-RPC over stdin/stdout with prompt/steer/follow_up/abort commands and typed AgentSessionEvent streaming. No custom IPC needed. Task file contract and git worktree isolation are unchanged — RPC is a communication enhancement, not a coordination contract replacement. Reintegration safety analysis shows all failure modes are LOW risk except steer context pollution (MEDIUM, mitigable with throttling, Phase 2 only).
+
+### Decision: Phase 1 (MVP): RPC spawn + structured event parsing, no steers or input proxying
+
+**Status:** decided
+**Rationale:** MVP swaps spawnChild() from -p to --mode rpc, replaces stdout line scraping with JSON event parsing, and emits structured progress to the dashboard. No sibling coordination, no input proxying. This alone eliminates isChildStatusLine heuristic, stripAnsiForStatus, exit-code reconciliation, and the debounced onChildLine callback. Low risk, high observability gain.
+
+### Decision: Phase 2: Sibling awareness via steer, input proxying via extension UI, structured abort
+
+**Status:** decided
+**Rationale:** Steer injection, extension UI request proxying, and graceful abort require the steer throttling policy and review loop compatibility questions to be resolved first. These are high-value features but depend on Phase 1 being stable.
+
+### Decision: Review loop stays on pipe mode for MVP, migrates to RPC in Phase 2
+
+**Status:** decided
+**Rationale:** The review subprocess is a separate spawn from the execution subprocess. It can continue using -p mode while the primary execution child uses RPC. This decouples the review migration from the core dispatch migration and reduces MVP scope.
+
 ## Open Questions
 
-- What is the steer throttling policy? Max steers per child? Only when scope overlaps? Only for published interfaces/decisions, not raw progress?
-- Does the review loop need to change for MVP, or can we defer review-over-RPC to Phase 2? (Review currently spawns a separate process — could continue using pipe mode even if primary execution uses RPC.)
+*No open questions.*
+
+## Implementation Notes
+
+### File Scope
+
+- `extensions/cleave/dispatcher.ts` (modified) — Replace spawnChild() to use --mode rpc. Replace stdout line parsing with JSON event stream parsing. Replace onLine callback with structured event handler. Remove isChildStatusLine, stripAnsiForStatus. Adapt dispatchSingleChild result extraction from JSON events.
+- `extensions/cleave/dispatcher.test.ts` (modified) — Update spawn mock to emit JSON events instead of text lines. Test RPC prompt command construction. Test event stream parsing for progress, tool_call, message_end. Test graceful degradation when RPC pipe breaks.
+- `extensions/cleave/rpc-child.ts` (new) — New module: RPC child communication helpers. JSON line framing for stdin commands. Event stream parser for stdout. Event-to-progress mapping (AgentSessionEvent → dashboard progress). Typed wrappers for prompt/abort commands.
+- `extensions/cleave/rpc-child.test.ts` (new) — Tests for RPC child communication: JSON framing, event parsing, prompt command construction, abort handling, pipe-break degradation.
+- `extensions/cleave/review.ts` (modified) — Keep review subprocess on pipe mode (MVP decision). No changes in Phase 1.
+- `extensions/cleave/index.ts` (modified) — Update emitCleaveChildProgress to consume structured events instead of debounced stdout lines. Remove onChildLine debounce timer from dispatchSingleChild.
+- `extensions/cleave/types.ts` (modified) — Add RPC-specific types: RpcChildEvent, RpcProgressUpdate, RpcChildState.
+- `skills/cleave/SKILL.md` (modified) — Document RPC mode dispatch, structured event streaming, Phase 1 vs Phase 2 capabilities.
+
+### Constraints
+
+- Task file contract (N-task.md with Status/Summary/Artifacts) must not change — RPC is communication enhancement only
+- Review subprocess stays on pipe mode in Phase 1 — decouple review migration from core dispatch
+- Child must degrade gracefully to fire-and-forget behavior if RPC pipe breaks
+- No steer injection in Phase 1 — structured observability only
+- spawnChild must support both RPC and pipe mode during transition (feature flag or per-call option)

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "changeName": "cleave-process-tree",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-17T13:03:59.148Z",
+  "summary": "All 9 spec scenarios verified: RPC spawn with --mode rpc, structured event parsing via parseRpcEventStream, task file contract preserved, review stays pipe mode, pipe-break degradation with pipe_closed event, structured dashboard progress via rpcProgress, no debounce for RPC children. 1709/1709 tests pass, typecheck clean.",
+  "snapshot": {
+    "gitHead": "f1bcbc0ecb3099ec145b8f015653cce2cb217acb",
+    "fingerprint": "f333b5c306a271235a569c315670168622103bc011ff0c2869ddceffe2430778",
+    "dirty": false,
+    "scopedPaths": [],
+    "files": [
+      {
+        "path": "openspec/changes/cleave-process-tree/design.md",
+        "exists": true,
+        "size": 537,
+        "sha256": "07a816dd3c57138de519fc58d090aa7b4a5908d525ea4c6f1e0693b39827f2f8"
+      },
+      {
+        "path": "openspec/changes/cleave-process-tree/proposal.md",
+        "exists": true,
+        "size": 546,
+        "sha256": "acf6ddf65cc138bb001d541aae3b8ef39a1c5bfb86b77677f71f20d9028c8a82"
+      },
+      {
+        "path": "openspec/changes/cleave-process-tree/specs/dispatch.md",
+        "exists": true,
+        "size": 3758,
+        "sha256": "ab2665052a93b477fcb662c7cf920163d01123b19d7773c146264f9bb5da5091"
+      },
+      {
+        "path": "openspec/changes/cleave-process-tree/tasks.md",
+        "exists": true,
+        "size": 3336,
+        "sha256": "b9aef65e00921fee0c037dbf7388ce46c26d49589a77ef0621194cb05d16601b"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
