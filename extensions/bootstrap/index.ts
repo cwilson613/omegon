@@ -25,7 +25,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir, tmpdir } from "node:os";
 import type { ExtensionAPI } from "@styrene-lab/pi-coding-agent";
-import { resolveOmegonSubprocess } from "../lib/omegon-subprocess.ts";
+
 import { checkAllProviders, type AuthResult } from "../01-auth/auth.ts";
 import { loadPiConfig } from "../lib/model-preferences.ts";
 import {
@@ -436,101 +436,18 @@ export default function (pi: ExtensionAPI) {
  * exit and release the terminal), then exec's the new Omegon. This avoids
  * two TUI processes fighting over the same terminal simultaneously.
  */
+/**
+ * Restart Omegon by exiting with code 75.
+ *
+ * The bin/omegon.mjs wrapper runs the CLI in a subprocess loop. When it sees
+ * exit code 75 (EX_TEMPFAIL), it re-spawns a fresh CLI process. Because the
+ * wrapper stays as the foreground process group leader throughout, the new
+ * CLI always owns the terminal and can receive input — no detached spawn,
+ * no competing with the shell for stdin.
+ */
 function restartOmegon(): never {
-	const { command, argvPrefix } = resolveOmegonSubprocess();
-	const userArgs = process.argv.slice(2).filter(a =>
-		!a.startsWith("--extensions-dir=") &&
-		!a.startsWith("--themes-dir=") &&
-		!a.startsWith("--skills-dir=") &&
-		!a.startsWith("--prompts-dir=") &&
-		!a.startsWith("--extension=") && !a.startsWith("--extension ") &&
-		!a.startsWith("--skill=") && !a.startsWith("--skill ") &&
-		!a.startsWith("--prompt-template=") && !a.startsWith("--prompt-template ") &&
-		!a.startsWith("--theme=") && !a.startsWith("--theme ") &&
-		!a.startsWith("--no-skills") &&
-		!a.startsWith("--no-prompt-templates") &&
-		!a.startsWith("--no-themes") &&
-		!a.startsWith("--no-extensions")
-	);
-
-	const parts = [command, ...argvPrefix, ...userArgs].map(shellEscape);
-	const script = join(tmpdir(), `omegon-restart-${process.pid}.sh`);
-	const oldPid = process.pid;
-	writeFileSync(script, [
-		"#!/bin/sh",
-		// Trap signals so Ctrl+C works; ignore HUP so parent death doesn't kill us
-		"trap 'stty sane 2>/dev/null; exit 130' INT TERM",
-		"trap '' HUP",
-		// Wait for the old process to fully die (poll with timeout)
-		"_w=0",
-		`while kill -0 ${oldPid} 2>/dev/null; do`,
-		"  sleep 0.1",
-		"  _w=$((_w + 1))",
-		// Bail after ~5 seconds — proceed anyway
-		'  [ "$_w" -ge 50 ] && break',
-		"done",
-		// Extra grace period for fd/terminal release
-		"sleep 0.3",
-		// Hard terminal reset via /dev/tty — avoids stdout buffering that
-		// bleeds into the exec'd process. RIS clears all protocol state
-		// (kitty keyboard protocol, bracketed paste, mouse tracking, etc.).
-		// Do NOT use `reset` here — it outputs terminfo init strings to
-		// stdout which the new TUI interprets as input (causing stray
-		// characters and double renders).
-		"printf '\\033c' >/dev/tty 2>/dev/null",
-		"stty sane 2>/dev/null",
-		// Clean up this script
-		`rm -f "${script}"`,
-		// Replace this shell with new omegon
-		`exec ${parts.join(" ")}`,
-	].join("\n") + "\n", { mode: 0o755 });
-
-	// Reset terminal to cooked mode BEFORE exiting so the restart script
-	// (and the user) aren't stuck with raw-mode terminal if something goes wrong.
-	try {
-		// RIS (Reset to Initial State) — the only reliable way to ensure ALL
-		// terminal protocol state is cleared. Write directly to the TTY fd
-		// to bypass pi's TUI layer which intercepts process.stdout and would
-		// mangle the escape sequence into visible ANSI garbage.
-		const { openSync, writeSync, closeSync } = require("fs") as typeof import("fs");
-		let ttyFd = -1;
-		try {
-			ttyFd = openSync("/dev/tty", "w");
-			writeSync(ttyFd, "\x1bc");
-			closeSync(ttyFd);
-		} catch {
-			// Fallback if /dev/tty isn't available (shouldn't happen on macOS/Linux)
-			process.stdout.write("\x1bc");
-		}
-		// Pause stdin to prevent buffered input from being re-interpreted
-		// after raw mode is disabled (prevents Ctrl+D from closing parent shell).
-		process.stdin.pause();
-		if (process.stdin.isTTY && typeof process.stdin.setRawMode === "function") {
-			process.stdin.setRawMode(false);
-		}
-		// stty sane resets line discipline to known-good state.
-		spawnSync("stty", ["sane"], { stdio: ["inherit", "ignore", "ignore"], timeout: 2000 });
-	} catch { /* best-effort */ }
-
-	// Spawn restart script detached (survives parent exit) but with SIGHUP
-	// ignored in the script so process-group teardown doesn't kill it.
-	// detached: true puts it in its own process group; the script's signal
-	// traps ensure Ctrl+C still works once the new omegon exec's.
-	const child = spawn("sh", [script], {
-		stdio: "inherit",
-		detached: true,
-		env: process.env,
-	});
-	child.unref();
-
-	// Clean exit — the script waits for us to die before starting new omegon
-	process.exit(0);
-}
-
-/** Escape a string for POSIX shell */
-function shellEscape(s: string): string {
-	if (/^[a-zA-Z0-9_./:=-]+$/.test(s)) return s;
-	return `'${s.replace(/'/g, "'\\''")}'`;
+	const RESTART_EXIT_CODE = 75;
+	process.exit(RESTART_EXIT_CODE);
 }
 
 /** Run a command, collect stdout+stderr, resolve with exit code. */

@@ -135,20 +135,31 @@ function purgeSelfReferentialPackages() {
 }
 purgeSelfReferentialPackages();
 
-process.argv = injectBundledResourceArgs(process.argv);
+// ---------------------------------------------------------------------------
+// CLI launch — subprocess with restart-loop support.
+//
+// Instead of importing the CLI directly (which makes restart impossible since
+// Node can't replace its own process image), we spawn it as a child process.
+// If the child exits with code 75 (EX_TEMPFAIL), we re-spawn — this is the
+// restart signal from /update and /restart commands.
+//
+// This keeps the wrapper as the foreground process group leader throughout,
+// so the re-spawned CLI always owns the terminal and can receive input.
+// ---------------------------------------------------------------------------
+import { spawn as nodeSpawn } from "node:child_process";
 
-// ---------------------------------------------------------------------------
-// Pre-import splash — show a simple loading indicator while the module graph
-// resolves. The TUI takes over once interactive mode starts.
-// ---------------------------------------------------------------------------
+const RESTART_EXIT_CODE = 75;
+
+const cliArgs = injectBundledResourceArgs(process.argv).slice(2);
+
 const isInteractive = process.stdout.isTTY &&
   !process.argv.includes("-p") &&
   !process.argv.includes("--print") &&
   !process.argv.includes("--help") &&
   !process.argv.includes("-h");
 
-let preImportCleanup;
-if (isInteractive) {
+function showPreImportSpinner() {
+  if (!isInteractive) return undefined;
   const PRIMARY = "\x1b[38;2;42;180;200m";
   const DIM = "\x1b[38;2;64;88;112m";
   const RST = "\x1b[0m";
@@ -157,9 +168,8 @@ if (isInteractive) {
   const spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   let frame = 0;
 
-  // Safety net: restore cursor on any exit path (crash, SIGTERM, etc.)
   const restoreCursor = () => { try { process.stdout.write(SHOW_CURSOR); } catch {} };
-  process.on('exit', restoreCursor);
+  process.on("exit", restoreCursor);
 
   process.stdout.write(HIDE_CURSOR);
   process.stdout.write(`\n  ${PRIMARY}omegon${RST} ${DIM}loading…${RST}`);
@@ -170,16 +180,52 @@ if (isInteractive) {
     frame++;
   }, 80);
 
-  preImportCleanup = () => {
+  return () => {
     clearInterval(spinTimer);
-    process.removeListener('exit', restoreCursor);
-    // Clear the loading line and restore cursor
+    process.removeListener("exit", restoreCursor);
     process.stdout.write(`\r\x1b[2K${SHOW_CURSOR}`);
   };
 }
 
-try {
-  await import(cli);
-} finally {
-  preImportCleanup?.();
+function launchCli() {
+  return new Promise((resolve) => {
+    const cleanup = showPreImportSpinner();
+
+    const child = nodeSpawn(process.execPath, [cli, ...cliArgs], {
+      stdio: "inherit",
+      env: process.env,
+    });
+
+    // Let the child handle SIGINT (Ctrl+C) — the wrapper ignores it.
+    const ignoreInt = () => {};
+    process.on("SIGINT", ignoreInt);
+    // Forward SIGTERM so graceful shutdown works.
+    const fwdTerm = () => child.kill("SIGTERM");
+    process.on("SIGTERM", fwdTerm);
+
+    // Clean up spinner once the child's TUI takes over. The child will
+    // clear the screen on startup anyway, but a brief delay ensures the
+    // spinner doesn't flicker.
+    if (cleanup) {
+      setTimeout(() => cleanup(), 200);
+    }
+
+    child.on("exit", (code, signal) => {
+      process.removeListener("SIGINT", ignoreInt);
+      process.removeListener("SIGTERM", fwdTerm);
+      if (signal) {
+        // Re-raise the signal so the wrapper exits with the right status
+        process.kill(process.pid, signal);
+      }
+      resolve(code ?? 1);
+    });
+  });
 }
+
+// Main loop — restart on exit code 75
+let exitCode;
+do {
+  exitCode = await launchCli();
+} while (exitCode === RESTART_EXIT_CODE);
+
+process.exit(exitCode);
