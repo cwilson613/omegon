@@ -432,6 +432,9 @@ export function computeAssessmentSnapshot(repoPath: string, changeName: string):
 	// assessment.json (which lives in-repo) changes HEAD, which invalidates
 	// the fingerprint, making the assessment permanently stale.
 	// Git HEAD is stored separately in the snapshot for informational use.
+	// The `dirty` flag still captures uncommitted-change state, which is
+	// the meaningful signal — it detects when scoped files have been
+	// modified since the last commit without requiring HEAD identity.
 	const fingerprintSeed = JSON.stringify({
 		changeName,
 		dirty,

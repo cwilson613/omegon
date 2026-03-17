@@ -352,7 +352,7 @@ async function checkpointRelatedChanges(
  * Prevents infinite loops when the agent repeatedly picks actions
  * that don't resolve the dirty tree.
  */
-const MAX_PREFLIGHT_ATTEMPTS = 3;
+export const MAX_PREFLIGHT_ATTEMPTS = 3;
 
 /**
  * Verify the tree is clean after an action. If only volatile files remain,
@@ -435,12 +435,23 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 		throw new Error(summary + "\n\nInteractive input is unavailable, so cleave cannot resolve the dirty tree automatically.");
 	}
 
-	// Mutable classification — refreshed after each action attempt.
+	// Mutable classification — refreshed after each resolution action.
 	let currentClassification = classification;
-	let attempts = 0;
+	// Only resolution actions (checkpoint, stash) increment this counter.
+	// Invalid input, empty guards, cancel, and proceed-without-cleave do NOT
+	// consume attempts — they are navigational, not resolution attempts.
+	let resolutionAttempts = 0;
 
-	while (attempts < MAX_PREFLIGHT_ATTEMPTS) {
-		attempts++;
+	// Outer safety cap: total loop iterations including non-resolution turns.
+	// Prevents truly pathological loops (e.g. select always returning garbage).
+	const MAX_TOTAL_ITERATIONS = MAX_PREFLIGHT_ATTEMPTS * 3;
+	let totalIterations = 0;
+
+	while (resolutionAttempts < MAX_PREFLIGHT_ATTEMPTS) {
+		totalIterations++;
+		if (totalIterations > MAX_TOTAL_ITERATIONS) {
+			break; // Fall through to the exhaustion error below
+		}
 
 		let answer: string | undefined;
 		if (hasSelect) {
@@ -458,6 +469,7 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 		try {
 			switch (answer) {
 				case "checkpoint": {
+					resolutionAttempts++;
 					const currentCheckpointPlan = buildCheckpointPlan(currentClassification, { changeName, openspecContext });
 					await checkpointRelatedChanges(pi, options.repoPath, currentClassification, currentCheckpointPlan.message, options.ui);
 
@@ -493,6 +505,7 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 						});
 						break;
 					}
+					resolutionAttempts++;
 					await stashPaths(pi, options.repoPath, "cleave-preflight-unrelated", toStash);
 					const { clean, classification: postClassification } = await verifyCleanAfterAction(
 						pi, options.repoPath, changeName, openspecContext, options.onUpdate,
@@ -509,6 +522,7 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 						});
 						break;
 					}
+					resolutionAttempts++;
 					await stashPaths(pi, options.repoPath, "cleave-preflight-volatile", currentClassification.volatile);
 					const { clean, classification: postClassification } = await verifyCleanAfterAction(
 						pi, options.repoPath, changeName, openspecContext, options.onUpdate,
@@ -529,6 +543,8 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 					});
 			}
 		} catch (error) {
+			// Resolution action threw (e.g. git commit failed) — still counts
+			// as a resolution attempt since work was attempted.
 			const message = error instanceof Error ? error.message : String(error);
 			options.onUpdate?.({
 				content: [{ type: "text", text: `Preflight action failed: ${message}` }],
@@ -537,7 +553,7 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 		}
 	}
 
-	// Exhausted attempts — report remaining dirty files and bail.
+	// Exhausted resolution attempts — report remaining dirty files and bail.
 	const remaining = [
 		...currentClassification.related,
 		...currentClassification.unrelated,
@@ -545,7 +561,7 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 		...currentClassification.volatile,
 	];
 	throw new Error(
-		`Dirty tree not resolved after ${MAX_PREFLIGHT_ATTEMPTS} attempts. Remaining files:\n` +
+		`Dirty tree not resolved after ${resolutionAttempts} resolution attempt(s). Remaining files:\n` +
 		remaining.map((f) => `  • ${f.path}`).join("\n") +
 		"\n\nResolve manually (git commit/stash/checkout) and retry /cleave.",
 	);
