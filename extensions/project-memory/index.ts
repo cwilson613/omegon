@@ -664,6 +664,28 @@ export default function (pi: ExtensionAPI) {
     // requests from implement/archive flows that were queued before store existed.
     drainMindLifecycleQueue(ctx);
 
+    // --- Branch↔mind consistency check for directive minds ---
+    // If the active mind is a directive mind (starts with 'directive/'),
+    // verify the current git branch matches the expected branch.
+    // Directive mind "directive/X" expects branch "feature/X".
+    const currentMind = activeMind();
+    if (currentMind.startsWith("directive/")) {
+      const directiveSuffix = currentMind.slice("directive/".length);
+      const expectedBranch = `feature/${directiveSuffix}`;
+      try {
+        const branchResult = await pi.exec("git", ["branch", "--show-current"], { timeout: 3_000, cwd: ctx.cwd });
+        const currentBranch = branchResult.stdout.trim();
+        if (currentBranch && currentBranch !== expectedBranch) {
+          pi.sendMessage(
+            `⚠️ Mind↔branch mismatch: directive mind "${currentMind}" expects branch "${expectedBranch}" but current branch is "${currentBranch}".`,
+            { role: "context" },
+          );
+        }
+      } catch {
+        // Git not available or not a git repo — skip check silently
+      }
+    }
+
     triggerState = createTriggerState();
     postCompaction = false;
     firstTurn = true;
