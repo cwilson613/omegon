@@ -558,9 +558,9 @@ export class FactStore {
     // Dedup check — same mind (or parent chain), same hash, still active.
     // Check the full chain so directive minds don't duplicate parent facts.
     const chain = this.resolveMindChain(mind);
-    const dedup_placeholders = chain.map(() => "?").join(", ");
+    const dedupPlaceholders = chain.map(() => "?").join(", ");
     const existing = this.db.prepare(
-      `SELECT id FROM facts WHERE mind IN (${dedup_placeholders}) AND content_hash = ? AND status = 'active'`
+      `SELECT id FROM facts WHERE mind IN (${dedupPlaceholders}) AND content_hash = ? AND status = 'active'`
     ).get(...chain, hash);
 
     if (existing) {
@@ -649,14 +649,16 @@ export class FactStore {
     let added = 0;
     const newFactIds: string[] = [];
 
+    // Resolve chain once for all observe dedup checks (cached, but avoid repeated map/join)
+    const observeChain = this.resolveMindChain(mind);
+    const observePlaceholders = observeChain.map(() => "?").join(", ");
+
     const tx = this.db.transaction(() => {
       for (const action of actions) {
         switch (action.type) {
           case "observe": {
             // Fact observed in session — reinforce if exists (in mind or parent chain), add if new
             const hash = contentHash(action.content ?? "");
-            const observeChain = this.resolveMindChain(mind);
-            const observePlaceholders = observeChain.map(() => "?").join(", ");
             const existing = this.db.prepare(
               `SELECT id FROM facts WHERE mind IN (${observePlaceholders}) AND content_hash = ? AND status = 'active'`
             ).get(...observeChain, hash);
@@ -1071,12 +1073,18 @@ export class FactStore {
     const allFacts = this.db.prepare(
       `SELECT * FROM facts WHERE mind IN (${placeholders}) AND section = ? AND status = 'active' ORDER BY created_at`
     ).all(...chain, section) as Fact[];
-    // Deduplicate by content_hash (child shadows parent)
-    const seen = new Set<string>();
+    // Deduplicate: child facts shadow parent facts with the same content_hash.
+    const seen = new Map<string, number>();
     const facts: Fact[] = [];
     for (const f of allFacts) {
-      if (seen.has(f.content_hash)) continue;
-      seen.add(f.content_hash);
+      const chainIdx = chain.indexOf(f.mind);
+      const existing = seen.get(f.content_hash);
+      if (existing !== undefined && existing <= chainIdx) continue;
+      seen.set(f.content_hash, chainIdx);
+      if (existing !== undefined) {
+        const idx = facts.findIndex(ff => ff.content_hash === f.content_hash);
+        if (idx !== -1) facts.splice(idx, 1);
+      }
       facts.push(f);
     }
 

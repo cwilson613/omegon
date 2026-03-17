@@ -1694,6 +1694,7 @@ export function extractAndArchiveDesignSpec(
 	}
 
 	// ── Write to openspec/design/{id}/ ──────────────────────────
+	// Preserve any existing files (e.g. tasks.md from scaffold), overwrite proposal/spec.
 	fs.mkdirSync(designDir, { recursive: true });
 	fs.writeFileSync(
 		path.join(designDir, "proposal.md"),
@@ -1701,7 +1702,7 @@ export function extractAndArchiveDesignSpec(
 	);
 	fs.writeFileSync(path.join(designDir, "spec.md"), specLines.join("\n"));
 
-	// ── Immediately archive ─────────────────────────────────────
+	// ── Immediately archive (copy ALL files, not just ours) ──────
 	const today = new Date().toISOString().split("T")[0];
 	const archiveDir = path.join(archiveBaseDir, `${today}-${node.id}`);
 	fs.mkdirSync(archiveDir, { recursive: true });

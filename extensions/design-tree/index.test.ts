@@ -6,7 +6,7 @@ import * as path from "node:path";
 
 import type { ExtensionAPI } from "@styrene-lab/pi-coding-agent";
 import designTreeExtension from "./index.ts";
-import { generateFrontmatter } from "./tree.ts";
+import { generateFrontmatter, extractAndArchiveDesignSpec } from "./tree.ts";
 import type { DesignNode } from "./types.ts";
 import { sharedState } from "../lib/shared-state.ts";
 
@@ -1226,5 +1226,224 @@ describe("design-spec-mirror: add/remove_question mirrors to tasks.md", () => {
 		// Should not throw even without a design spec
 		const result = await runUpdateTool({ action: "add_question", node_id: "no-design-node", question: "A question" });
 		assert.ok(!result.isError, "add_question should succeed even without a design spec directory");
+	});
+});
+
+describe("auto-transition seed → exploring on substance addition", () => {
+	let tmpDir: string;
+	let pi: ReturnType<typeof createFakePi>;
+
+	type ToolResult = { content: Array<{ type: string; text?: string }>; details: Record<string, unknown>; isError?: boolean };
+
+	async function runUpdateTool(params: Record<string, unknown>): Promise<ToolResult> {
+		const tool = pi.tools.find((entry) => entry.name === "design_tree_update");
+		assert.ok(tool, "missing design_tree_update tool");
+		return tool.execute("tool-1", params, {} as never, () => {}, { cwd: tmpDir }) as Promise<ToolResult>;
+	}
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "design-tree-auto-transition-"));
+		const docsDir = path.join(tmpDir, "docs");
+		fs.mkdirSync(docsDir, { recursive: true });
+
+		// Create a seed node
+		const content = [
+			"---",
+			"id: seed-node",
+			"title: Seed Node",
+			"status: seed",
+			"tags: []",
+			"open_questions: []",
+			"---",
+			"",
+			"# Seed Node",
+			"",
+			"## Overview",
+			"",
+			"A seed.",
+		].join("\n");
+		fs.writeFileSync(path.join(docsDir, "seed-node.md"), content);
+
+		pi = createFakePi();
+		designTreeExtension(pi as unknown as ExtensionAPI);
+	});
+
+	afterEach(() => {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("add_research auto-transitions seed → exploring", async () => {
+		const result = await runUpdateTool({
+			action: "add_research",
+			node_id: "seed-node",
+			heading: "Finding",
+			content: "Something interesting",
+		});
+		assert.ok(!result.isError);
+		assert.match(result.content[0]?.text ?? "", /auto-transitioned seed → exploring/);
+
+		const raw = fs.readFileSync(path.join(tmpDir, "docs", "seed-node.md"), "utf8");
+		assert.match(raw, /status:\s*exploring/);
+	});
+
+	it("add_decision auto-transitions seed → exploring", async () => {
+		const result = await runUpdateTool({
+			action: "add_decision",
+			node_id: "seed-node",
+			decision_title: "Use approach A",
+			decision_status: "exploring",
+			rationale: "Because reasons",
+		});
+		assert.ok(!result.isError);
+
+		const raw = fs.readFileSync(path.join(tmpDir, "docs", "seed-node.md"), "utf8");
+		assert.match(raw, /status:\s*exploring/);
+	});
+
+	it("add_research on exploring node does NOT re-transition", async () => {
+		// First transition to exploring
+		await runUpdateTool({ action: "set_status", node_id: "seed-node", status: "exploring" });
+
+		const result = await runUpdateTool({
+			action: "add_research",
+			node_id: "seed-node",
+			heading: "Second finding",
+			content: "More info",
+		});
+		assert.ok(!result.isError);
+		assert.ok(!(result.content[0]?.text ?? "").includes("auto-transitioned"));
+	});
+});
+
+describe("extractAndArchiveDesignSpec", () => {
+	let tmpDir: string;
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "design-tree-extract-"));
+		const docsDir = path.join(tmpDir, "docs");
+		fs.mkdirSync(docsDir, { recursive: true });
+	});
+
+	afterEach(() => {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("extracts decisions and research into archived spec", () => {
+		const content = [
+			"---",
+			"id: extract-test",
+			"title: Extract Test",
+			"status: exploring",
+			"tags: []",
+			"open_questions: []",
+			"---",
+			"",
+			"# Extract Test",
+			"",
+			"## Overview",
+			"",
+			"Test node.",
+			"",
+			"## Research",
+			"",
+			"### Finding 1",
+			"",
+			"Some research content here.",
+			"",
+			"## Decisions",
+			"",
+			"### Decision: Use SQLite",
+			"",
+			"**Status:** decided",
+			"**Rationale:** Because it works.",
+		].join("\n");
+		fs.writeFileSync(path.join(tmpDir, "docs", "extract-test.md"), content);
+
+		const node: DesignNode = {
+			id: "extract-test",
+			title: "Extract Test",
+			status: "exploring",
+			dependencies: [],
+			related: [],
+			tags: [],
+			open_questions: [],
+			branches: [],
+			filePath: path.join(tmpDir, "docs", "extract-test.md"),
+			lastModified: Date.now(),
+		};
+
+		const result = extractAndArchiveDesignSpec(tmpDir, node);
+		assert.ok(result.created);
+		assert.ok(result.archived);
+		assert.match(result.message, /1 decisions/);
+
+		// Active design dir should be cleaned up
+		assert.ok(!fs.existsSync(path.join(tmpDir, "openspec", "design", "extract-test")));
+
+		// Archive should exist
+		const archiveDir = path.join(tmpDir, "openspec", "design-archive");
+		assert.ok(fs.existsSync(archiveDir));
+		const entries = fs.readdirSync(archiveDir);
+		assert.equal(entries.length, 1);
+		assert.match(entries[0], /extract-test$/);
+
+		// Spec content should have real content
+		const specContent = fs.readFileSync(path.join(archiveDir, entries[0], "spec.md"), "utf8");
+		assert.match(specContent, /Use SQLite/);
+		assert.match(specContent, /Finding 1/);
+	});
+
+	it("preserves existing scaffold files (e.g. tasks.md) in archive", () => {
+		fs.writeFileSync(path.join(tmpDir, "docs", "preserve-test.md"), [
+			"---", "id: preserve-test", "title: Preserve Test", "status: exploring",
+			"tags: []", "open_questions: []", "---", "", "# Preserve Test",
+		].join("\n"));
+
+		// Pre-create a scaffold with tasks.md
+		const designDir = path.join(tmpDir, "openspec", "design", "preserve-test");
+		fs.mkdirSync(designDir, { recursive: true });
+		fs.writeFileSync(path.join(designDir, "tasks.md"), "# Tasks\n\n- [ ] Do something\n");
+		fs.writeFileSync(path.join(designDir, "proposal.md"), "# Old proposal\n");
+
+		const node: DesignNode = {
+			id: "preserve-test",
+			title: "Preserve Test",
+			status: "exploring",
+			dependencies: [], related: [], tags: [], open_questions: [], branches: [],
+			filePath: path.join(tmpDir, "docs", "preserve-test.md"),
+			lastModified: Date.now(),
+		};
+
+		const result = extractAndArchiveDesignSpec(tmpDir, node);
+		assert.ok(result.created);
+
+		const archiveDir = path.join(tmpDir, "openspec", "design-archive");
+		const entries = fs.readdirSync(archiveDir);
+		const archivedFiles = fs.readdirSync(path.join(archiveDir, entries[0]));
+
+		assert.ok(archivedFiles.includes("tasks.md"), "tasks.md from scaffold should be preserved in archive");
+		assert.ok(archivedFiles.includes("proposal.md"), "proposal.md should exist");
+		assert.ok(archivedFiles.includes("spec.md"), "spec.md should exist");
+	});
+
+	it("returns early if already archived", () => {
+		fs.writeFileSync(path.join(tmpDir, "docs", "already-done.md"), [
+			"---", "id: already-done", "title: Already Done", "status: decided",
+			"tags: []", "open_questions: []", "---", "", "# Already Done",
+		].join("\n"));
+
+		// Pre-create archive
+		fs.mkdirSync(path.join(tmpDir, "openspec", "design-archive", "2026-01-01-already-done"), { recursive: true });
+
+		const node: DesignNode = {
+			id: "already-done", title: "Already Done", status: "decided",
+			dependencies: [], related: [], tags: [], open_questions: [], branches: [],
+			filePath: path.join(tmpDir, "docs", "already-done.md"),
+			lastModified: Date.now(),
+		};
+
+		const result = extractAndArchiveDesignSpec(tmpDir, node);
+		assert.ok(!result.created);
+		assert.ok(result.archived);
 	});
 });

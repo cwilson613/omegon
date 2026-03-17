@@ -803,11 +803,9 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					// Substance = open questions resolved, decisions recorded.
 					// Artifacts = design spec archived (auto-created if missing).
 					if (newStatus === "decided") {
-						const sections = getNodeSections(node);
 						const openQs = node.open_questions?.length ?? 0;
-						const decisionCount = sections.decisions.length;
 
-						// Substance check: open questions must be resolved
+						// Substance check: open questions must be resolved (fast — no file I/O)
 						if (openQs > 0) {
 							return {
 								content: [{ type: "text", text:
@@ -819,9 +817,11 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						}
 
 						// Substance check: at least one decision recorded (skip for lightweight types)
+						// Parse doc only if we need to check decisions (past the open-questions gate).
+						const sections = getNodeSections(node);
 						const lightweightTypes = new Set(["bug", "chore", "task"]);
 						const isLightweight = node.issue_type && lightweightTypes.has(node.issue_type);
-						if (!isLightweight && decisionCount === 0) {
+						if (!isLightweight && sections.decisions.length === 0) {
 							return {
 								content: [{ type: "text", text:
 									`⚠ Cannot decide '${node.title}': no decisions recorded\n` +
@@ -961,13 +961,14 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					}
 					// Auto-transition seed → exploring on first substance addition
 					let transitioned = "";
+					let currentNode = node;
 					if (node.status === "seed") {
-						const updated = setNodeStatus(node, "exploring");
-						tree.nodes.set(updated.id, updated);
-						scaffoldDesignOpenSpecChange(ctx.cwd, updated);
+						currentNode = setNodeStatus(node, "exploring");
+						tree.nodes.set(currentNode.id, currentNode);
+						scaffoldDesignOpenSpecChange(ctx.cwd, currentNode);
 						transitioned = " (auto-transitioned seed → exploring)";
 					}
-					addResearch(node, params.heading, params.content);
+					addResearch(currentNode, params.heading, params.content);
 					emitCurrentState();
 					return {
 						content: [{ type: "text", text: `Added research '${params.heading}' to '${node.title}'${transitioned}` }],
@@ -985,10 +986,11 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						return { content: [{ type: "text", text: `Node '${params.node_id}' not found` }], details: {}, isError: true };
 					}
 					// Auto-transition seed → exploring on first substance addition
+					let currentNode = node;
 					if (node.status === "seed") {
-						const updated = setNodeStatus(node, "exploring");
-						tree.nodes.set(updated.id, updated);
-						scaffoldDesignOpenSpecChange(ctx.cwd, updated);
+						currentNode = setNodeStatus(node, "exploring");
+						tree.nodes.set(currentNode.id, currentNode);
+						scaffoldDesignOpenSpecChange(ctx.cwd, currentNode);
 					}
 					const validDecisionStatuses = ["exploring", "decided", "rejected"];
 					const rawDStatus = params.decision_status || "exploring";
@@ -996,7 +998,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						return { content: [{ type: "text", text: `Invalid decision_status '${rawDStatus}'. Valid: ${validDecisionStatuses.join(", ")}` }], details: {}, isError: true };
 					}
 					const dStatus = rawDStatus as "exploring" | "decided" | "rejected";
-					addDecision(node, {
+					addDecision(currentNode, {
 						title: params.decision_title,
 						status: dStatus,
 						rationale: params.rationale || "",
