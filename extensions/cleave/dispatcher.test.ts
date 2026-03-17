@@ -5,7 +5,7 @@
  * but the semaphore and status harvesting are testable in isolation.
  */
 
-import { describe, it } from "node:test";
+import { describe, it, afterEach } from "node:test";
 import * as assert from "node:assert/strict";
 import {
 	AsyncSemaphore,
@@ -814,5 +814,112 @@ describe("timeout constants", () => {
 	it("idle timeout is shorter than wall-clock timeout", () => {
 		assert.ok(IDLE_TIMEOUT_MS < DEFAULT_CHILD_TIMEOUT_MS,
 			"idle timeout must be shorter than wall-clock timeout");
+	});
+});
+
+// ─── Native agent resolution ────────────────────────────────────────────────
+
+import { resolveNativeAgent, _clearNativeAgentCache, type NativeAgentSpec } from "../lib/omegon-subprocess.ts";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+import type { ModelTier } from "./types.ts";
+
+const __here = dirname(fileURLToPath(import.meta.url));
+const __repoRoot = resolve(__here, "..", "..");
+
+/**
+ * Reproduce the exact routing logic from dispatchSingleChild.
+ * Using ModelTier type avoids TS2367 literal narrowing complaints.
+ */
+function wouldUseNative(
+	nativeAgent: NativeAgentSpec | null,
+	effectiveTier: ModelTier,
+	nativeModelSpec: string | null | undefined,
+): boolean {
+	return nativeAgent != null
+		&& effectiveTier !== "local"
+		&& nativeModelSpec != null
+		&& process.env.OMEGON_NATIVE_DISPATCH !== "0";
+}
+
+describe("native agent dispatch routing", () => {
+	const savedEnv = process.env.OMEGON_NATIVE_DISPATCH;
+
+	afterEach(() => {
+		_clearNativeAgentCache();
+		if (savedEnv === undefined) delete process.env.OMEGON_NATIVE_DISPATCH;
+		else process.env.OMEGON_NATIVE_DISPATCH = savedEnv;
+	});
+
+	it("resolveNativeAgent returns spec with valid paths when binary exists", () => {
+		_clearNativeAgentCache();
+		const native = resolveNativeAgent();
+		const devBinary = join(__repoRoot, "core", "target", "release", "omegon-agent");
+		if (!existsSync(devBinary)) {
+			assert.equal(native, null, "no binary found — null expected");
+			return;
+		}
+		assert.ok(native, "should resolve when binary exists");
+		assert.equal(native!.binaryPath, devBinary);
+		assert.ok(native!.bridgePath.endsWith("llm-bridge.mjs"));
+	});
+
+	it("OMEGON_NATIVE_DISPATCH=0 disables native dispatch", () => {
+		process.env.OMEGON_NATIVE_DISPATCH = "0";
+		_clearNativeAgentCache();
+		const nativeAgent = resolveNativeAgent();
+		assert.equal(
+			wouldUseNative(nativeAgent, "victory", "anthropic:claude-sonnet-4-20250514"),
+			false,
+			"native dispatch should be disabled by env var",
+		);
+	});
+
+	it("local tier never uses native dispatch", () => {
+		_clearNativeAgentCache();
+		delete process.env.OMEGON_NATIVE_DISPATCH;
+		const nativeAgent = resolveNativeAgent();
+		assert.equal(
+			wouldUseNative(nativeAgent, "local", "anthropic:claude-sonnet-4-20250514"),
+			false,
+			"local tier must never use native dispatch",
+		);
+	});
+
+	it("victory tier uses native dispatch when binary available", () => {
+		_clearNativeAgentCache();
+		delete process.env.OMEGON_NATIVE_DISPATCH;
+		const nativeAgent = resolveNativeAgent();
+		if (!nativeAgent) return;
+		assert.equal(
+			wouldUseNative(nativeAgent, "victory", "anthropic:claude-sonnet-4-20250514"),
+			true,
+			"victory tier should use native when available",
+		);
+	});
+
+	it("gloriana tier uses native dispatch when binary available", () => {
+		_clearNativeAgentCache();
+		delete process.env.OMEGON_NATIVE_DISPATCH;
+		const nativeAgent = resolveNativeAgent();
+		if (!nativeAgent) return;
+		assert.equal(
+			wouldUseNative(nativeAgent, "gloriana", "openai:gpt-4.1-2025-04-14"),
+			true,
+			"gloriana tier should use native when available",
+		);
+	});
+
+	it("native dispatch is disabled when nativeModelSpec is null", () => {
+		_clearNativeAgentCache();
+		delete process.env.OMEGON_NATIVE_DISPATCH;
+		const nativeAgent = resolveNativeAgent();
+		assert.equal(
+			wouldUseNative(nativeAgent, "victory", undefined),
+			false,
+			"no model spec → no native dispatch",
+		);
 	});
 });

@@ -27,7 +27,7 @@ import { sendRpcCommand, buildPromptCommand, parseRpcEventStream, mapEventToProg
 import { executeWithReview, type ReviewConfig, type ReviewExecutor, DEFAULT_REVIEW_CONFIG } from "./review.ts";
 import { saveState } from "./workspace.ts";
 import { resolveTier, getDefaultPolicy, getViableModels, type ProviderRoutingPolicy, type RegistryModel } from "../lib/model-routing.ts";
-import { resolveOmegonSubprocess } from "../lib/omegon-subprocess.ts";
+import { resolveOmegonSubprocess, resolveNativeAgent, type NativeAgentSpec } from "../lib/omegon-subprocess.ts";
 import { registerCleaveProc, deregisterCleaveProc, killCleaveProc } from "./subprocess-tracker.ts";
 
 // ─── Large-run threshold ────────────────────────────────────────────────────
@@ -501,6 +501,147 @@ async function spawnChildPipe(
 	});
 }
 
+/**
+ * Spawn a child using the native omegon-agent binary (pipe mode).
+ *
+ * The Rust binary:
+ * - Accepts task via --prompt (reads stdin if not provided, but we pass explicitly)
+ * - Writes events to stderr (tracing logs)
+ * - Writes final assistant text to stdout (exit code 0 = success)
+ * - Has built-in: read, write, edit, bash tools + path traversal protection,
+ *   turn limits, retry, stuck detection, and auto-validation
+ *
+ * This is Ship of Theseus Plank #1 — headless cleave children execute in
+ * the Rust loop instead of spawning a full TS Omegon process.
+ */
+async function spawnChildNative(
+	native: NativeAgentSpec,
+	prompt: string,
+	cwd: string,
+	timeoutMs: number,
+	model: string,
+	signal?: AbortSignal,
+	onLine?: (line: string) => void,
+	maxTurns: number = 50,
+): Promise<ChildResult> {
+	const args = [
+		"--prompt", prompt,
+		"--cwd", cwd,
+		"--bridge", native.bridgePath,
+		"--model", model,
+		"--max-turns", String(maxTurns),
+	];
+
+	return new Promise<ChildResult>((resolve) => {
+		let stdout = "";
+		let stderr = "";
+		let killed = false;
+
+		const proc = spawn(native.binaryPath, args, {
+			cwd,
+			stdio: ["pipe", "pipe", "pipe"],
+			detached: true,
+			env: {
+				...process.env,
+				// RUST_LOG controls tracing verbosity for the Rust binary
+				RUST_LOG: process.env.RUST_LOG ?? "info",
+			},
+		});
+		registerCleaveProc(proc);
+
+		// stdin not needed — prompt passed via --prompt flag
+		proc.stdin?.end();
+
+		let lineBuf = "";
+		proc.stdout?.on("data", (data: Buffer) => {
+			const chunk = data.toString();
+			stdout += chunk;
+			if (onLine) {
+				lineBuf += chunk;
+				const parts = lineBuf.split("\n");
+				lineBuf = parts.pop() ?? "";
+				for (const part of parts) {
+					const clean = stripAnsiForStatus(part);
+					if (isChildStatusLine(clean)) onLine(clean);
+				}
+			}
+		});
+
+		// Parse stderr for tool events (tracing lines contain → toolname and ✓/✗)
+		proc.stderr?.on("data", (data: Buffer) => {
+			const chunk = data.toString();
+			stderr += chunk;
+			if (onLine) {
+				// Extract tool progress from tracing output
+				for (const line of chunk.split("\n")) {
+					const toolMatch = line.match(/→ (\w+)/);
+					if (toolMatch) {
+						onLine(`tool: ${toolMatch[1]}`);
+					} else if (line.includes("✓") || line.includes("✗")) {
+						const clean = stripAnsiForStatus(line);
+						if (clean.length > 5) onLine(clean);
+					}
+				}
+			}
+		});
+
+		let escalationTimer: ReturnType<typeof setTimeout> | undefined;
+		const scheduleEscalation = () => {
+			escalationTimer = setTimeout(() => {
+				if (!proc.killed) {
+					try {
+						if (proc.pid) process.kill(-proc.pid, "SIGKILL");
+					} catch {
+						try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+					}
+				}
+			}, 5_000);
+		};
+
+		const timer = setTimeout(() => {
+			killed = true;
+			killCleaveProc(proc);
+			scheduleEscalation();
+		}, timeoutMs);
+
+		const onAbort = () => {
+			killed = true;
+			killCleaveProc(proc);
+			scheduleEscalation();
+		};
+		signal?.addEventListener("abort", onAbort, { once: true });
+
+		let settled = false;
+		proc.on("close", (code) => {
+			if (settled) return;
+			settled = true;
+			deregisterCleaveProc(proc);
+			clearTimeout(timer);
+			clearTimeout(escalationTimer);
+			signal?.removeEventListener("abort", onAbort);
+			resolve({
+				exitCode: killed ? -1 : (code ?? 1),
+				stdout,
+				stderr: killed ? `Killed (timeout or abort)\n${stderr}` : stderr,
+			});
+		});
+
+		proc.on("error", (err) => {
+			if (settled) return;
+			settled = true;
+			deregisterCleaveProc(proc);
+			clearTimeout(timer);
+			clearTimeout(escalationTimer);
+			signal?.removeEventListener("abort", onAbort);
+			resolve({
+				exitCode: 1,
+				stdout: "",
+				stderr: `Failed to spawn omegon-agent: ${err.message}`,
+			});
+		});
+	});
+}
+
 /** Events collected during an RPC child session. */
 interface RpcChildResult extends ChildResult {
 	events: RpcChildEvent[];
@@ -675,10 +816,17 @@ async function spawnChildRpc(
 }
 
 /**
- * Spawn a child process — dispatches to RPC or pipe mode.
+ * Spawn a child process — dispatches to native, RPC, or pipe mode.
  *
- * @param useRpc  When true (default), uses RPC mode with structured events.
- *                When false, uses legacy pipe mode.
+ * Dispatch priority:
+ * 1. Native (Rust binary) — when nativeAgent is provided and useNative=true
+ * 2. RPC (JSON events) — when useRpc=true and not using native
+ * 3. Pipe (legacy) — fallback
+ *
+ * @param useRpc      When true, uses RPC mode with structured events.
+ * @param nativeAgent When provided, attempts native dispatch (Ship of Theseus).
+ * @param useNative   When true (and nativeAgent is available), use the native binary.
+ * @param model       Model ID string (for native binary --model flag).
  */
 async function spawnChild(
 	prompt: string,
@@ -689,7 +837,14 @@ async function spawnChild(
 	onLine?: (line: string) => void,
 	useRpc?: boolean,
 	onEvent?: (event: RpcChildEvent) => void,
+	nativeAgent?: NativeAgentSpec | null,
+	useNative?: boolean,
+	model?: string,
 ): Promise<ChildResult> {
+	// Native dispatch: use the Rust binary when available and requested
+	if (useNative && nativeAgent && model) {
+		return spawnChildNative(nativeAgent, prompt, cwd, timeoutMs, model, signal, onLine);
+	}
 	if (useRpc) {
 		return spawnChildRpc(prompt, cwd, timeoutMs, signal, localModel, onEvent);
 	}
@@ -945,6 +1100,34 @@ async function dispatchSingleChild(
 	const modelFlag = resolveModelIdForTier(effectiveTier, registryModels, activePolicy, localModel);
 	child.backend = child.executeModel === "local" ? "local" : "cloud";
 
+	// ── Native agent resolution ─────────────────────────────────────────────
+	// Ship of Theseus: prefer the Rust binary for non-local cloud children.
+	// The native agent has the 4 primitive tools (read, write, edit, bash)
+	// plus turn limits, retry, stuck detection, and auto-validation.
+	// Local-tier children still go through TS (Ollama integration is Phase 3).
+	const nativeAgent = resolveNativeAgent();
+
+	// Build the provider:model string for the Rust binary.
+	// resolveModelIdForTier returns just the model ID (e.g., "claude-sonnet-4-20250514");
+	// the Rust binary expects "provider:model" format (e.g., "anthropic:claude-sonnet-4-20250514").
+	let nativeModelSpec: string | undefined;
+	if (modelFlag && effectiveTier !== "local") {
+		const resolved = resolveTier(effectiveTier, registryModels, activePolicy);
+		nativeModelSpec = resolved
+			? `${resolved.provider}:${resolved.modelId}`
+			: `anthropic:${modelFlag}`; // fallback: assume anthropic
+	}
+
+	const useNative = nativeAgent != null
+		&& effectiveTier !== "local"
+		&& nativeModelSpec != null
+		// Opt-out: OMEGON_NATIVE_DISPATCH=0 disables native dispatch
+		&& process.env.OMEGON_NATIVE_DISPATCH !== "0";
+
+	if (useNative) {
+		child.backend = "native";
+	}
+
 	// Read the task file
 	const taskFilePath = join(state.workspacePath, `${child.childId}-task.md`);
 	let taskContent: string;
@@ -964,13 +1147,23 @@ async function dispatchSingleChild(
 
 	// Build executor adapter for the review loop
 	const executor: ReviewExecutor = {
-		execute: async (execPrompt: string, execCwd: string, execModelFlag?: string) => {
-			// Execution uses RPC mode for structured events
-			return spawnChild(execPrompt, execCwd, timeoutMs, signal, execModelFlag,
+		execute: async (execPrompt: string, execCwd: string, _execModelFlag?: string) => {
+			if (useNative) {
+				// Native dispatch: Rust binary with pipe mode (stdout=final text)
+				// Uses nativeModelSpec (provider:model) instead of the bare model ID
+				return spawnChild(
+					execPrompt, execCwd, timeoutMs, signal, undefined,
+					onChildLine, false /* not RPC */, undefined,
+					nativeAgent, true /* useNative */, nativeModelSpec,
+				);
+			}
+			// TS dispatch: RPC mode for structured events
+			return spawnChild(execPrompt, execCwd, timeoutMs, signal, _execModelFlag,
 				useRpc ? undefined : onChildLine, useRpc, useRpc ? onRpcEvent : undefined);
 		},
 		review: async (reviewPrompt: string, reviewCwd: string) => {
-			// Reviews always use pipe mode (Phase 1) + gloriana tier
+			// Reviews always use TS + pipe mode (Phase 1) + gloriana tier.
+			// The native binary doesn't have review infrastructure yet.
 			const reviewModelId = resolveModelIdForTier("gloriana", registryModels, activePolicy, localModel);
 			return spawnChild(reviewPrompt, reviewCwd, timeoutMs, signal, reviewModelId,
 				undefined, false /* pipe mode for review */);

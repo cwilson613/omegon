@@ -149,8 +149,8 @@ export interface ChildState {
 	error?: string;
 	/** Duration in seconds */
 	durationSec?: number;
-	/** "local" | "cloud" — which execution backend was used */
-	backend?: "local" | "cloud";
+	/** Execution backend: "local" (Ollama), "cloud" (TS+pi-ai), "native" (Rust binary) */
+	backend?: "local" | "cloud" | "native";
 	/** Resolved execution model tier for this child */
 	executeModel?: string;
 	/** Number of review iterations completed (0 = no review, 1+ = reviewed) */

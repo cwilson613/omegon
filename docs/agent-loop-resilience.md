@@ -1,7 +1,7 @@
 ---
 id: agent-loop-resilience
 title: Agent loop resilience — what the hermit crab wants in its shell
-status: exploring
+status: resolved
 parent: rust-agent-loop
 tags: [rust, agent-loop, resilience, self-awareness, introspective]
 open_questions: []
