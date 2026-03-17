@@ -537,17 +537,13 @@ async function spawnChildRpc(
 			// Do NOT close stdin — child may need it for the session lifetime
 		}
 
-		// Parse stdout as RPC event stream
-		let stdoutRaw = "";
-		proc.stdout?.on("data", (data: Buffer) => {
-			stdoutRaw += data.toString();
-		});
+		// Collect stderr
 		proc.stderr?.on("data", (data) => { stderr += data.toString(); });
 
-		// Process events from the stream in the background
-		let eventStreamDone = false;
+		// Parse stdout exclusively via RPC event stream (no competing data listener)
+		let eventsFinished: Promise<void> = Promise.resolve();
 		if (proc.stdout) {
-			const processEvents = async () => {
+			eventsFinished = (async () => {
 				try {
 					for await (const event of parseRpcEventStream(proc.stdout!)) {
 						events.push(event);
@@ -560,9 +556,7 @@ async function spawnChildRpc(
 					// Stream parsing error — treat as pipe break
 					pipeBroken = true;
 				}
-				eventStreamDone = true;
-			};
-			processEvents();
+			})();
 		}
 
 		let escalationTimer: ReturnType<typeof setTimeout> | undefined;
@@ -592,7 +586,7 @@ async function spawnChildRpc(
 		signal?.addEventListener("abort", onAbort, { once: true });
 
 		let settled = false;
-		proc.on("close", (code) => {
+		proc.on("close", async (code) => {
 			if (settled) return;
 			settled = true;
 			deregisterCleaveProc(proc);
@@ -603,9 +597,12 @@ async function spawnChildRpc(
 			// Close stdin if still open (child has exited)
 			try { proc.stdin?.end(); } catch { /* already closed */ }
 
+			// Wait for all RPC events to be consumed before resolving
+			await eventsFinished;
+
 			resolve({
 				exitCode: killed ? -1 : (code ?? 1),
-				stdout: stdoutRaw,
+				stdout: "",
 				stderr: killed ? `Killed (timeout or abort)\n${stderr}` : stderr,
 				events,
 				pipeBroken,
