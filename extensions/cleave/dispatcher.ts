@@ -664,7 +664,15 @@ interface RpcChildResult extends ChildResult {
  * Uses `--mode rpc --no-session`, sends prompt via sendRpcCommand on stdin,
  * parses stdout as a JSON event stream. Stdin stays open for the session lifetime.
  */
-const _dlog = (msg: string) => { try { _appendFileSync("/tmp/cleave-trace.log", `[${Date.now()}] ${msg}\n`); } catch {} };
+const _dlog = (msg: string) => {
+	try {
+		_appendFileSync("/tmp/cleave-trace.log", `[${Date.now()}] ${msg}\n`);
+	} catch (e: any) {
+		// Last resort: if appendFileSync fails, try writeFileSync to a different path
+		try { writeFileSync("/tmp/cleave-trace-err.log", `DLOG_FAIL: ${e.message}\n${msg}\n`); } catch {}
+		console.error(`[cleave-trace] WRITE FAILED: ${e.message} — msg: ${msg}`);
+	}
+};
 
 async function spawnChildRpc(
 	prompt: string,
@@ -961,11 +969,15 @@ export async function dispatchChildren(
 	onProgress?: (msg: string) => void,
 	reviewConfig?: ReviewConfig,
 ): Promise<void> {
+	// HARD TRACE: writeFileSync + stderr — cannot be swallowed
+	try { writeFileSync("/tmp/cleave-trace-hard.log", `[${Date.now()}] dispatchChildren ENTERED children=${state.children.length}\n`); } catch {}
+	process.stderr.write(`[cleave-trace] dispatchChildren ENTERED children=${state.children.length}\n`);
 	_dlog(`dispatchChildren: entry signal=${!!signal} signalAborted=${signal?.aborted} children=${state.children.length}`);
 	const statusResult = await pi.exec("git", ["status", "--porcelain"], {
 		cwd: state.repoPath,
 		timeout: 5_000,
 	});
+	_dlog(`dispatchChildren: git status done, dirty=${!!statusResult.stdout.trim()}`);
 	if (statusResult.stdout.trim()) {
 		throw new Error(
 			"Dispatch blocked: repository became dirty before child execution. Resolve the dirty-tree preflight before dispatching.\n" +
@@ -1030,6 +1042,7 @@ export async function dispatchChildren(
 	const waves = computeDispatchWaves(
 		state.children.map((c) => ({ label: c.label, dependsOn: c.dependsOn })),
 	);
+	_dlog(`dispatchChildren: waves=${waves.length} waveSizes=${waves.map(w => w.length).join(",")}`);
 
 	const semaphore = new AsyncSemaphore(maxParallel);
 	const effectiveReviewConfig = reviewConfig ?? DEFAULT_REVIEW_CONFIG;
@@ -1040,15 +1053,22 @@ export async function dispatchChildren(
 	for (let waveIdx = 0; waveIdx < waves.length; waveIdx++) {
 		const waveLabels = waves[waveIdx];
 		const waveChildren = state.children.filter((c) => waveLabels.includes(c.label));
+		_dlog(`dispatchChildren: wave=${waveIdx} labels=${waveLabels.join(",")} children=${waveChildren.length}`);
 		onProgress?.(
 			`dispatching ${waveChildren.map((c) => c.label).join(", ")}`,
 		);
 		childrenDispatched += waveChildren.length;
 
 		const promises = waveChildren.map(async (child) => {
+			_dlog(`dispatchChildren: acquiring semaphore for ${child.label}`);
 			await semaphore.acquire();
+			_dlog(`dispatchChildren: semaphore acquired for ${child.label}, calling dispatchSingleChild`);
 			try {
 				await dispatchSingleChild(pi, state, child, childTimeoutMs, localModel, signal, effectiveReviewConfig);
+				_dlog(`dispatchChildren: dispatchSingleChild returned for ${child.label} status=${child.status}`);
+			} catch (e: any) {
+				_dlog(`dispatchChildren: dispatchSingleChild THREW for ${child.label}: ${e.message}`);
+				throw e;
 			} finally {
 				semaphore.release();
 			}

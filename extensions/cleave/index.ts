@@ -2577,6 +2577,13 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 				churnThreshold: params.review_churn_threshold ?? DEFAULT_REVIEW_CONFIG.churnThreshold,
 			};
 
+			// HARD TRACE: confirm we reach the dispatchChildren call
+			try {
+				const { writeFileSync: _wfs } = await import("node:fs");
+				_wfs("/tmp/cleave-trace-index.log", `[${Date.now()}] index.ts: about to call dispatchChildren, children=${state.children.length}, maxParallel=${maxParallel}, localModel=${localModel}\n`);
+				process.stderr.write(`[cleave-trace] index.ts: calling dispatchChildren\n`);
+			} catch {}
+
 			await dispatchChildren(
 				pi,
 				state,
