@@ -2,24 +2,22 @@
 
 ## Architecture Decisions
 
-### Decision: Use RPC event-gap idle timeout alongside reduced wall-clock cap
+### Decision: Activity-gap idle timeout alongside reduced wall-clock cap
 
-**Status:** exploring
-**Rationale:** Two-tier timeout: (1) a wall-clock cap reduced from 2h to ~15 minutes for default children (configurable), and (2) an idle timeout of ~3 minutes with no RPC events. The idle timer resets on every RPC event (tool_start, tool_end, assistant_message). If the idle timer fires, the child is killed with a clear error message. The wall-clock cap is the hard backstop.
+**Status:** decided
+**Rationale:** Two-tier timeout: (1) a wall-clock cap reduced from 2h to 15 minutes for default children (configurable), and (2) an idle timeout of 3 minutes with no child activity. In the Rust native orchestrator (primary path), activity = stderr output lines. In the TS resume path, activity = RPC events. If the idle timer fires, the child is killed immediately. The wall-clock cap is the hard backstop.
 
 This catches both failure modes: children stuck in inference loops (idle — no tool calls) and children that are technically active but going nowhere (wall clock). The 3-minute idle window is generous enough that normal LLM thinking pauses won't trigger it, but short enough that a stalled child dies in minutes, not hours.
 
-For pipe mode (legacy/review), fall back to wall-clock only since there's no structured event stream.
-
 ### Decision: Kill idle children immediately rather than sending a graceful signal
 
-**Status:** exploring
-**Rationale:** A "please wrap up" RPC message to a stuck child has two problems: (1) if the child's LLM is in a stalled inference, the message sits unread in stdin; (2) it adds complexity for a case where the child has already failed to produce useful work. Clean kill + preserved worktree is better — the parent can log what happened, and the operator or a retry can pick up from the branch state. The existing pipe-break handling already preserves worktrees for recovery.
+**Status:** decided
+**Rationale:** A graceful "wrap up" message to a stuck child is unlikely to be received (stalled inference, closed stdin). Clean kill + preserved worktree is better — the parent logs what happened, and the operator or a retry can pick up from the branch state. Both Rust (kill_on_drop + explicit kill) and TS (killCleaveProc) implement immediate kill.
 
-### Decision: RPC event-gap idle detection, flat 15-min wall clock, kill on idle
+### Decision: Dual-backend idle detection — Rust stderr monitoring as primary, TS RPC as resume fallback
 
 **Status:** decided
-**Rationale:** Answers all three open questions: (1) RPC event absence only — git polling is expensive and unreliable. (2) Flat 15-min wall clock — complexity-proportional sizing adds planning overhead for marginal benefit; 15 min covers legitimate large tasks while cutting worst-case from 2h. (3) Kill outright — a graceful signal to a stalled child is unlikely to be received. Idle timeout of 3 minutes with reset on any RPC event. Pipe mode keeps wall-clock only.
+**Rationale:** The primary cleave_run path uses the Rust orchestrator (dispatchViaNative), which monitors stderr line output as the activity signal. The TS dispatchChildren path with RPC event-gap detection remains reachable only via the resume code path. Both backends enforce the same timeout constants (3-min idle, 15-min wall clock) and the same kill semantics. idle_timeout_ms is threaded through to both.
 
 ## Research Context
 
@@ -54,12 +52,15 @@ RPC mode gives us a rich event stream from the child. Events include:
 
 ## File Changes
 
-- `extensions/cleave/dispatcher.ts` (modified) — Add idle timer in spawnChildRpc() — reset on each RPC event, kill child when fired. Reduce default wall-clock timeout constant.
-- `extensions/cleave/index.ts` (modified) — Change hardcoded 120*60*1000 to a configurable default (e.g. 15 min wall clock). Expose idle_timeout_ms as optional cleave_run param.
+- `extensions/cleave/dispatcher.ts` (modified) — DEFAULT_CHILD_TIMEOUT_MS=15min, IDLE_TIMEOUT_MS=3min constants. Idle timer in spawnChildRpc() for TS resume path.
+- `extensions/cleave/index.ts` (modified) — idle_timeout_ms param in cleave_run schema. Threads timeoutSecs/idleTimeoutSecs to native dispatch.
+- `extensions/cleave/native-dispatch.ts` (new) — Spawns Rust omegon-agent cleave with --timeout and --idle-timeout args.
+- `core/crates/omegon/src/cleave/orchestrator.rs` (new) — Rust idle timeout via tokio::time::timeout on stderr lines. Wall-clock timeout via tokio::select.
 
 ## Constraints
 
-- Idle timeout only applies to RPC mode — pipe mode children keep wall-clock-only timeout
-- Idle timer must reset on ANY RPC event, not just tool events (assistant_message counts as activity)
-- Default idle timeout should be generous enough that normal thinking pauses (60-90s for complex reasoning) don't trigger false kills
-- Wall-clock default should still allow legitimately large tasks (15 min) but not 2 hours
+- Primary dispatch is Rust (dispatchViaNative) — idle detection monitors stderr lines
+- TS resume path uses RPC event-gap detection (spawnChildRpc) — same timeout constants
+- Idle timer must reset on ANY activity (stderr line or RPC event), not just specific event types
+- Default idle timeout (3 min) must be generous enough for normal thinking pauses (60-90s)
+- Wall-clock default (15 min) must allow legitimate large tasks but not 2 hours
