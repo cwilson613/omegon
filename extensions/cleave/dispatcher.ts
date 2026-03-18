@@ -17,7 +17,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, appendFileSync as _appendFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@styrene-lab/pi-coding-agent";
 import { DASHBOARD_UPDATE_EVENT, sharedState } from "../lib/shared-state.ts";
@@ -664,6 +664,8 @@ interface RpcChildResult extends ChildResult {
  * Uses `--mode rpc --no-session`, sends prompt via sendRpcCommand on stdin,
  * parses stdout as a JSON event stream. Stdin stays open for the session lifetime.
  */
+const _dlog = (msg: string) => { try { _appendFileSync("/tmp/cleave-trace.log", `[${Date.now()}] ${msg}\n`); } catch {} };
+
 async function spawnChildRpc(
 	prompt: string,
 	cwd: string,
@@ -685,6 +687,7 @@ async function spawnChildRpc(
 		const events: RpcChildEvent[] = [];
 		let pipeBroken = false;
 
+		_dlog(`spawnChildRpc: cmd=${omegon.command} cwd=${cwd} signal=${!!signal} signalAborted=${signal?.aborted}`);
 		const proc = spawn(omegon.command, args, {
 			cwd,
 			stdio: ["pipe", "pipe", "pipe"],
@@ -695,7 +698,13 @@ async function spawnChildRpc(
 				I_AM: "alpharius",
 			},
 		});
+		_dlog(`spawnChildRpc: pid=${proc.pid}`);
 		registerCleaveProc(proc);
+
+		proc.stdout?.on("data", (d) => _dlog(`stdout pid=${proc.pid} len=${d.length}`));
+		proc.stderr?.on("data", (d) => _dlog(`stderr pid=${proc.pid} len=${d.length} data=${d.toString().slice(0, 100)}`));
+		proc.on("error", (e) => _dlog(`error pid=${proc.pid} ${e.message}`));
+		proc.on("close", (code, sig) => _dlog(`close pid=${proc.pid} code=${code} sig=${sig}`));
 
 		// Send prompt via RPC command on stdin — keep stdin open
 		if (proc.stdin) {
@@ -952,6 +961,7 @@ export async function dispatchChildren(
 	onProgress?: (msg: string) => void,
 	reviewConfig?: ReviewConfig,
 ): Promise<void> {
+	_dlog(`dispatchChildren: entry signal=${!!signal} signalAborted=${signal?.aborted} children=${state.children.length}`);
 	const statusResult = await pi.exec("git", ["status", "--porcelain"], {
 		cwd: state.repoPath,
 		timeout: 5_000,
@@ -1178,8 +1188,8 @@ async function dispatchSingleChild(
 
 	// DEBUG: trace dispatch decision
 	try {
-		const { appendFileSync } = await import("node:fs");
-		appendFileSync("/tmp/cleave-dispatch-debug.log",
+		_dlog(`dispatchSingleChild: child=${child.label} tier=${effectiveTier} modelFlag=${modelFlag} useNative=${useNative} backend=${child.backend} useRpc=${useRpc} signal=${!!signal} signalAborted=${signal?.aborted}`);
+		_appendFileSync("/tmp/cleave-dispatch-debug.log",
 			`[${new Date().toISOString()}] child=${child.label} tier=${effectiveTier} modelFlag=${modelFlag} nativeAgent=${!!nativeAgent} nativeModelSpec=${nativeModelSpec} useNative=${useNative} backend=${child.backend} useRpc=${useRpc}\n`);
 	} catch {}
 
