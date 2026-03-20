@@ -7,9 +7,9 @@ on:
       - 'core/site/**'
       - 'core/install.sh'
       - 'core/CHANGELOG.md'
+      - 'site/**'
       - 'docs/**'
       - 'openspec/baseline/**'
-  # Also rebuild on release (CHANGELOG updated)
   release:
     types: [published]
 
@@ -23,8 +23,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Copy install.sh into site directory
-        run: cp core/install.sh core/site/install.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: site/package-lock.json
+
+      # Build Astro docs site
+      - name: Install site dependencies
+        run: cd site && npm ci
+
+      - name: Build design tree SVG
+        run: cd site && node scripts/build-design-tree.mjs
+
+      - name: Build Astro site
+        run: cd site && npx astro build
+
+      # Assemble container build context
+      - name: Prepare container build context
+        run: |
+          cp core/install.sh core/site/install.sh
+          cp -r site/dist core/site/docs-dist
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -43,7 +62,12 @@ jobs:
             ghcr.io/styrene-lab/omegon-site:sha-${{ github.sha }}
             ghcr.io/styrene-lab/omegon-site:latest
 
-      - name: Output deployment update
+      - name: Summary
         run: |
-          echo "::notice::New site image: ghcr.io/styrene-lab/omegon-site:sha-${{ github.sha }}"
-          echo "Update vanderlyn/apps/omegon-site/deployment.yaml with the new SHA."
+          echo "### Site Build" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** \`ghcr.io/styrene-lab/omegon-site:sha-${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Pages:** $(find site/dist -name '*.html' | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Design tree nodes:** $(grep -c '<circle' site/public/design-tree.svg)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "ArgoCD Image Updater will auto-deploy to omegon.styrene.dev." >> $GITHUB_STEP_SUMMARY

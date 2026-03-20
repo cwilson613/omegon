@@ -1,0 +1,29 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+<Docs title="Cleave Orchestrator" description="Parallel task execution via git worktrees with automatic merge and conflict detection.">
+  <h1>Cleave Orchestrator</h1>
+  <p>Cleave decomposes complex tasks into independent children that execute in parallel, each in an isolated git worktree (or jj workspace when co-located). Results are merged back with automatic conflict detection.</p>
+
+  <h2>How It Works</h2>
+  <ol>
+    <li><strong>Assess</strong> — <code>cleave_assess</code> evaluates task complexity. Below threshold → execute directly. Above → decompose.</li>
+    <li><strong>Plan</strong> — The agent produces a JSON plan with labeled children, file scopes, and dependency ordering.</li>
+    <li><strong>Dispatch</strong> — Each child runs in its own worktree/workspace with an isolated branch. Children can run in parallel or sequentially based on <code>depends_on</code>.</li>
+    <li><strong>Merge</strong> — Completed children are squash-merged back to the parent branch. Conflicts are detected and reported.</li>
+    <li><strong>Review</strong> — Optional adversarial review loop checks for bugs, security issues, and spec compliance.</li>
+  </ol>
+
+  <h2>Merge Policies</h2>
+  <table>
+    <thead><tr><th>Policy</th><th>Use Case</th><th>Method</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Squash</strong></td><td>Cleave children</td><td>Single commit, no diary noise in history</td></tr>
+      <tr><td><strong>Cleanup</strong></td><td>Feature branches</td><td>Cherry-pick real commits, drop ceremony</td></tr>
+      <tr><td><strong>No-FF</strong></td><td>Explicit merges</td><td>Merge commit preserving branch topology</td></tr>
+    </tbody>
+  </table>
+
+  <h2>jj Integration</h2>
+  <p>When jj is co-located (<code>.jj/</code> alongside <code>.git/</code>), cleave uses jj workspaces instead of git worktrees. This eliminates submodule initialization, provides lock-free concurrent access, and tracks changes automatically (no dirty tree concept).</p>
+</Docs>

@@ -1,7 +1,7 @@
 ---
 id: omegon-site-docs
 title: "omegon.styrene.dev/docs — documentation and architecture sub-site"
-status: decided
+status: implementing
 parent: omegon-install-site
 tags: [docs, site, architecture, marketing, astro]
 open_questions: []
@@ -94,3 +94,27 @@ Cons: Two rendering paths for the same content.
 ## Open Questions
 
 *No open questions.*
+
+## Implementation Notes
+
+### File Scope
+
+- `site/` (new) — New Astro project root (separate from core/site/ which is the landing page)
+- `site/astro.config.mjs` (new) — Astro config with markdown, content collections, base path
+- `site/src/content/config.ts` (new) — Content collection definitions for docs, skills, architecture
+- `site/src/layouts/Docs.astro` (new) — Docs layout with sidebar navigation, Alpharius theme
+- `site/src/pages/docs/[...slug].astro` (new) — Dynamic route for all doc pages
+- `site/src/pages/changelog.astro` (new) — Changelog page rendering CHANGELOG.md
+- `site/scripts/build-design-tree.mjs` (new) — Node script: reads docs/*.md frontmatter, generates force-directed SVG
+- `core/site/Containerfile` (modified) — Updated to COPY Astro dist output alongside landing page
+- `.github/workflows/site.yml` (modified) — Updated to run Astro build before container build
+
+### Constraints
+
+- Astro output must coexist with existing index.html and install.sh in the nginx container
+- Design tree SVG generated at build time from docs/*.md frontmatter
+- Skills rendered from skills/*/SKILL.md into /docs/skills/
+- CHANGELOG rendered from core/CHANGELOG.md into /changelog
+- Alpharius color palette must match the existing landing page CSS variables
+- No client-side JavaScript required for core docs reading (static HTML)
+- Container image stays under 50MB

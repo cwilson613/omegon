@@ -1,0 +1,20 @@
+{
+  "name": "omegon-site-docs",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "build": "node scripts/build-design-tree.mjs && astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "astro": "^5.7.0",
+    "@astrojs/sitemap": "^3.3.0"
+  },
+  "devDependencies": {
+    "gray-matter": "^4.0.3",
+    "d3-force": "^3.0.0",
+    "d3-scale": "^4.0.0"
+  }
+}

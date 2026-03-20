@@ -1,0 +1,35 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+<Docs title="Design Tree" description="A 185-node markdown knowledge graph tracking architecture decisions and implementation.">
+  <h1>Design Tree</h1>
+  <p>The design tree is a markdown-based knowledge graph stored in <code>docs/</code>. Each node is a markdown file with YAML frontmatter tracking status, tags, dependencies, and related nodes.</p>
+
+  <h2>Lifecycle</h2>
+  <p>Every design node follows a status lifecycle:</p>
+  <pre><code>seed → exploring → resolved → decided → implementing → implemented</code></pre>
+  <table>
+    <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>seed</code></td><td>Idea captured, no exploration yet</td></tr>
+      <tr><td><code>exploring</code></td><td>Actively researching, open questions exist</td></tr>
+      <tr><td><code>resolved</code></td><td>Questions answered, not yet formally decided</td></tr>
+      <tr><td><code>decided</code></td><td>Design approved, ready to implement</td></tr>
+      <tr><td><code>implementing</code></td><td>Code being written (bound to OpenSpec change)</td></tr>
+      <tr><td><code>implemented</code></td><td>Complete with passing tests</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Node Structure</h2>
+  <p>Each node can contain structured sections:</p>
+  <ul>
+    <li><strong>Research</strong> — findings with headings and content</li>
+    <li><strong>Decisions</strong> — choices with status (exploring/decided/rejected) and rationale</li>
+    <li><strong>Open Questions</strong> — unresolved unknowns that block progress</li>
+    <li><strong>Implementation Notes</strong> — file scope and constraints for the implementation phase</li>
+  </ul>
+
+  <h2>Scale</h2>
+  <p>The omegon project's design tree currently has <strong>185 nodes</strong>, with 126 implemented, 29 decided, and 19 still exploring. The tree captures every major architectural decision from the initial fork through the Rust agent loop, memory system, cleave orchestrator, and provider routing.</p>
+  <p><a href="/docs/architecture/graph">View the design graph →</a></p>
+</Docs>

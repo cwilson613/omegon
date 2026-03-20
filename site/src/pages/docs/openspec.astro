@@ -1,0 +1,34 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+<Docs title="OpenSpec Lifecycle" description="Spec-driven development: propose, specify, execute, verify, archive.">
+  <h1>OpenSpec Lifecycle</h1>
+  <p>OpenSpec is a spec-driven development workflow that ensures code is correct by defining what must be true <em>before</em> implementation begins.</p>
+
+  <h2>Lifecycle Stages</h2>
+  <pre><code>propose → spec → fast-forward → cleave → assess → archive</code></pre>
+  <table>
+    <thead><tr><th>Stage</th><th>Artifact</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Propose</strong></td><td><code>proposal.md</code></td><td>Intent, scope, and motivation</td></tr>
+      <tr><td><strong>Spec</strong></td><td><code>specs/*.md</code></td><td>Given/When/Then scenarios defining correct behavior</td></tr>
+      <tr><td><strong>Fast-Forward</strong></td><td><code>design.md</code> + <code>tasks.md</code></td><td>Architecture decisions and implementation plan</td></tr>
+      <tr><td><strong>Cleave</strong></td><td>Parallel children</td><td>Decompose tasks into parallel worktree executions</td></tr>
+      <tr><td><strong>Assess</strong></td><td><code>assessment.json</code></td><td>Verify specs are satisfied, adversarial review</td></tr>
+      <tr><td><strong>Archive</strong></td><td>Baseline specs</td><td>Merge specs to baseline, close the change</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Spec Format</h2>
+  <p>Specs use Given/When/Then scenarios that are precise enough to be falsifiable:</p>
+  <pre><code>### Requirement: Context class classification
+
+#### Scenario: Token count below 128k maps to Squad
+Given a token count of 100,000
+When classifyContextWindow is called
+Then the result is `Squad`</code></pre>
+  <p>Specs live in <code>openspec/changes/&lt;name&gt;/specs/</code> during development and merge to <code>openspec/baseline/</code> on archive.</p>
+
+  <h2>Design Tree Binding</h2>
+  <p>OpenSpec changes bind to design tree nodes via <code>design_tree_update(implement)</code>. This creates the change directory, scaffolds tasks from implementation notes, and tracks the full lifecycle from design decision through verified implementation.</p>
+</Docs>

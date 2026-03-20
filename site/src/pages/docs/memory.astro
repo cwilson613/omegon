@@ -1,0 +1,37 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+<Docs title="Project Memory" description="Persistent knowledge layer with semantic recall, episodes, and cross-session continuity.">
+  <h1>Project Memory</h1>
+  <p>Omegon maintains a durable knowledge layer per project. Facts, episodes, and edges persist across sessions, giving the agent continuity without re-discovering the same information each time.</p>
+
+  <h2>Memory Types</h2>
+  <table>
+    <thead><tr><th>Type</th><th>Purpose</th><th>Storage</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Facts</strong></td><td>Atomic knowledge units — decisions, patterns, constraints</td><td>SQLite + <code>facts.jsonl</code> (git-tracked)</td></tr>
+      <tr><td><strong>Episodes</strong></td><td>Session narratives — what happened, in what order, what was the outcome</td><td>SQLite (local only)</td></tr>
+      <tr><td><strong>Edges</strong></td><td>Relationships between facts — depends_on, contradicts, replaces</td><td>SQLite (local only)</td></tr>
+      <tr><td><strong>Working Memory</strong></td><td>Pinned facts that survive context compaction</td><td>In-memory (session-scoped)</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Retrieval</h2>
+  <ul>
+    <li><code>memory_query</code> — Load all active facts (full context picture)</li>
+    <li><code>memory_recall(query)</code> — Semantic search via embeddings, ranked by relevance × confidence</li>
+    <li><code>memory_episodes(query)</code> — Search past session narratives</li>
+    <li><code>memory_focus(ids)</code> — Pin specific facts to working memory</li>
+  </ul>
+
+  <h2>Lifecycle</h2>
+  <ul>
+    <li><strong>Store</strong> — <code>memory_store</code> persists a conclusion (not investigation steps)</li>
+    <li><strong>Supersede</strong> — <code>memory_supersede</code> atomically replaces an outdated fact</li>
+    <li><strong>Archive</strong> — <code>memory_archive</code> removes stale facts (searchable in archive)</li>
+    <li><strong>Decay</strong> — Unreferenced facts gradually lose relevance score</li>
+  </ul>
+
+  <h2>Cross-Session Transport</h2>
+  <p><code>facts.jsonl</code> is exported on session end and tracked in git. On next session start, facts are imported from the JSONL file into the local SQLite database. This means facts travel with the repository — clone the repo, get the project's accumulated knowledge.</p>
+</Docs>

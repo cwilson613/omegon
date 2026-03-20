@@ -1,0 +1,71 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+
+<Docs title="Introduction" description="Omegon — native AI agent harness. Single binary, zero dependencies, full autonomy.">
+  <h1>Omegon</h1>
+  <p>
+    Native AI agent harness — for agents, by agents.
+    Single binary. Zero dependencies. Full autonomy.
+  </p>
+
+  <h2>What is Omegon?</h2>
+  <p>
+    Omegon is a terminal-native AI coding agent that ships as a single ~12MB binary.
+    It provides a complete development environment with parallel task execution,
+    persistent project memory, spec-driven development lifecycle, and a design
+    exploration tree — all running locally with no external dependencies.
+  </p>
+
+  <h2>Three-Axis Routing Model</h2>
+  <p>
+    Omegon organizes inference along three independent axes, giving operators
+    fine-grained control over capability, cost, and context:
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Axis</th>
+        <th>Values</th>
+        <th>Controls</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Capability Tier</strong></td>
+        <td>local → retribution → victory → gloriana</td>
+        <td>Which model family to use</td>
+      </tr>
+      <tr>
+        <td><strong>Thinking Level</strong></td>
+        <td>Servitor → Functionary → Adept → Magos → Archmagos</td>
+        <td>Extended reasoning budget</td>
+      </tr>
+      <tr>
+        <td><strong>Context Class</strong></td>
+        <td>Squad (128k) → Maniple (272k) → Clan (400k) → Legion (1M)</td>
+        <td>Context window capacity</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Key Features</h2>
+  <ul>
+    <li><strong>Parallel Execution</strong> — Cleave tasks into parallel worktree children with automatic merge and conflict detection</li>
+    <li><strong>Project Memory</strong> — Persistent facts, episodes, and semantic recall across sessions. 1800+ facts in the omegon project itself</li>
+    <li><strong>Design Tree</strong> — 185-node knowledge graph tracking design decisions, dependencies, and implementation status</li>
+    <li><strong>OpenSpec Lifecycle</strong> — Spec-driven development: propose → spec → fast-forward → cleave → assess → archive</li>
+    <li><strong>Live Dashboard</strong> — Terminal TUI + web dashboard with real-time WebSocket protocol</li>
+    <li><strong>Provider Resilience</strong> — Automatic failover, rate-limit cooldowns, and context-aware downgrade policy</li>
+  </ul>
+
+  <h2>Quick Start</h2>
+  <pre><code>curl -fsSL https://omegon.styrene.dev/install.sh | sh
+
+# With API key:
+export ANTHROPIC_API_KEY="sk-ant-..."
+omegon
+
+# With Claude Pro/Max subscription:
+omegon login</code></pre>
+</Docs>

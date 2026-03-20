@@ -1,0 +1,55 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+
+<Docs title="Installation" description="Install omegon on macOS or Linux.">
+  <h1>Installation</h1>
+
+  <h2>Quick Install</h2>
+  <pre><code>curl -fsSL https://omegon.styrene.dev/install.sh | sh</code></pre>
+  <p>This downloads the latest release for your platform, verifies the SHA-256 checksum, and installs to <code>/usr/local/bin</code>.</p>
+
+  <h2>Options</h2>
+  <table>
+    <thead>
+      <tr><th>Environment Variable</th><th>Default</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>INSTALL_DIR</code></td><td><code>/usr/local/bin</code></td><td>Installation directory</td></tr>
+      <tr><td><code>VERSION</code></td><td>latest</td><td>Pin a specific release (e.g. <code>v0.14.0</code>)</td></tr>
+      <tr><td><code>NO_COLOR</code></td><td>unset</td><td>Disable colored output</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Install to home directory</h3>
+  <pre><code>INSTALL_DIR=~/.local/bin curl -fsSL https://omegon.styrene.dev/install.sh | sh</code></pre>
+
+  <h3>Pin a version</h3>
+  <pre><code>VERSION=v0.14.0 curl -fsSL https://omegon.styrene.dev/install.sh | sh</code></pre>
+
+  <h2>Supported Platforms</h2>
+  <table>
+    <thead>
+      <tr><th>OS</th><th>Architecture</th><th>Artifact</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>macOS</td><td>Apple Silicon (arm64)</td><td><code>omegon-darwin-arm64.tar.gz</code></td></tr>
+      <tr><td>macOS</td><td>Intel (x86_64)</td><td><code>omegon-darwin-x64.tar.gz</code></td></tr>
+      <tr><td>Linux</td><td>x86_64</td><td><code>omegon-linux-x64.tar.gz</code></td></tr>
+      <tr><td>Linux</td><td>arm64 / aarch64</td><td><code>omegon-linux-arm64.tar.gz</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Authentication</h2>
+  <p>Omegon supports two authentication methods:</p>
+  <h3>API Key</h3>
+  <pre><code>export ANTHROPIC_API_KEY="sk-ant-..."
+omegon</code></pre>
+
+  <h3>OAuth (Claude Pro/Max subscription)</h3>
+  <pre><code>omegon login</code></pre>
+  <p>This opens a browser for OAuth authentication. Your session persists across restarts.</p>
+
+  <h2>Manual Download</h2>
+  <p>Download release artifacts directly from <a href="https://github.com/styrene-lab/omegon-core/releases">GitHub Releases</a>.</p>
+</Docs>

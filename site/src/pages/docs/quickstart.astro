@@ -1,0 +1,64 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+
+<Docs title="Quick Start" description="Get productive with omegon in 5 minutes.">
+  <h1>Quick Start</h1>
+
+  <h2>1. Install</h2>
+  <pre><code>curl -fsSL https://omegon.styrene.dev/install.sh | sh</code></pre>
+
+  <h2>2. Authenticate</h2>
+  <pre><code># API key (Anthropic or OpenAI):
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Or OAuth (Claude Pro/Max):
+omegon login</code></pre>
+
+  <h2>3. Start a Session</h2>
+  <pre><code># Interactive mode (default):
+omegon
+
+# One-shot prompt:
+omegon --prompt "explain this codebase"
+
+# Resume last session:
+omegon --resume</code></pre>
+
+  <h2>4. Key Commands</h2>
+  <table>
+    <thead>
+      <tr><th>Command</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>/effort</code></td><td>View or change inference tier (Servitor → Omnissiah)</td></tr>
+      <tr><td><code>/context</code></td><td>Inspect context class routing state, pin floor</td></tr>
+      <tr><td><code>/providers</code></td><td>Show provider auth status and routing summary</td></tr>
+      <tr><td><code>/dashboard</code></td><td>Toggle the live TUI dashboard overlay</td></tr>
+      <tr><td><code>/cleave</code></td><td>Decompose and parallelize a complex task</td></tr>
+      <tr><td><code>/init</code></td><td>Initialize project memory and orientation</td></tr>
+    </tbody>
+  </table>
+
+  <h2>5. Project Memory</h2>
+  <p>
+    Omegon automatically builds a persistent knowledge layer for your project.
+    Facts, decisions, and patterns survive across sessions. The agent uses
+    <code>memory_store</code>, <code>memory_recall</code>, and <code>memory_query</code>
+    tools to maintain context continuity.
+  </p>
+  <p>
+    Memory is stored in <code>.pi/memory/</code> in your project directory.
+    The <code>facts.jsonl</code> file is tracked in git for cross-session portability.
+  </p>
+
+  <h2>6. Design Tree</h2>
+  <p>
+    The design tree is a markdown-based knowledge graph in <code>docs/</code>.
+    Each node has a status lifecycle: <code>seed → exploring → resolved → decided → implementing → implemented</code>.
+  </p>
+  <p>
+    The agent uses <code>design_tree</code> and <code>design_tree_update</code> tools
+    to explore, decide, and track implementation of architectural decisions.
+  </p>
+</Docs>

@@ -1,0 +1,68 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+
+<Docs title="Three-Axis Model" description="Capability tier, thinking level, and context class — three orthogonal axes for inference control.">
+  <h1>Three-Axis Routing Model</h1>
+  <p>
+    Omegon organizes inference along three independent axes. Each axis can be
+    adjusted without affecting the others, giving operators fine-grained control
+    over capability, cost, and context capacity.
+  </p>
+
+  <h2>Axis 1: Capability Tier</h2>
+  <p>Controls <em>which model</em> to use. Higher tiers use more capable (and expensive) models.</p>
+  <table>
+    <thead><tr><th>Tier</th><th>Role</th><th>Use Case</th></tr></thead>
+    <tbody>
+      <tr><td><code>local</code></td><td>Servitor</td><td>On-device Ollama models. Zero API cost.</td></tr>
+      <tr><td><code>retribution</code></td><td>Adept</td><td>Fast cloud models (Haiku, GPT-5.1). Simple lookups, formatting.</td></tr>
+      <tr><td><code>victory</code></td><td>Magos</td><td>Capable cloud models (Sonnet, GPT-5.3). Routine coding.</td></tr>
+      <tr><td><code>gloriana</code></td><td>Archmagos</td><td>Frontier models (Opus, GPT-5.4). Architecture, complex debugging.</td></tr>
+    </tbody>
+  </table>
+  <p>The agent adjusts its own tier using <code>set_model_tier</code>, or operators use <code>/effort</code> to set a tier ceiling.</p>
+
+  <h2>Axis 2: Thinking Level</h2>
+  <p>Controls <em>how much reasoning</em> the model does before responding. Higher levels allocate more tokens for internal deliberation.</p>
+  <table>
+    <thead><tr><th>Level</th><th>Cognition Name</th><th>Token Budget</th><th>Use Case</th></tr></thead>
+    <tbody>
+      <tr><td><code>off</code></td><td>Servitor</td><td>—</td><td>No extended thinking. Fastest.</td></tr>
+      <tr><td><code>minimal</code></td><td>Functionary</td><td>~2k</td><td>Light reasoning for simple tasks.</td></tr>
+      <tr><td><code>low</code></td><td>Adept</td><td>~5k</td><td>Straightforward execution.</td></tr>
+      <tr><td><code>medium</code></td><td>Magos</td><td>~10k</td><td>General development work.</td></tr>
+      <tr><td><code>high</code></td><td>Archmagos</td><td>~50k</td><td>Complex debugging, architecture decisions.</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Thinking level and capability tier are orthogonal:
+    <code>victory</code> + <code>high</code> is cheaper than <code>gloriana</code> + <code>medium</code>
+    for tasks that need careful reasoning but not a frontier model.
+  </p>
+
+  <h2>Axis 3: Context Class</h2>
+  <p>Controls <em>how much context</em> the session can hold. Named after formation scales.</p>
+  <table>
+    <thead><tr><th>Class</th><th>Window</th><th>Typical Models</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Squad</strong></td><td>128k tokens</td><td>Copilot Claude routes, small local models</td></tr>
+      <tr><td><strong>Maniple</strong></td><td>272k tokens</td><td>OpenAI GPT-5.4, GPT-5.3</td></tr>
+      <tr><td><strong>Clan</strong></td><td>400k tokens</td><td>GPT-5.4 mini, Copilot GPT routes</td></tr>
+      <tr><td><strong>Legion</strong></td><td>1M+ tokens</td><td>Anthropic Claude (Opus/Sonnet), GPT-5.4 Pro</td></tr>
+    </tbody>
+  </table>
+  <p>
+    The harness tracks the session's <em>required context floor</em> — the minimum context class
+    the session can tolerate without losing critical information. Downgrades that cross this
+    floor require explicit operator confirmation.
+  </p>
+  <p>Use <code>/context</code> to inspect the current routing state and <code>/context pin Clan</code> to lock the floor.</p>
+
+  <h2>Route Matrix</h2>
+  <p>
+    Omegon ships with a reviewed route matrix mapping every known provider/model combination
+    to its context ceiling and capability tier. This matrix is compiled into the binary and
+    updated through a scheduled refresh pipeline — runtime routing never trusts live provider claims.
+  </p>
+</Docs>

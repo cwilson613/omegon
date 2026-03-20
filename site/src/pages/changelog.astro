@@ -1,0 +1,35 @@
+---
+import Docs from "../layouts/Docs.astro";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+// Read CHANGELOG.md and convert to HTML with basic markdown rules
+const changelogPath = join(process.cwd(), "..", "core", "CHANGELOG.md");
+let raw = "";
+try {
+  raw = readFileSync(changelogPath, "utf-8");
+} catch {
+  raw = "# Changelog\n\n*Not available during this build.*";
+}
+
+// Simple markdown → HTML (headers, lists, code, bold, links)
+function md(text: string): string {
+  return text
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/(<li>.*<\/li>\n?)+/gs, '<ul>$&</ul>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/^(?!<[hul])/gm, '');
+}
+
+const html = md(raw);
+---
+
+<Docs title="Changelog" description="Release history for omegon.">
+  <Fragment set:html={html} />
+</Docs>
