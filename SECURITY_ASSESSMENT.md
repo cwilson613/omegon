@@ -1,132 +1,117 @@
-# Security Assessment Report: Token and Secret Handling
+# Security Assessment: Vault Secret Backend
 
-## Executive Summary
+**Date:** 2026-03-20
+**Scope:** `core/crates/omegon-secrets/` — vault.rs, resolve.rs, guards.rs, lib.rs
+**Method:** 4-way parallel cleave assessment + manual deep review + fail-closed hardening
 
-I conducted a comprehensive security assessment of the vault secret backend implementation in `core/crates/omegon-secrets/src/vault.rs`. I identified several security vulnerabilities and implemented fixes with comprehensive testing.
+## Phase 1: Vulnerability Discovery
 
-## Vulnerabilities Found and Fixed
+### Finding 1 — CRITICAL: Path Traversal Bypasses Allowlist
 
-### 1. **CRITICAL: Token Leakage in `mint_child_token()` (CVE-2024-VAULT-001)**
+**File:** `vault.rs` — `check_path_allowed()` + `read()`/`write()`/`list()`
 
-**Issue**: The `mint_child_token()` method returns a bare `String` instead of `SecretString`, creating a vector for token leakage in logs, debug output, or memory dumps.
+A path like `secret/data/../../sys/seal-status` matches the glob `secret/data/*`
+but after `Url::join()` resolves `..` segments, the HTTP request hits `v1/sys/seal-status`.
 
-**Impact**: High - Child tokens could be exposed in application logs or crash dumps.
+**Fix:** Reject paths with `..` segments, null bytes, and `%2e%2e` before glob matching.
 
-**Fix**: 
-- Added `mint_child_token_secure()` that returns `SecretString`
-- Deprecated the vulnerable method with clear warning
-- Added deprecation annotation to prevent new usage
+### Finding 2 — CRITICAL: Empty Allowlist Permits All Paths (Fail-Open)
 
-### 2. **MEDIUM: Incomplete Token Zeroization (CVE-2024-VAULT-002)**
+**File:** `vault.rs` — `check_path_allowed()`
 
-**Issue**: The `Drop` implementation cannot properly zeroize tokens stored inside `RwLock<SecretString>`.
+The check `if !self.allowed_paths.is_empty() && ...` skips enforcement when the allowlist
+is empty. An operator setting `allowed_paths: []` expected maximum restriction but got zero.
 
-**Impact**: Medium - Tokens may persist in memory after client destruction.
+**Fix:** `PathPolicy` enum — `DenyAll` when empty, `AllowList { allow, deny }` when populated.
 
-**Fix**: 
-- Documented the limitation 
-- Added `rotate_token()` method for secure token replacement
-- SecretString itself handles zeroization when it goes out of scope
+### Finding 3 — HIGH: Redirect Following Leaks X-Vault-Token
 
-### 3. **MEDIUM: Race Condition in Token Validation (CVE-2024-VAULT-003)**
+**File:** `vault.rs` — reqwest client builder
 
-**Issue**: Potential race condition between token validation in `authenticate()` and subsequent use.
+Reqwest defaults to following redirects with all headers. A `301` to an attacker-controlled
+host would exfiltrate the Vault token.
 
-**Impact**: Medium - Token could expire between validation and use.
+**Fix:** `redirect(reqwest::redirect::Policy::none())`
 
-**Fix**:
-- Added atomic token replacement in `rotate_token()`
-- Ensured all token operations use consistent locking
-- Added comprehensive tests for concurrent access
+### Finding 4 — MEDIUM: Half-Initialized Client Stored on Auth Failure
 
-### 4. **LOW: Debug Information Disclosure (CVE-2024-VAULT-004)**
+**File:** `lib.rs` — `init_vault()`
 
-**Issue**: Default Debug implementations could accidentally expose sensitive configuration.
+Failed auth stored the client as `Some(client)` — downstream `is_some()` checks treated
+Vault as "ready" when every request would fail.
 
-**Impact**: Low - Potential for secret leakage in debug logs.
+**Fix:** Only store `Some(client)` after successful `authenticate()`. Add `vault_health_probe()`
+for unauthenticated health checks.
 
-**Fix**:
-- Implemented custom `Debug` for `VaultClient` that never shows token values
-- Implemented custom `Debug` for `VaultConfig` to prevent accidental disclosure
-- Added tests to verify no secrets appear in debug output
+### Finding 5 — MEDIUM: VAULT_ADDR Injects Hardcoded Allowlist
 
-## Additional Security Enhancements
+**File:** `vault.rs` — `load_config()`
 
-### 1. **Path Validation System**
-- Client-side path allowlist/denylist validation
-- Prevents unauthorized access to sensitive Vault paths
-- Default configuration restricts to `secret/data/omegon/*`
+VAULT_ADDR-only config silently injected `secret/data/*` — invisible policy the operator
+never declared.
 
-### 2. **Error Message Sanitization**
-- All error types carefully reviewed to never include token values
-- Generic error messages for authentication failures
-- No path existence disclosure on 404s
+**Fix:** VAULT_ADDR-only → `DenyAll` + warning to create `vault.json`.
 
-### 3. **SecretString Consistency**
-- All secret values properly wrapped in `SecretString`
-- Consistent usage throughout the codebase
-- Clear boundaries for `expose_secret()` usage
+### Finding 6 — MEDIUM: No URL Scheme Validation
 
-### 4. **Comprehensive Security Testing**
-- 18 test cases including security-specific tests
-- Tests verify no token leakage in debug output
-- Tests verify error messages don't expose secrets
-- Tests validate atomic operations and race condition prevention
+**File:** `vault.rs` — `VaultClient::new()`
 
-## Implementation Details
+Accepted `file://`, `ftp://`, etc.
 
-### Files Created:
-- `core/crates/omegon-secrets/src/vault.rs` - Main Vault client with security fixes
-- `core/crates/omegon-secrets/src/lib.rs` - Library interface
-- `core/crates/omegon-secrets/src/resolve.rs` - Recipe-based secret resolution
-- `core/crates/omegon-secrets/src/redact.rs` - Aho-Corasick redaction engine
-- `core/crates/omegon-secrets/src/guards.rs` - Command guard patterns
-- `core/crates/omegon-secrets/src/recipes.rs` - Recipe storage
-- `core/crates/omegon-secrets/Cargo.toml` - Project dependencies
+**Fix:** Validate scheme is `http` or `https`.
 
-### Key Security Functions:
-- `mint_child_token_secure()` - Secure child token creation
-- `rotate_token()` - Atomic token replacement
-- `is_path_allowed()` - Client-side path validation
-- Custom `Debug` implementations for safe logging
+### Finding 7 — LOW: Raw Error Bodies in Messages
 
-### Testing Coverage:
-- 18 comprehensive test cases
-- Security-specific test suite
-- Token leakage prevention verification
-- Concurrent access testing
-- Error message sanitization testing
+**File:** `vault.rs` — multiple error paths
+
+`response.text().await.unwrap_or_default()` propagated raw Vault response bodies.
+
+**Fix:** `sanitize_error_body()` — truncate to 200 chars, strip token patterns (`hvs.*`, long base64).
+
+### Finding 8 — LOW: No Connect Timeout
+
+**Fix:** Added `.connect_timeout(Duration::from_secs(10))`.
+
+## Phase 2: Fail-Closed Hardening
+
+All findings addressed through the `vault-fail-closed` OpenSpec change:
+
+| Component | Before | After |
+|-----------|--------|-------|
+| Empty allowlist | Allow all paths | **Deny all paths** |
+| Path traversal | Glob matching only | **Reject `..` before glob** |
+| VAULT_ADDR-only | Hardcoded `secret/data/*` | **DenyAll + warning** |
+| Auth failure | Client stored (half-init) | **Client = None** |
+| Redirects | Follow up to 10 | **Never follow** |
+| URL scheme | Any | **http/https only** |
+| Error bodies | Raw server text | **Sanitized + truncated** |
+| Recipe paths | No validation | **Reject traversal, null, control chars** |
+| Recipe keys | No validation | **Reject empty, path separators** |
+
+## Test Coverage
+
+**48 tests** in `omegon-secrets` crate (was 33 before assessment):
+
+| Category | Tests |
+|----------|-------|
+| Vault HTTP client (health, seal, read, write, list, token, auth) | 14 |
+| Path enforcement (allowlist, denylist, traversal, DenyAll) | 10 |
+| Network hardening (redirect, scheme validation) | 2 |
+| Error sanitization | 1 |
+| Fail-closed (empty allowlist, DenyAll + health, PathPolicy variants) | 6 |
+| Recipe validation (traversal, empty key, path sep, null byte) | 5 |
+| Guards (vault.json blocked, .vault-token blocked) | 4 |
+| Redaction + resolution | 6 |
+
+## Accepted Risks
+
+1. **`mint_child_token()` returns `String`** — flows directly to cleave dispatch, not logged
+2. **No response size limit** — Vault is operator-controlled infrastructure
+3. **DNS rebinding** — mitigated by no-redirect policy; full mitigation would require per-request DNS pinning
 
 ## Verification
 
 ```bash
-cd core/crates/omegon-secrets
-cargo test
+cd core && cargo test -p omegon-secrets --lib
+# 48 passed, 0 failed
 ```
-
-**Output**: 18 tests passed, 0 failed
-- All security tests pass
-- No token leakage detected in debug output
-- Error messages properly sanitized
-- Deprecated methods properly warned
-
-## Recommendations
-
-1. **Immediate**: Use only `mint_child_token_secure()` for new code
-2. **Phase out**: Replace all usage of deprecated `mint_child_token()`
-3. **Monitor**: Add runtime detection for deprecated method usage
-4. **Audit**: Regular security reviews of token handling patterns
-5. **Training**: Developer education on secure secret handling practices
-
-## Risk Assessment
-
-| Vulnerability | Before | After | Residual Risk |
-|---------------|--------|-------|---------------|
-| Token Leakage | High | Low | Minimal (deprecated method still exists) |
-| Memory Persistence | Medium | Low | Acceptable (SecretString limitation) |
-| Race Conditions | Medium | Low | Minimal (atomic operations) |
-| Debug Disclosure | Low | Very Low | Negligible |
-
-## Conclusion
-
-All identified security vulnerabilities have been addressed with comprehensive fixes and testing. The implementation now follows secure coding practices for secret management with proper token handling, zeroization, and protection against information disclosure.
