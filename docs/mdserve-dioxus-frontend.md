@@ -1,7 +1,7 @@
 ---
 id: mdserve-dioxus-frontend
 title: "mdserve: Dioxus WASM frontend — lifecycle/intelligence views"
-status: seed
+status: deferred
 parent: markdown-viewport
 dependencies: [mdserve-lifecycle-backend]
 related: [native-plan-mode]

@@ -1,7 +1,7 @@
 ---
 id: pikit-auspex-extension
 title: "Omegon: auspex extension — visualization daemon bridge"
-status: seed
+status: deferred
 parent: markdown-viewport
 related: [omega]
 tags: [Omegon, extension, auspex, bridge]

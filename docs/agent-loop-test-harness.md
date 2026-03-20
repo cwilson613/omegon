@@ -1,7 +1,7 @@
 ---
 id: agent-loop-test-harness
 title: Agent loop test harness — mock LlmBridge and deterministic state machine testing
-status: resolved
+status: implemented
 parent: rust-agent-loop
 open_questions: []
 ---

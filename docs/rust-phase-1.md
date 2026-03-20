@@ -1,7 +1,7 @@
 ---
 id: rust-phase-1
 title: "Phase 1 — Process inversion: Rust binary becomes the process owner, TS becomes subprocess"
-status: resolved
+status: implemented
 parent: rust-agent-loop
 tags: [rust, phase-1, process-inversion, tui-bridge, strategic]
 open_questions: []

@@ -1,7 +1,7 @@
 ---
 id: lifecycle-native-loop
 title: Lifecycle-native agent loop — design, spec, decomposition as cognitive modes, not external tools
-status: resolved
+status: implemented
 parent: rust-agent-loop
 tags: [rust, architecture, lifecycle, design-tree, openspec, cleave, cognitive-modes, strategic]
 open_questions: []

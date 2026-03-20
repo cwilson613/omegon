@@ -1,7 +1,7 @@
 ---
 id: mdserve-lifecycle-backend
 title: "mdserve: Lifecycle data model + /api/ backend"
-status: seed
+status: deferred
 parent: markdown-viewport
 open_questions:
   - What is the right decomposition into implementation child nodes?

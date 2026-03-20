@@ -1,7 +1,7 @@
 ---
 id: splash-screen
 title: "Branded splash/loading screen for Omegon startup"
-status: resolved
+status: deferred
 tags: [ux, tui, startup]
 open_questions: []
 ---

@@ -1,7 +1,7 @@
 ---
 id: memory-optimization-pass
 title: Project Memory System Optimization
-status: resolved
+status: deferred
 tags: [performance, memory, subprocess]
 open_questions: []
 ---

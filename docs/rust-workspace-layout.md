@@ -1,7 +1,7 @@
 ---
 id: rust-workspace-layout
 title: Rust workspace layout — crate organization for the agent loop and feature crates
-status: resolved
+status: implemented
 parent: rust-agent-loop
 open_questions: []
 ---

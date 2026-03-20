@@ -1,7 +1,7 @@
 ---
 id: rust-wire-existing-tools
 title: Wire existing Rust tool implementations as registered tools
-status: resolved
+status: implemented
 parent: ts-to-rust-migration
 open_questions: []
 ---

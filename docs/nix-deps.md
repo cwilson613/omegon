@@ -1,7 +1,7 @@
 ---
 id: nix-deps
 title: Nix as Unified Dependency Manager
-status: exploring
+status: deferred
 tags: [infra, bootstrap, cross-platform]
 open_questions:
   - "Should Nix be the only install path, or a preferred-first with brew/apt fallback?"

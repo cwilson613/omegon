@@ -1,7 +1,7 @@
 ---
 id: tui-visual-system
 title: TUI visual system — conversation view, event cards, widget primitives
-status: resolved
+status: implemented
 parent: harness-honest-assessment
 tags: [tui, ratatui, visual, conversation]
 open_questions: []

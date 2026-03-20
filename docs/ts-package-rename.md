@@ -1,7 +1,7 @@
 ---
 id: ts-package-rename
 title: "Rename TS Omegon npm package from `omegon` to `omegon-pi`"
-status: resolved
+status: implemented
 tags: [npm, breaking-change, distribution]
 open_questions: []
 ---

@@ -1,7 +1,7 @@
 ---
 id: omegon-directive-authority
 title: Omegon directive authority — code-level opinions over filesystem discovery
-status: seed
+status: implemented
 parent: test-coverage-directive-gap
 tags: [architecture, directives, system-prompt, opinions, authority]
 open_questions: []
@@ -20,6 +20,13 @@ Medium-term: session_start engineering standards injection via sendMessage.
 Long-term (Omega): coordinator owns the system prompt composition with explicit priority layering.
 
 See research in parent node (test-coverage-directive-gap) for the full directive provenance audit.
+
+## Decisions
+
+### Decision: Subsumed by Lex Imperialis in core-directives
+
+**Status:** decided
+**Rationale:** The Lex Imperialis (6 constitutional directives embedded at compile time in prompt.rs) is the implementation of this concept. Code-level opinions are now baked into the binary via include_str!(), not discovered from the filesystem. See core-directives node.
 
 ## Open Questions
 

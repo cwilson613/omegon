@@ -1,7 +1,7 @@
 ---
 id: cleave-child-dispatch-quality
 title: Cleave child dispatch quality — progress visibility, prerequisite prompting, and submodule awareness
-status: exploring
+status: implemented
 tags: [cleave, dx, submodules]
 open_questions: []
 issue_type: epic

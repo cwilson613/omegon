@@ -1,7 +1,7 @@
 ---
 id: mdserve-nix-distribution
 title: "mdserve: Nix flake + packaging"
-status: seed
+status: deferred
 parent: markdown-viewport
 dependencies: [mdserve-dioxus-frontend]
 tags: [nix, distribution, packaging, rust]

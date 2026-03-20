@@ -1,7 +1,7 @@
 ---
 id: harness-honest-assessment
 title: Honest assessment — what the harness actually feels like from inside, March 2026
-status: resolved
+status: deferred
 parent: rust-agent-loop
 tags: [introspective, assessment, harness, ux, agent-experience]
 open_questions:
