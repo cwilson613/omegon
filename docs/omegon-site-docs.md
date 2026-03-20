@@ -1,7 +1,7 @@
 ---
 id: omegon-site-docs
 title: "omegon.styrene.dev/docs — documentation and architecture sub-site"
-status: implementing
+status: implemented
 parent: omegon-install-site
 tags: [docs, site, architecture, marketing, astro]
 open_questions: []

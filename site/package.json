@@ -9,12 +9,11 @@
     "preview": "astro preview"
   },
   "dependencies": {
+    "@astrojs/sitemap": "^3.3.0",
     "astro": "^5.7.0",
-    "@astrojs/sitemap": "^3.3.0"
+    "markdown-it": "^14.1.1"
   },
   "devDependencies": {
-    "gray-matter": "^4.0.3",
-    "d3-force": "^3.0.0",
-    "d3-scale": "^4.0.0"
+    "gray-matter": "^4.0.3"
   }
 }

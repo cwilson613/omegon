@@ -142,8 +142,14 @@ for (const node of nodes) {
   const pos = positions.get(node.id);
   if (!pos) continue;
   const color = STATUS_COLORS[node.status] || "#405870";
-  const shortTitle =
+  const rawTitle =
     node.title.length > 28 ? node.title.slice(0, 26) + "…" : node.title;
+  // Escape XML entities to prevent invalid SVG
+  const shortTitle = rawTitle
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
   svgParts.push(`<circle cx="${pos.x - 60}" cy="${pos.y}" r="${NODE_R}" fill="${color}"/>`);
   svgParts.push(`<text x="${pos.x - 52}" y="${pos.y + 3}">${shortTitle}</text>`);
 }
