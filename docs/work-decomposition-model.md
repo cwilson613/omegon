@@ -3,11 +3,7 @@ id: work-decomposition-model
 title: "Work decomposition model — beyond the cleave/execute dichotomy"
 status: exploring
 tags: [architecture, cleave, core]
-open_questions:
-  - "Should the assessment output a strategy (phased plan with modes) rather than a binary cleave/execute decision?"
-  - Can scope-graph conflict detection replace or augment the current pattern-matching complexity heuristic?
-  - "What's the migration path from the current binary model to the spectrum model without breaking existing /cleave usage?"
-  - Does phased execution (mode 2) need new infrastructure or can it be implemented as guidance to the in-session agent?
+open_questions: []
 issue_type: epic
 priority: 1
 ---
@@ -48,9 +44,41 @@ The DSM and coupling metrics need a structural model of the codebase. This model
 
 ```\nInput:\n  - directive (text)\n  - scope (file paths, from OpenSpec or inferred)\n  - structural_model (from /init, optional)\n  - infrastructure_constraints (submodules, monorepo layout)\n\nStep 1: SCOPE RESOLUTION\n  If scope provided (OpenSpec): use it directly\n  If no scope: infer from directive + structural model\n    - Pattern match directive to modules (current heuristic, but output is modules not a score)\n    - If no structural model: fall back to file path extraction from directive text\n\nStep 2: DEPENDENCY ANALYSIS\n  Build scope-DSM: NxN matrix where N = scope modules\n  For each pair (A, B):\n    - Direct dependency: A imports/uses B → cell = 1\n    - Shared file: A and B modify same file → cell = 2 (merge conflict risk)\n    - Submodule boundary: A and B in different git repos → flag\n  Source: structural model if available, else quick `grep` pass over scope files\n\nStep 3: DSM PARTITIONING\n  Apply Tarjan's algorithm to find strongly-connected components (cycles)\n  Merge cycles into single work units (can't parallelize within a cycle)\n  Topological sort remaining DAG → natural wave order\n  Identify bus modules (high afferent coupling) → foundation wave\n\nStep 4: STRATEGY SELECTION\n  Metrics from the partitioned DSM:\n    - parallel_groups: number of independent clusters after partitioning\n    - max_wave_depth: longest dependency chain\n    - conflict_density: ratio of shared-file edges to total edges\n    - total_scope_size: number of files\n\n  Decision matrix:\n    total_scope_size ≤ 3 → DIRECT EXECUTION\n    conflict_density > 0.5 → PHASED EXECUTION (too many shared files for parallel)\n    parallel_groups ≤ 1 → SEQUENTIAL CHILDREN (everything depends on everything)\n    parallel_groups ≥ 2 AND conflict_density ≤ 0.3 → PARALLEL CLEAVE\n    analysis separable from implementation → LIGHTWEIGHT DELEGATION + one of above\n\nStep 5: PLAN GENERATION\n  Output a strategy plan:\n    phases: [{mode, children, estimated_effort}]\n    critical_path: [module names in order]\n    infrastructure_warnings: [submodule, merge risk, etc.]\n    estimated_total_time: CPM calculation\n```\n\nThis replaces `systems × (1 + 0.5 × modifiers) > 2.0 → cleave`. The output is a plan, not a boolean."
 
+### Memory system as the structural model — not a parallel store
+
+The memory system already has everything the DSM needs:\n\n### What exists today\n- **2230 active facts** across Architecture (349), Decisions (504), Constraints (385), Known Issues (330)\n- **Edges table** with relation, confidence, decay, bidirectional indexing — fully schema'd, zero edges populated\n- **Semantic search** via embeddings (memory_recall) — can find facts relevant to any scope\n- **FTS5 full-text search** as fallback\n- **Global extraction pipeline** that already supports `connect` actions to create edges\n- **Cross-session persistence** via facts.jsonl sync\n\n### What's missing: structural facts\nThe memory system stores KNOWLEDGE facts ('Vault client lives in omegon-secrets'). It doesn't store STRUCTURAL facts ('omegon-secrets/vault.rs imports from omegon-secrets/resolve.rs'). The structural model from /init should be stored AS memory facts in a dedicated section (e.g., 'Structure') with edges:\n\n```\nFact A: 'Module: core/crates/omegon-secrets — Rust crate, 6 source files'\nFact B: 'Module: core/crates/omegon — Rust crate, binary, 30+ source files'\nEdge: A →[depends_on]→ B (description: 'omegon depends on omegon-secrets')\n\nFact C: 'File: core/crates/omegon-secrets/src/vault.rs — VaultClient, 800 LoC'\nFact D: 'File: core/crates/omegon-secrets/src/resolve.rs — resolve_secret, recipes'\nEdge: D →[imports]→ C (description: 'resolve.rs uses VaultClient from vault.rs')\n\nFact E: 'Submodule: core/ → separate git repo'\nEdge: A →[inside_submodule]→ E\nEdge: B →[inside_submodule]→ E\n```\n\n### How the DSM algorithm queries memory\nInstead of building a DSM from scratch on every assessment:\n1. `memory_recall('modules related to vault secret backend')` → finds structural facts\n2. Query edges WHERE source_fact_id IN (found facts) → builds adjacency list\n3. Apply Tarjan's SCC + topological sort → partitioned DSM\n4. Enrich with knowledge facts: `memory_recall('known issues with vault')` → adds risk signals to the strategy\n\n### Three types of edges the structural model needs\n1. **Static dependencies** (`imports`, `depends_on`): from code analysis at /init. Stable, high confidence.\n2. **Co-change relationships** (`changes_with`): from git history. 'vault.rs and resolve.rs are modified together in 80% of commits.' Emergent, medium confidence, decays.\n3. **Knowledge relationships** (`motivated_by`, `contradicts`, `enables`): from extraction. 'The VaultClient decision enables the vault recipe kind.' High-value for understanding WHY, not just WHAT.\n\nType 1 comes from /init scanning. Type 2 comes from git log analysis (also /init). Type 3 comes from the existing extraction pipeline. All three store as edges in the same graph.\n\n### Why this is better than a separate structural store\n- **Single query interface**: memory_recall finds both structural AND knowledge facts\n- **Confidence decay**: stale structural facts (from an old /init run) naturally decay\n- **Cross-session**: structural model persists without a separate file\n- **Incremental updates**: each session's extraction can add new structural facts from code it reads\n- **Already exists**: the edges table, the decay model, the query interface — all built, just empty"
+
+### Co-change analysis from git history — the emergent coupling signal
+
+Static import analysis misses emergent coupling. Two files that never import each other but are always modified together are coupled — by shared assumptions, shared data schemas, or shared behavioral contracts. Git history reveals this:\n\n```bash\ngit log --name-only --format='' --diff-filter=M -- '*.rs' | \\\n  awk '/^$/{next} {files[NR]=$0} END{...}' # pairwise co-change frequency\n```\n\nThis produces edges like:\n```\nvault.rs ←[changes_with, confidence=0.8]→ resolve.rs\nlib.rs ←[changes_with, confidence=0.6]→ Cargo.toml\nmod.rs ←[changes_with, confidence=0.9]→ orchestrator.rs\n```\n\nCo-change coupling is MORE predictive than import coupling for merge conflicts. If two files change together 80% of the time, putting them in different cleave children guarantees conflicts. The DSM should weight co-change edges higher than import edges for the conflict_density calculation.\n\n`/init` can compute the co-change matrix from git history (last 100 commits, say) and store as memory edges with `changes_with` relation. This decays naturally — old co-change patterns fade as the code evolves.\n\nThis is exactly the 'Design Structure Matrix approach for measuring co-change-modularity' from the ACM research (Zimmerman et al.) — using association rule mining on co-change graphs to determine evolutionary coupling."
+
+## Decisions
+
+### Decision: The structural model IS the memory graph — /init populates structural facts and edges, the DSM algorithm queries memory
+
+**Status:** decided
+**Rationale:** Building a separate structural store would duplicate the persistence, query, decay, and cross-session sync infrastructure that already exists in the memory system. The edges table is empty but fully schema'd with relation, confidence, decay, and bidirectional indexes. Structural facts (modules, files, submodules) go in a 'Structure' section. Three edge types: static imports (from /init code scan), co-change coupling (from /init git log analysis), and knowledge relationships (from existing extraction). The DSM algorithm queries memory_recall for scope-relevant structural facts, fetches edges for adjacency, and applies standard partitioning. This means every session that reads and modifies code can incrementally improve the structural model via the existing extraction pipeline — the model gets better over time without explicit /init re-runs.
+
+### Decision: Strategy output replaces binary decision — assessment returns a phased plan with modes, not cleave/execute
+
+**Status:** decided
+**Rationale:** The evidence from this session is conclusive: the binary model produces wrong recommendations. The DSM-partitioned strategy naturally produces the right decomposition mode because it's based on structural analysis, not keyword counting. The strategy includes phases, modes per phase, critical path, and infrastructure warnings. Backward compatibility: the strategy includes a top-level `decision` field that maps to cleave/execute for old callers.
+
+### Decision: DSM from memory graph replaces pattern-matching heuristic — patterns become fallback when no structural model exists
+
+**Status:** decided
+**Rationale:** The current pattern library (12 domain patterns + modifier detection) becomes the cold-start fallback. When the memory graph has structural facts and edges, the DSM algorithm supersedes it. The pattern heuristic is still useful for the first session before /init populates structure. Progressive enhancement: cold start → pattern heuristic → structural DSM → DSM + co-change.
+
+### Decision: Migration via backward-compatible strategy envelope — strategy.decision provides cleave/execute for old callers, strategy.phases for new callers
+
+**Status:** decided
+**Rationale:** The cleave_assess tool return type gains a `strategy` field alongside the existing `decision`, `complexity`, etc. Old callers that read `decision` still work. New callers read `strategy.phases`. The `decision` field is derived from the strategy: if any phase uses parallel cleave mode → 'cleave'; otherwise → 'execute'. This is a non-breaking additive change to the tool API.
+
+### Decision: Phased execution is guidance injected into system prompt — the strategy's phases become a work plan the in-session agent follows with compaction checkpoints
+
+**Status:** decided
+**Rationale:** No new infrastructure needed. The strategy output includes phases with estimated effort. When the top-level mode is 'phased execution', the system prompt gains a section: 'Work Plan: Phase 1: [files], Phase 2: [files]. Compact between phases.' The agent follows this plan, calling memory_compact between phases. This is how we actually worked in this session — we just did it manually. The strategy makes it explicit.
+
 ## Open Questions
 
-- Should the assessment output a strategy (phased plan with modes) rather than a binary cleave/execute decision?
-- Can scope-graph conflict detection replace or augment the current pattern-matching complexity heuristic?
-- What's the migration path from the current binary model to the spectrum model without breaking existing /cleave usage?
-- Does phased execution (mode 2) need new infrastructure or can it be implemented as guidance to the in-session agent?
+*No open questions.*
