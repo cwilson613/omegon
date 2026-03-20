@@ -1,13 +1,10 @@
 ---
 id: styrene-identity-secrets
 title: Styrene Identity as operator credential root — RNS identity for secret unlocking and trust
-status: exploring
+status: decided
 related: [styrene-ipc-mcp-transport]
 tags: [architecture, security, identity, styrene, secrets, vault, keyring, trust]
-open_questions:
-  - Should the identity-encrypted local store be a separate SQLite DB (secrets.db) or a section within the existing memory DB?
-  - Can mesh-accessible secrets (fetched from remote nodes via Styrene) be cached locally in the encrypted store, or must they always be fetched live?
-  - Should the age crate be a default dependency or feature-gated like Styrene?
+open_questions: []
 issue_type: feature
 priority: 2
 ---
@@ -103,8 +100,23 @@ The bootstrap flow (from the native-local-inference design) should show the secr
     ○ age Identity        not configured
 ```
 
+## Decisions
+
+### Decision: Separate secrets.db, encrypted at rest, never in git
+
+**Status:** decided
+**Rationale:** Different threat model (credentials vs knowledge), different lifecycle (never synced/archived casually), different encryption boundary (secrets.db encrypted at rest, memory.db plaintext for semantic search). Located at ~/.config/omegon/secrets.db. Never appears in any git repo, backup, or sync mechanism without explicit operator action.
+
+### Decision: Mesh secrets are live lookups, no caching
+
+**Status:** decided
+**Rationale:** Caching introduces invalidation, staleness, and a larger encrypted attack surface for zero demonstrated need. If the mesh is down, mesh secrets are unavailable — same as Vault when unreachable. Local secrets (keyring, passphrase-encrypted, env vars) are the offline path. Mesh secrets are by definition online resources.
+
+### Decision: Three encryption backends: Styrene Identity (feature-gated), OS keyring (default), passphrase with Argon2id (default)
+
+**Status:** decided
+**Rationale:** Dropped age crate — it solves a niche case that passphrase encryption handles without a new dependency. (1) Styrene Identity: HKDF-derived AES key from RNS Ed25519/X25519 keypair, feature-gated with --features=styrene. (2) OS keyring: platform credential store via keyring crate, default for desktop operators. (3) Passphrase: AES-256-GCM with Argon2id key derivation, default for headless servers with no keyring daemon. Uses aes-gcm already in the dependency tree via styrene-tunnel. All three produce the same encryption key for secrets.db — the operator picks during `omegon secrets init`.
+
 ## Open Questions
 
-- Should the identity-encrypted local store be a separate SQLite DB (secrets.db) or a section within the existing memory DB?
-- Can mesh-accessible secrets (fetched from remote nodes via Styrene) be cached locally in the encrypted store, or must they always be fetched live?
-- Should the age crate be a default dependency or feature-gated like Styrene?
+*No open questions.*
