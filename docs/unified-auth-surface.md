@@ -1,7 +1,7 @@
 ---
 id: unified-auth-surface
 title: "Unified auth surface — single /login command, agent-callable, all backends"
-status: implementing
+status: implemented
 tags: [auth, ux, oauth, providers, mcp, vault, secrets, unification]
 open_questions: []
 branches: ["feature/unified-auth-surface"]
@@ -146,6 +146,15 @@ All auth tokens stay where they are (auth.json, vault.json, secrets.db, env vars
 - `core/crates/omegon/src/tui/mod.rs` (modified) — Add /auth slash command dispatching to auth.rs probe + login flows
 - `core/crates/omegon/src/setup.rs` (modified) — Populate HarnessStatus.providers from auth::probe_all_providers() at startup
 - `core/crates/omegon-secrets/src/recipes.rs` (modified) — Add RecipeType::Vault with path field for Vault KV resolution
+- `core/crates/omegon/src/features/auth.rs` (new) — AuthFeature: auth_status tool (status/check actions, read-only), provide_context on auth keywords, on_event expiry check on SessionStart. 5-min probe cache TTL. 7 tests.
+- `core/crates/omegon/src/auth.rs` (modified) — probe_all_providers() → AuthStatus (providers/vault/secrets/mcp). auth_status_to_provider_statuses() for HarnessStatus compat. Probes env vars, stored OAuth tokens, Vault connectivity. 5 tests.
+- `core/crates/omegon-secrets/src/resolve.rs` (modified) — Vault recipe resolution: vault:secret/data/path#key → Vault KV v2 lookup. Fail-closed. Path traversal + null byte rejection. 6 tests.
+- `core/crates/omegon-secrets/src/recipes.rs` (modified) — RecipeType::Vault { path, key } added. Serialization + validation.
+- `core/crates/omegon/src/plugins/mcp.rs` (modified) — url field on McpServerConfig for Streamable HTTP transport. URL scheme validation (https required, http://localhost for dev). 5 tests.
+- `core/crates/omegon/Cargo.toml` (modified) — rmcp features: transport-streamable-http-client-reqwest + auth enabled
+- `core/crates/omegon/src/main.rs` (modified) — Auth subcommand (status/login/logout/unlock) replaces Login. Backward-compat login alias. 1 test.
+- `core/crates/omegon/src/tui/mod.rs` (modified) — /auth slash command: no args → status table, /auth login <provider> → OAuth flow, registered in COMMANDS
+- `core/crates/omegon/src/setup.rs` (modified) — HarnessStatus.providers populated from probe_all_providers() via auth_status_to_provider_statuses()
 
 ### Constraints
 
@@ -154,3 +163,7 @@ All auth tokens stay where they are (auth.json, vault.json, secrets.db, env vars
 - MCP HTTP transport must validate server URL scheme (https only, or http://localhost for dev)
 - OAuth tokens from Vault must not be logged or included in HarnessStatus events
 - /auth login triggers browser-open for OAuth providers — requires operator presence
+- 21 new tests across 4 cleave children, 761 total passing
+- Vault recipe path validation rejects traversal (../) and null bytes
+- MCP URL validation: https required except http://localhost for dev
+- auth_status tool read-only — agent cannot trigger login flows
