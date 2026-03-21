@@ -452,10 +452,12 @@ async fn stream_with_retry(
                     delay_ms = delay,
                     "Transient LLM error, retrying: {err_msg}"
                 );
-                // Notify the TUI so the user knows why it's paused
-                let short_err = if err_msg.len() > 80 { &err_msg[..80] } else { &err_msg };
+                // Notify the TUI so the user knows why it's paused.
+                // First retry shows in conversation (persistent); subsequent are toasts.
+                let short_err = if err_msg.len() > 120 { &err_msg[..120] } else { &err_msg };
+                let msg = format!("⚠ LLM error (attempt {attempt}/{}): {short_err}", config.max_retries);
                 let _ = events.send(AgentEvent::SystemNotification {
-                    message: format!("⟳ Retrying ({attempt}/{})… {short_err}", config.max_retries),
+                    message: msg,
                 });
                 tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                 delay = (delay * 2).min(30_000); // exponential backoff, cap at 30s
