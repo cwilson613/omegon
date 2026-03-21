@@ -22,6 +22,7 @@
 pub mod auto_compact;
 pub mod cleave;
 pub mod adapter;
+pub mod harness_settings;
 pub mod lifecycle;
 pub mod manage_tools;
 pub mod model_budget;

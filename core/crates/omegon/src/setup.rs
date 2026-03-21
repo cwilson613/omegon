@@ -250,6 +250,9 @@ impl AgentSetup {
         );
         bus.register(Box::new(features::persona::PersonaFeature::new(persona_registry)));
 
+        if let Some(ref settings) = settings {
+            bus.register(Box::new(features::harness_settings::HarnessSettings::new(settings.clone())));
+        }
         bus.register(Box::new(features::auto_compact::AutoCompact::new()));
         bus.register(Box::new(features::terminal_title::TerminalTitle::new(
             &cwd.to_string_lossy(),
