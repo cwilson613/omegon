@@ -233,6 +233,7 @@ impl AgentSetup {
 
         // ─── Tool management ─────────────────────────────────────────────
         let manage_tools = features::manage_tools::ManageTools::new();
+        let disabled_handle = manage_tools.disabled_handle();
         bus.register(Box::new(manage_tools));
 
         // ─── Auth (credential probing + status) ───────────────────────
@@ -264,6 +265,44 @@ impl AgentSetup {
 
         // ─── Finalize bus (caches tool/command definitions) ─────────────
         bus.finalize();
+
+        // Wire disabled-tools handle so tool_definitions() filters at runtime
+        bus.set_disabled_tools(disabled_handle.clone());
+
+        // ─── Default tool profile — disable rarely-used tools ───────────
+        // These tools are available via manage_tools enable but don't need
+        // to consume input tokens on every request.
+        {
+            let mut disabled = disabled_handle.lock().unwrap();
+            // Speculation tools — only needed when explicitly exploring
+            disabled.insert("speculate_start".into());
+            disabled.insert("speculate_check".into());
+            disabled.insert("speculate_commit".into());
+            disabled.insert("speculate_rollback".into());
+            // Render/image tools — most sessions don't need them
+            disabled.insert("render_diagram".into());
+            disabled.insert("generate_image_local".into());
+            // Persona/tone switching — rarely used mid-session
+            disabled.insert("switch_persona".into());
+            disabled.insert("switch_tone".into());
+            disabled.insert("list_personas".into());
+            // Delegate system — advanced multi-agent, not default
+            disabled.insert("delegate".into());
+            disabled.insert("delegate_result".into());
+            disabled.insert("delegate_status".into());
+            // Auth probing — used at startup, not mid-conversation
+            disabled.insert("auth_status".into());
+            // Harness settings — internal, rarely agent-called
+            disabled.insert("harness_settings".into());
+            // Memory tools that are rarely called directly
+            disabled.insert("memory_ingest_lifecycle".into());
+            disabled.insert("memory_connect".into());
+            disabled.insert("memory_search_archive".into());
+            tracing::info!(
+                disabled = disabled.len(),
+                "default tool profile applied — use manage_tools to re-enable"
+            );
+        }
 
         // ─── Assemble harness status (bootstrap probe) ──────────────────
         let mut harness_status = crate::status::HarnessStatus::assemble();

@@ -36,6 +36,8 @@ pub struct EventBus {
     tool_defs: Vec<(usize, ToolDefinition)>, // (feature_index, def)
     /// Cached command definitions.
     command_defs: Vec<(usize, CommandDefinition)>,
+    /// Handle to the disabled tools set from ManageTools.
+    disabled_tools: Option<crate::features::manage_tools::DisabledTools>,
 }
 
 impl EventBus {
@@ -45,7 +47,13 @@ impl EventBus {
             pending_requests: Vec::new(),
             tool_defs: Vec::new(),
             command_defs: Vec::new(),
+            disabled_tools: None,
         }
+    }
+
+    /// Set the disabled tools handle (called from setup after ManageTools is registered).
+    pub fn set_disabled_tools(&mut self, handle: crate::features::manage_tools::DisabledTools) {
+        self.disabled_tools = Some(handle);
     }
 
     /// Register a feature. Call during setup before the agent loop starts.
@@ -125,6 +133,19 @@ impl EventBus {
 
     /// All tool definitions across all features.
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
+        let disabled = self.disabled_tools.as_ref()
+            .and_then(|d| d.lock().ok());
+        self.tool_defs.iter()
+            .filter(|(_, d)| {
+                disabled.as_ref().map_or(true, |set| !set.contains(&d.name))
+            })
+            .map(|(_, d)| d.clone())
+            .collect()
+    }
+
+    /// All registered tool definitions, ignoring disabled state.
+    /// Used for the manage_tools list command.
+    pub fn all_tool_definitions(&self) -> Vec<ToolDefinition> {
         self.tool_defs.iter().map(|(_, d)| d.clone()).collect()
     }
 
