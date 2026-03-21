@@ -1,7 +1,7 @@
 ---
 id: embedded-web-dashboard
 title: Embedded web dashboard — lightweight localhost UI served from the omegon binary
-status: implementing
+status: implemented
 parent: markdown-viewport
 tags: [dashboard, web, axum, ratatui, architecture]
 open_questions: []
@@ -127,6 +127,27 @@ The design tree is a DAG (directed acyclic graph) with ~139 nodes, parent/child 
 **Recommendation: force-graph.js for the design tree graph, vanilla SVG for the OpenSpec funnel and cleave timeline.**
 force-graph.js is already proven, small, and handles our node count. The funnel and timeline are simple enough for hand-rolled SVG (no layout algorithm needed — they're linear/parallel, not graph-shaped).
 
+### Implementation status (March 2026)
+
+**Backend complete (884 LoC Rust, 10 tests):**
+- Axum server with `/api/state`, `/api/graph`, `/ws`, `/` routes
+- WebSocket bidirectional: all AgentEvents pushed, inbound commands (user_prompt, slash_command, cancel)
+- Random auth token per session (required for WS connection)
+- `WebState` shares `Arc<Mutex<>>` handles with TUI for zero-copy state
+- `/dash open` starts server + opens browser, `/dash` toggles TUI panel
+- `HarnessStatusChanged` event broadcast over WS
+
+**Frontend (42KB embedded HTML):**
+- Single HTML with Alpharius theme CSS custom properties
+- Real-time WebSocket consumer
+- Panels: session stats, routing, design tree counts, openspec changes, cleave progress
+
+**Not yet implemented:**
+- force-graph.js for interactive design tree DAG visualization (backend serves graph data via `/api/graph`, frontend doesn't render it yet)
+- Preact/HTM should be vendored as separate files for offline use (currently CDN or inline reference)
+- OpenSpec pipeline funnel SVG
+- Cleave Gantt-style timeline SVG
+
 ## Decisions
 
 ### Decision: Option C: Axum + Preact/HTM standalone — no build step, no WASM, ~120KB embedded assets
@@ -171,6 +192,7 @@ force-graph.js is already proven, small, and handles our node count. The funnel 
 - `crates/omegon/src/tui/mod.rs` (modified) — Add /dash command handling — toggle panel, /dash open starts web server
 - `crates/omegon/src/tui/dashboard.rs` (modified) — Enrich with status counts, pipeline funnel, actionable nodes, implementing nodes
 - `crates/omegon/Cargo.toml` (modified) — Add axum, tower-http (serve-static feature) dependencies
+- `core/crates/omegon/src/web/assets/dashboard.html` (new) — 42KB single-page dashboard with Alpharius theme, real-time WebSocket updates, session/routing/design/openspec/cleave panels. Preact/HTM referenced, no force-graph yet.
 
 ### Constraints
 
@@ -180,3 +202,5 @@ force-graph.js is already proven, small, and handles our node count. The funnel 
 - WebSocket reconnects automatically on disconnect
 - Dashboard HTML must work offline — no CDN dependencies
 - Alpharius theme colors applied via CSS custom properties loaded from the same themes/alpharius.json
+- force-graph.js for interactive design tree DAG not yet vendored — dashboard works without it, follow-on enhancement
+- Preact/HTM not vendored as separate files — referenced from CDN or inlined in HTML; should be vendored for offline use per constraint
