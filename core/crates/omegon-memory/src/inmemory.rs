@@ -96,6 +96,9 @@ impl MemoryBackend for InMemoryBackend {
             source: req.source,
             content_hash: Some(ch),
             last_accessed: None, created_session: None, superseded_at: None, archived_at: None, jj_change_id: None,
+            persona_id: None,
+            layer: "project".into(),
+            tags: vec![],
         };
         s.facts.insert(fact.id.clone(), fact.clone());
         Ok(StoreResult {
@@ -183,6 +186,9 @@ impl MemoryBackend for InMemoryBackend {
             source: replacement.source,
             content_hash: Some(ch),
             last_accessed: None, created_session: None, superseded_at: None, archived_at: None, jj_change_id: None,
+            persona_id: None,
+            layer: "project".into(),
+            tags: vec![],
         };
 
         // Archive original — matches TS: original gets status='superseded', no forward pointer.
@@ -336,6 +342,7 @@ impl MemoryBackend for InMemoryBackend {
             files_changed: req.files_changed,
             tags: req.tags,
             tool_calls_count: req.tool_calls_count,
+            jj_change_id: None,
         };
         s.episodes.push(episode.clone());
         Ok(episode)
@@ -385,6 +392,9 @@ impl MemoryBackend for InMemoryBackend {
                 supersedes: None,
                 version: fact.version,
                 decay_profile: fact.decay_profile.clone(),
+                persona_id: fact.persona_id.clone(),
+                layer: fact.layer.clone(),
+                tags: fact.tags.clone(),
             });
             lines.push(serde_json::to_string(&record).unwrap());
         }
@@ -451,6 +461,9 @@ impl MemoryBackend for InMemoryBackend {
                             source: jf.source,
                             content_hash: jf.content_hash,
                             last_accessed: None, created_session: None, superseded_at: None, archived_at: None, jj_change_id: None,
+                            persona_id: None,
+                            layer: "project".into(),
+                            tags: vec![],
                         };
                         s.facts.insert(jf.id, fact);
                         stats.imported += 1;

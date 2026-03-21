@@ -91,6 +91,23 @@ pub struct Fact {
     /// jj change ID that created this fact (permanent, survives rebase).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jj_change_id: Option<String>,
+    /// Persona ID that owns this fact. NULL = project fact (default).
+    /// When a persona is active and a fact is stored into its mind layer,
+    /// this records which persona owns it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persona_id: Option<String>,
+    /// Memory layer: 'project' (default), 'persona', 'working'.
+    /// Controls injection priority and lifecycle.
+    #[serde(default = "default_layer")]
+    pub layer: String,
+    /// Searchable tags for domain classification (e.g. ["pcb", "thermal"]).
+    /// Used by persona mind stores for filtered queries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+fn default_layer() -> String {
+    "project".into()
 }
 
 /// Decay profile discriminant — persisted in DB.
@@ -135,6 +152,9 @@ pub struct Episode {
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls_count: Option<u32>,
+    /// jj change ID that created this episode (permanent, survives rebase).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jj_change_id: Option<String>,
 }
 
 /// A directional relationship between two facts.
@@ -294,6 +314,15 @@ pub struct JsonlFact {
     /// Decay profile — additive field, default "standard" for legacy facts.
     #[serde(default)]
     pub decay_profile: DecayProfileName,
+    /// Persona ID that owns this fact. NULL = project fact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persona_id: Option<String>,
+    /// Memory layer: 'project' (default), 'persona', 'working'.
+    #[serde(default = "default_layer")]
+    pub layer: String,
+    /// Searchable tags for domain classification.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 /// Mind record in the JSONL transport.
@@ -337,6 +366,9 @@ mod tests {
             supersedes: None,
             version: 0,
             decay_profile: DecayProfileName::Standard,
+            persona_id: None,
+            layer: "project".into(),
+            tags: vec![],
         };
         let record = JsonlRecord::Fact(fact);
         let json = serde_json::to_string(&record).unwrap();

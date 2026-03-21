@@ -81,10 +81,15 @@ impl SqliteBackend {
                 version             INTEGER NOT NULL DEFAULT 0,
                 last_accessed       TEXT,
                 jj_change_id        TEXT,
+                persona_id          TEXT,
+                layer               TEXT NOT NULL DEFAULT 'project',
+                tags                TEXT,
                 FOREIGN KEY (mind) REFERENCES minds(name) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS idx_facts_active ON facts(mind, status) WHERE status = 'active';
+            CREATE INDEX IF NOT EXISTS idx_facts_persona ON facts(persona_id) WHERE persona_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_facts_layer ON facts(mind, layer) WHERE status = 'active';
             CREATE INDEX IF NOT EXISTS idx_facts_hash ON facts(mind, content_hash);
             CREATE INDEX IF NOT EXISTS idx_facts_section ON facts(mind, section) WHERE status = 'active';
             CREATE INDEX IF NOT EXISTS idx_facts_session ON facts(created_session);
@@ -264,6 +269,29 @@ impl SqliteBackend {
             )?;
         }
 
+        // Migration: v5 → v6 (persona system schema)
+        // Adds columns for persona mind layers, tags, and layer classification.
+        // All nullable/defaulted — existing data reads cleanly without changes.
+        if current < 6 {
+            for stmt in &[
+                "ALTER TABLE facts ADD COLUMN persona_id TEXT",
+                "ALTER TABLE facts ADD COLUMN layer TEXT NOT NULL DEFAULT 'project'",
+                "ALTER TABLE facts ADD COLUMN tags TEXT",
+            ] {
+                let _ = conn.execute(stmt, []);
+            }
+
+            conn.execute_batch("
+                CREATE INDEX IF NOT EXISTS idx_facts_persona ON facts(persona_id) WHERE persona_id IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS idx_facts_layer ON facts(mind, layer) WHERE status = 'active';
+            ")?;
+
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (6, datetime('now'))",
+                [],
+            )?;
+        }
+
         Ok(())
     }
 
@@ -326,6 +354,12 @@ impl SqliteBackend {
             superseded_at: row.get("superseded_at")?,
             archived_at: row.get("archived_at")?,
             jj_change_id: row.get("jj_change_id")?,
+            persona_id: row.get("persona_id")?,
+            layer: row.get::<_, Option<String>>("layer")?
+                .unwrap_or_else(|| "project".into()),
+            tags: row.get::<_, Option<String>>("tags")?
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default(),
         })
     }
 }
@@ -676,6 +710,7 @@ impl MemoryBackend for SqliteBackend {
             affected_nodes: req.affected_nodes, affected_changes: req.affected_changes,
             files_changed: req.files_changed, tags: req.tags,
             tool_calls_count: req.tool_calls_count,
+            jj_change_id: None,
         })
     }
 
@@ -695,6 +730,7 @@ impl MemoryBackend for SqliteBackend {
                 created_at: row.get("created_at")?,
                 affected_nodes: vec![], affected_changes: vec![],
                 files_changed: vec![], tags: vec![], tool_calls_count: None,
+                jj_change_id: None,
             })
         }).map_err(|e| MemoryError::Storage(e.into()))?
             .filter_map(|r| r.map_err(|e| tracing::debug!("row deser: {e}")).ok())
@@ -726,6 +762,7 @@ impl MemoryBackend for SqliteBackend {
                 created_at: row.get("created_at")?,
                 affected_nodes: vec![], affected_changes: vec![],
                 files_changed: vec![], tags: vec![], tool_calls_count: None,
+                jj_change_id: None,
             })
         }).map_err(|e| MemoryError::Storage(e.into()))?
             .filter_map(|r| r.map_err(|e| tracing::debug!("row deser: {e}")).ok())
@@ -751,6 +788,7 @@ impl MemoryBackend for SqliteBackend {
                 section: f.section.clone(), status: f.status.clone(), created_at: f.created_at.clone(),
                 source: f.source.clone(), content_hash: f.content_hash.clone(),
                 supersedes: None, version: f.version, decay_profile: f.decay_profile.clone(),
+                persona_id: f.persona_id.clone(), layer: f.layer.clone(), tags: f.tags.clone(),
             });
             lines.push(serde_json::to_string(&record).unwrap());
         }
@@ -784,6 +822,7 @@ impl MemoryBackend for SqliteBackend {
                 created_at: row.get("created_at")?,
                 affected_nodes: vec![], affected_changes: vec![],
                 files_changed: vec![], tags: vec![], tool_calls_count: None,
+                jj_change_id: None,
             })
         }).map_err(|e| MemoryError::Storage(e.into()))?
             .filter_map(|r| r.map_err(|e| tracing::debug!("row deser: {e}")).ok())
