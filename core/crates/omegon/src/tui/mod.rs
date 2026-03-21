@@ -470,6 +470,19 @@ impl App {
 
         let area = frame.area();
 
+        // ── Global background fill ──────────────────────────────────
+        // Fill the entire frame with our theme background BEFORE any widgets
+        // render. This ensures no cell inherits the terminal's default
+        // background (Color::Reset). Every pixel is ours.
+        let bg = self.theme.surface_bg();
+        let fg = self.theme.fg();
+        let base_style = Style::default().bg(bg).fg(fg);
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                frame.buffer_mut()[(x, y)].set_style(base_style);
+            }
+        }
+
         // ── Horizontal split: main area | dashboard panel ───────────
         // Dashboard appears as a right-side panel when terminal is wide enough.
         let show_dashboard = area.width >= 120

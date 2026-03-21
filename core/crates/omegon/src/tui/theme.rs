@@ -204,11 +204,11 @@ impl Theme for JsonTheme {
 pub struct Alpharius;
 
 impl Theme for Alpharius {
-    fn bg(&self) -> Color { Color::Rgb(2, 3, 10) }
-    fn card_bg(&self) -> Color { Color::Rgb(14, 22, 36) }
-    fn surface_bg(&self) -> Color { Color::Rgb(18, 28, 44) }
-    fn border(&self) -> Color { Color::Rgb(40, 92, 116) }
-    fn border_dim(&self) -> Color { Color::Rgb(28, 56, 76) }
+    fn bg(&self) -> Color { Color::Rgb(2, 3, 8) }
+    fn card_bg(&self) -> Color { Color::Rgb(8, 14, 24) }
+    fn surface_bg(&self) -> Color { Color::Rgb(6, 10, 18) }
+    fn border(&self) -> Color { Color::Rgb(48, 112, 140) }
+    fn border_dim(&self) -> Color { Color::Rgb(32, 72, 96) }
 
     fn fg(&self) -> Color { Color::Rgb(196, 216, 228) }
     fn muted(&self) -> Color { Color::Rgb(96, 120, 136) }
