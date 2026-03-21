@@ -95,6 +95,16 @@ impl EventBus {
         std::mem::take(&mut self.pending_requests)
     }
 
+    /// Emit a HarnessStatusChanged event from an updated status snapshot.
+    /// Also returns the serialized JSON for forwarding to AgentEvent broadcast.
+    pub fn emit_harness_status(&mut self, status: &crate::status::HarnessStatus) -> Value {
+        let status_json = serde_json::to_value(status).unwrap_or_default();
+        self.emit(&BusEvent::HarnessStatusChanged {
+            status_json: status_json.clone(),
+        });
+        status_json
+    }
+
     // ─── Tool dispatch ──────────────────────────────────────────────
 
     /// All tool definitions across all features.

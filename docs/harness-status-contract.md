@@ -1,7 +1,7 @@
 ---
 id: harness-status-contract
 title: HarnessStatus contract — unified status surface for TUI, web dashboard, and bootstrap
-status: decided
+status: implementing
 tags: [architecture, ui, tui, dashboard, bootstrap, contract, persona, mcp, secrets, inference]
 open_questions: []
 issue_type: feature

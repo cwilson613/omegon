@@ -273,6 +273,9 @@ impl AgentSetup {
             eprint!("{panel}");
         }
 
+        // Emit initial HarnessStatusChanged so TUI footer + web dashboard get the first snapshot
+        let _initial_status_json = bus.emit_harness_status(&harness_status);
+
         // ─── System prompt + context ────────────────────────────────────
         // Build the base prompt from bus tool definitions (not the old tools vec)
         let tool_defs = bus.tool_definitions();

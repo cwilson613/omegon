@@ -38,6 +38,11 @@ pub struct FooterData {
 }
 
 impl FooterData {
+    /// Update the harness status snapshot from a BusEvent::HarnessStatusChanged.
+    pub fn update_harness(&mut self, status: HarnessStatus) {
+        self.harness = status;
+    }
+
     pub fn render(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
         let width = area.width as usize;
 
