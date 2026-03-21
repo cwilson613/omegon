@@ -941,7 +941,7 @@ fn format_agent_error(e: &anyhow::Error) -> String {
         }
     }
     // Fallback: truncate
-    let truncated = if raw.len() > 120 { &raw[..120] } else { &raw };
+    let truncated = if raw.len() > 500 { &raw[..500] } else { &raw };
     format!("⚠ {truncated}")
 }
 
@@ -1236,7 +1236,7 @@ mod tests {
         let long = "x".repeat(500);
         let e = anyhow::anyhow!("{long}");
         let result = format_agent_error(&e);
-        assert!(result.len() < 200, "should truncate, got len {}", result.len());
+        assert!(result.len() < 600, "should truncate, got len {}", result.len());
     }
 
     #[test]

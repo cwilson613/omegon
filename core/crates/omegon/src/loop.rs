@@ -454,7 +454,7 @@ async fn stream_with_retry(
                 );
                 // Notify the TUI so the user knows why it's paused.
                 // First retry shows in conversation (persistent); subsequent are toasts.
-                let short_err = if err_msg.len() > 120 { &err_msg[..120] } else { &err_msg };
+                let short_err = if err_msg.len() > 300 { &err_msg[..300] } else { &err_msg };
                 let msg = format!("⚠ LLM error (attempt {attempt}/{}): {short_err}", config.max_retries);
                 let _ = events.send(AgentEvent::SystemNotification {
                     message: msg,
