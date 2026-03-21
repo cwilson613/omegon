@@ -27,6 +27,8 @@ pub mod widgets;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod snapshot_tests;
 
 use std::io;
 use std::time::Duration;

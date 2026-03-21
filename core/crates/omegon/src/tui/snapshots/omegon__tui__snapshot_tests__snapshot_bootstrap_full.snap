@@ -1,0 +1,36 @@
+---
+source: crates/omegon/src/tui/snapshot_tests.rs
+expression: output
+---
+
+  Ω  Omegon
+  Systems engineering harness
+
+  Cloud Providers
+    ✓ Anthropic      Claude Sonnet 4.6        (oauth)
+    ⚠ OpenAI         -                        (none)
+
+  Local Inference
+    ✓ Ollama         (external)  1 model
+
+  MCP Servers
+    ✓ filesystem     (local)  5 tools
+
+  Secrets
+    🔓 keyring        3 stored
+
+  Container
+    ✓ podman         5.3.1
+
+  Identity
+    ⚙ Systems Engineer  42 mind facts, 2 skills
+    ♪ Concise  intensity: full
+
+  Routing
+    Context:  Maniple
+    Thinking: High
+    Tier:     victory
+
+  Memory
+    2440 facts (1800 active, 1790 project, 10 persona, 8 working)
+    45 episodes, 120 edges

@@ -1,0 +1,24 @@
+---
+source: crates/omegon/src/tui/snapshot_tests.rs
+expression: render_to_string(&terminal)
+---
+│ Ω Dashboard
+│── session ──────────────────
+│0 turns · 0 tool calls
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│

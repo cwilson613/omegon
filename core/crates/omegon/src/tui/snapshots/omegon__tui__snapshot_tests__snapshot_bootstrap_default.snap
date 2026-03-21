@@ -1,0 +1,22 @@
+---
+source: crates/omegon/src/tui/snapshot_tests.rs
+expression: output
+---
+
+  Ω  Omegon
+  Systems engineering harness
+
+  Cloud Providers
+    none configured
+
+  Local Inference
+    none available
+
+  Routing
+    Context:  Squad
+    Thinking: Medium
+    Tier:     victory
+
+  Memory
+    0 facts (0 active, 0 project, 0 persona, 0 working)
+    0 episodes, 0 edges

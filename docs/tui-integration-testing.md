@@ -1,7 +1,7 @@
 ---
 id: tui-integration-testing
 title: TUI integration testing — snapshot tests, PTY harness, and interactive verification
-status: decided
+status: implementing
 parent: tui-visual-system
 tags: [testing, tui, ratatui, snapshot, pty, insta, ci, quality]
 open_questions: []
@@ -170,3 +170,14 @@ fn full_startup_renders_splash_then_editor() {
 ## Open Questions
 
 *No open questions.*
+
+## Implementation Notes
+
+### File Scope
+
+- `core/crates/omegon/src/tui/tests.rs` (new) — T2 scenario tests: 22 tests covering slash command routing (12), selector overlays (4), event handling (2), routing guards (3), completeness guard (1). App constructed with test_settings(), commands dispatched via handle_slash_command().
+
+### Constraints
+
+- all_commands_in_table_are_handled is a completeness guard — any new command added to COMMANDS table without a match arm will fail this test
+- Tests use App::new(test_settings()) — no terminal, no async runtime, pure state machine verification
