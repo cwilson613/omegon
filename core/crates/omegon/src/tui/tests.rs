@@ -362,9 +362,12 @@ fn handled_commands_are_in_commands_table() {
         if known_names.contains(name) { continue; } // skip if it's actually documented
         let cmd = format!("/{name}");
         let result = app.handle_slash_command(&cmd, &tx);
+        // Unknown commands should either be NotACommand (not /-prefixed)
+        // or Display an error (/-prefixed but unrecognized). They must
+        // NOT return Handled (which would silently swallow input).
         assert!(
-            matches!(result, SlashResult::NotACommand),
-            "/{name} is handled but NOT in COMMANDS table — add it to COMMANDS or remove the handler"
+            matches!(result, SlashResult::NotACommand | SlashResult::Display(_)),
+            "/{name} returned Handled but is NOT in COMMANDS table — add it to COMMANDS or remove the handler"
         );
     }
 }

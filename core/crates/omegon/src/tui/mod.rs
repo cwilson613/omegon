@@ -704,6 +704,8 @@ impl App {
         ("delegate", "delegate task management",              &["status"]),
         ("status",   "show harness status (providers, MCP, secrets, routing)", &[]),
         ("splash",   "replay splash animation",              &[]),
+        ("dashboard", "open web dashboard (alias for /dash open)", &[]),
+        ("version",  "show build version and git sha",       &[]),
         ("exit",     "quit (or double Ctrl+C)",              &[]),
     ];
 
@@ -1179,6 +1181,19 @@ impl App {
             }
 
             "exit" | "quit" => SlashResult::Quit,
+
+            // ── Aliases ─────────────────────────────────────────────
+            "dashboard" => self.handle_slash_command("/dash open", tx),
+            "thinking"  => self.handle_slash_command(&format!("/think {args}"), tx),
+            "models"    => self.handle_slash_command("/model", tx),
+            "version"   => SlashResult::Display(format!(
+                "omegon {} ({} {})",
+                env!("CARGO_PKG_VERSION"),
+                env!("OMEGON_GIT_SHA"),
+                env!("OMEGON_BUILD_DATE"),
+            )),
+            "q" => SlashResult::Quit,
+
             _ => {
                 // Check if a bus feature handles this command
                 if self.bus_commands.iter().any(|c| c.name == cmd) {
@@ -1188,7 +1203,31 @@ impl App {
                     });
                     SlashResult::Handled
                 } else {
-                    SlashResult::NotACommand
+                    // Try prefix match — e.g. "/das" matches "/dash"
+                    let matches: Vec<&str> = Self::COMMANDS.iter()
+                        .map(|(name, _, _)| *name)
+                        .filter(|name| name.starts_with(cmd) && *name != cmd)
+                        .collect();
+                    if matches.len() == 1 {
+                        // Unique prefix match — execute it
+                        let full_cmd = if args.is_empty() {
+                            format!("/{}", matches[0])
+                        } else {
+                            format!("/{} {args}", matches[0])
+                        };
+                        self.handle_slash_command(&full_cmd, tx)
+                    } else if !matches.is_empty() {
+                        // Ambiguous prefix
+                        SlashResult::Display(format!(
+                            "Ambiguous command /{cmd}. Did you mean: {}",
+                            matches.iter().map(|m| format!("/{m}")).collect::<Vec<_>>().join(", ")
+                        ))
+                    } else {
+                        // No match at all — show error, do NOT send to agent
+                        SlashResult::Display(format!(
+                            "Unknown command: /{cmd}\n\nType /help for available commands."
+                        ))
+                    }
                 }
             }
         }
@@ -1967,7 +2006,7 @@ pub async fn run_tui(
                                         let _ = command_tx.send(TuiCommand::Quit).await;
                                     }
                                     SlashResult::NotACommand => {
-                                        // Unknown /command — queue as prompt if agent busy
+                                        // Not a slash command (no / prefix) — send as prompt
                                         if app.agent_active {
                                             app.queue_prompt(text.clone());
                                         } else {
