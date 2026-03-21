@@ -1051,6 +1051,18 @@ impl App {
                 SlashResult::Handled
             }
 
+            "delegate" => {
+                match args {
+                    "" | "status" => {
+                        // Show active/completed delegate tasks
+                        SlashResult::Display("Delegate status: use the delegate_status agent tool for full details.\n\nActive delegates shown in dashboard when running.".into())
+                    }
+                    _ => {
+                        SlashResult::Display("Usage: /delegate status\n\nTo invoke a delegate, use the delegate agent tool.".into())
+                    }
+                }
+            }
+
             "vault" => {
                 match args {
                     "" | "status" => {
