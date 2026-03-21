@@ -5,7 +5,7 @@ status: exploring
 tags: [security, permissions, tools, ux, policy]
 open_questions: []
 issue_type: feature
-priority: 2
+priority: 1
 ---
 
 # Granular tool permissions — per-tool, per-path allow/deny/prompt policies
