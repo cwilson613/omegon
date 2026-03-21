@@ -35,6 +35,7 @@ build:
 # Uses dev-release profile: optimized but fast link (~90% perf, ~10% link time)
 update:
     git checkout -- core/Cargo.lock 2>/dev/null || true
+    git checkout -- .omegon/history 2>/dev/null || true
     git pull --rebase
     cd core && cargo build --profile dev-release -p omegon
     @echo "Updated to $(cd core && ./target/dev-release/omegon --version 2>/dev/null || echo 'build failed')"
