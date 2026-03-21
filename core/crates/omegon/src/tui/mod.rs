@@ -10,6 +10,7 @@
 //!   - user_input_tx → agent loop receives prompts
 //!   - AgentEvent broadcast → TUI receives streaming updates
 
+pub mod bootstrap;
 pub mod conversation;
 pub mod conv_widget;
 pub mod dashboard;

@@ -214,6 +214,66 @@ impl HarnessStatus {
     }
 }
 
+impl HarnessStatus {
+    /// Probe the system and assemble the initial HarnessStatus at startup.
+    /// This is the bootstrap probe — runs once before the event loop.
+    pub fn assemble() -> Self {
+        let mut status = Self::default();
+
+        // Probe container runtime
+        status.container_runtime = probe_container_runtime();
+
+        // Probe secret store
+        status.secret_backend = probe_secret_store();
+
+        status
+    }
+}
+
+/// Detect container runtime (podman/docker).
+fn probe_container_runtime() -> Option<ContainerRuntimeStatus> {
+    for runtime in &["podman", "docker", "nerdctl"] {
+        if let Ok(output) = std::process::Command::new(runtime)
+            .arg("--version")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .output()
+        {
+            if output.status.success() {
+                let version_str = String::from_utf8_lossy(&output.stdout);
+                // Extract version number — typically "podman version 5.3.1" or "Docker version 27.x"
+                let version = version_str
+                    .split_whitespace()
+                    .find(|w| w.chars().next().is_some_and(|c| c.is_ascii_digit()))
+                    .map(|v| v.trim_end_matches(',').to_string());
+
+                return Some(ContainerRuntimeStatus {
+                    runtime: runtime.to_string(),
+                    version,
+                    available: true,
+                });
+            }
+        }
+    }
+    None
+}
+
+/// Check if secrets.db exists and probe its backend.
+fn probe_secret_store() -> Option<SecretBackendStatus> {
+    let path = omegon_secrets::SecretStore::default_path();
+    if omegon_secrets::SecretStore::exists(&path) {
+        // We can read the header without unlocking
+        // For now, report as locked (we don't have the key yet at probe time)
+        Some(SecretBackendStatus {
+            backend: "encrypted".into(),
+            stored_count: 0, // unknown until unlocked
+            locked: true,
+        })
+    } else {
+        None
+    }
+}
+
 impl Default for HarnessStatus {
     fn default() -> Self {
         Self {
@@ -312,6 +372,15 @@ mod tests {
         let json = serde_json::to_string(&status).unwrap();
         let parsed: HarnessStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.active_persona.unwrap().name, "Test");
+    }
+
+    #[test]
+    fn assemble_runs_without_panic() {
+        let status = HarnessStatus::assemble();
+        // Should always have routing defaults
+        assert_eq!(status.context_class, "Squad");
+        // Container runtime may or may not be found — that's fine
+        // Just verify it doesn't panic
     }
 
     #[test]

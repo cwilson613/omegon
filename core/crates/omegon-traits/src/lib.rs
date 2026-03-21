@@ -143,6 +143,17 @@ pub enum BusEvent {
 
     /// Context compaction was triggered.
     Compacted,
+
+    // ── Harness status ──────────────────────────────────────────────
+    /// Emitted when observable harness state changes (persona switch,
+    /// MCP connect/disconnect, secret store unlock, etc.).
+    /// Carries the full HarnessStatus snapshot as serialized JSON.
+    /// TUI re-renders footer, web dashboard broadcasts over WebSocket.
+    HarnessStatusChanged {
+        /// Serialized HarnessStatus JSON. Using Value instead of the concrete
+        /// type to avoid a circular dependency (omegon-traits → omegon).
+        status_json: Value,
+    },
 }
 
 /// Requests from features back to the runtime.
