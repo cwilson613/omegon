@@ -42,7 +42,13 @@ fn main() {
     println!("cargo:rustc-env=OMEGON_BUILD_DATE={date}");
     println!("cargo:rustc-env=OMEGON_GIT_DESCRIBE={describe}");
 
-    // Only re-run when git state changes (HEAD moves or index changes)
+    // Only re-run when the commit changes (HEAD moves), not on every
+    // git status/stage/stash. Watching .git/index causes full recompiles
+    // on every incremental build because the index changes constantly.
     println!("cargo:rerun-if-changed=../../.git/HEAD");
-    println!("cargo:rerun-if-changed=../../.git/index");
+    // Also watch the ref that HEAD points to (e.g. refs/heads/main)
+    if let Some(head_ref) = git(&["symbolic-ref", "--short", "HEAD"]) {
+        let ref_path = format!("../../.git/refs/heads/{head_ref}");
+        println!("cargo:rerun-if-changed={ref_path}");
+    }
 }
