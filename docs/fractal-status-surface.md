@@ -1,13 +1,10 @@
 ---
 id: fractal-status-surface
 title: Fractal status surface — multi-dimensional state visualization via generative fractal rendering
-status: exploring
+status: decided
 parent: tui-visual-system
 tags: [tui, ux, visualization, fractal, ratatui, generative, status, aesthetic]
-open_questions:
-  - "Should the fractal render in a dedicated panel (dashboard right-side), as a background behind the spinner/thinking area, or both? Dashboard panel is always visible; background rendering only appears during active operations."
-  - Half-block rendering (▀▄) gives 2x vertical resolution but requires true-color terminal support for smooth gradients. Should we require true color, or provide a 256-color fallback with dithering?
-  - "How does the fractal interact with tachyonfx effects? Should transitions (palette swap, zoom shift) go through the effects system, or be self-contained in the widget's time parameter?"
+open_questions: []
 issue_type: feature
 priority: 3
 ---
@@ -121,8 +118,23 @@ This means each persona has a visually distinct fractal signature — the operat
 - **Background of thinking indicator** — during extended thinking, the fractal slowly evolves behind the spinner text
 - **NOT in the conversation area** — the fractal is ambient, not intrusive
 
+## Decisions
+
+### Decision: Render in a dedicated viewport at the bottom-right of the dashboard sidebar
+
+**Status:** decided
+**Rationale:** The fractal lives at the base of the sidebar panel — below lifecycle status, above the footer. It's ambient and always visible when the dashboard is raised, but doesn't compete with conversation or tool output. The sidebar already has variable-height content (design tree focus, openspec changes, cleave progress) — the fractal fills whatever vertical space remains at the bottom, naturally growing when there's less lifecycle content and shrinking when there's more. Minimum viable size: ~20×8 cells (enough for recognizable fractal structure). If the sidebar is collapsed (/dash toggle), the fractal is hidden — zero rendering cost.
+
+### Decision: 256-color fallback with half-block rendering — true color preferred, not required
+
+**Status:** decided
+**Rationale:** True color (24-bit RGB) gives smooth gradients. 256-color gives banded but still recognizable fractal structure — the palette just quantizes to the nearest xterm-256 color. The widget detects terminal capability at render time (COLORTERM=truecolor env check) and selects the palette accordingly. No dithering needed — the fractal's own iteration banding provides visual structure even at 256 colors. Half-block characters (▀▄) work in both modes since they only need fg+bg color, not additional color depth.
+
+### Decision: Self-contained time parameter for v1 — tachyonfx integration deferred until value is proven
+
+**Status:** decided
+**Rationale:** The widget manages its own animation state via a `time: f64` field incremented on each render tick. Palette transitions are linear interpolation over ~500ms (self-contained lerp, not tachyonfx). This keeps the widget dependency-free and testable in isolation. If the fractal proves its worth as a status surface, tachyonfx integration for richer transitions (dissolve, wipe, glow) can be added as a follow-on. Don't overengineer before we know this is warranted.
+
 ## Open Questions
 
-- Should the fractal render in a dedicated panel (dashboard right-side), as a background behind the spinner/thinking area, or both? Dashboard panel is always visible; background rendering only appears during active operations.
-- Half-block rendering (▀▄) gives 2x vertical resolution but requires true-color terminal support for smooth gradients. Should we require true color, or provide a 256-color fallback with dithering?
-- How does the fractal interact with tachyonfx effects? Should transitions (palette swap, zoom shift) go through the effects system, or be self-contained in the widget's time parameter?
+*No open questions.*
