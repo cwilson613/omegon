@@ -584,13 +584,19 @@ impl App {
             );
         }
 
-        // ── Footer / Instrument Panel ────────────────────────────────
+        // ── Split-panel footer: text left, instruments right ─────────
         if !self.focus_mode {
-            // Render the old footer data as a fallback (footer.rs still has the
-            // card layout). The instrument panel renders alongside it.
-            self.footer_data.render(chunks[2], frame, t.as_ref());
-            // TODO: replace footer_data.render with the full split-panel layout
-            // that embeds the instrument panel in the right half.
+            let footer_area = chunks[2];
+            let footer_cols = Layout::horizontal([
+                Constraint::Percentage(40),  // engine + memory text
+                Constraint::Percentage(60),  // CIC instrument panel
+            ]).split(footer_area);
+
+            // Left: old footer cards (engine + memory)
+            self.footer_data.render(footer_cols[0], frame, t.as_ref());
+
+            // Right: CIC instrument panel (four simultaneous displays)
+            self.instrument_panel.render(footer_cols[1], frame);
         }
 
         // Apply theme to textarea each frame (in case theme changed)
@@ -686,22 +692,35 @@ impl App {
 
         // ── Final bg cleanup pass ───────────────────────────────────
         // Force every cell to have a known-good background color.
-        // If a cell's bg isn't in our allow-list of intentional colors,
-        // override it to the theme base bg. This ensures no foreign color
-        // can appear in the final buffer.
-        // The instrument panel renders its own pixels — we skip it in the
-        // bg cleanup. The instruments area is inside the footer which uses
-        // footer_bg, so it's already in the allow-list.
+        // Skip the instrument panel area — it renders its own pixels
+        // with half-block characters where bg carries color data.
         {
             let base = self.theme.surface_bg();
             let card = self.theme.card_bg();
             let footer = self.theme.footer_bg();
-            let err_bg = Color::Rgb(30, 8, 16);    // tool_error_bg
-            let diff_add = Color::Rgb(4, 22, 12);  // diff_added_bg
-            let diff_rm = Color::Rgb(22, 4, 4);    // diff_removed_bg
+            let err_bg = Color::Rgb(30, 8, 16);
+            let diff_add = Color::Rgb(4, 22, 12);
+            let diff_rm = Color::Rgb(22, 4, 4);
+            // Instrument panel occupies the right 60% of the footer area
+            let inst_area = if !self.focus_mode && chunks[2].width > 0 {
+                let cols = Layout::horizontal([
+                    Constraint::Percentage(40),
+                    Constraint::Percentage(60),
+                ]).split(chunks[2]);
+                cols[1]
+            } else {
+                Rect::ZERO
+            };
             let buf = frame.buffer_mut();
             for y in area.top()..area.bottom() {
                 for x in area.left()..area.right() {
+                    // Skip instrument panel — it owns its pixels
+                    if inst_area.width > 0
+                        && x >= inst_area.x && x < inst_area.right()
+                        && y >= inst_area.y && y < inst_area.bottom()
+                    {
+                        continue;
+                    }
                     let cell = &mut buf[(x, y)];
                     let bg = cell.bg;
                     match bg {
