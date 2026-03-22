@@ -1557,6 +1557,8 @@ pub struct TuiConfig {
     pub bus_commands: Vec<omegon_traits::CommandDefinition>,
     /// Shared handles for live dashboard updates during the session.
     pub dashboard_handles: dashboard::DashboardHandles,
+    /// Initial prompt to queue after startup (sent automatically, TUI stays open).
+    pub initial_prompt: Option<String>,
 }
 
 /// Initial state snapshot gathered during setup, before the TUI event loop starts.
@@ -1885,6 +1887,11 @@ pub async fn run_tui(
     {
         let t = &app.theme;
         app.effects.queue_startup(t.as_ref());
+    }
+
+    // Queue initial prompt if provided (--initial-prompt / --initial-prompt-file)
+    if let Some(prompt) = config.initial_prompt {
+        app.queue_prompt(prompt);
     }
 
     loop {

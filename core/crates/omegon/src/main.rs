@@ -126,6 +126,15 @@ struct Cli {
     #[arg(long)]
     no_splash: bool,
 
+    /// Queue an initial prompt in the TUI (interactive mode, not headless).
+    /// The prompt is sent automatically after startup. The TUI stays open.
+    #[arg(long)]
+    initial_prompt: Option<String>,
+
+    /// Like --initial-prompt but reads from a file.
+    #[arg(long)]
+    initial_prompt_file: Option<PathBuf>,
+
     /// Log level: error, warn, info, debug, trace. Overrides RUST_LOG.
     #[arg(long, default_value = "info", global = true)]
     log_level: String,
@@ -602,6 +611,13 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         .map(|(_, def)| def.clone())
         .collect();
 
+    // Resolve initial prompt (--initial-prompt or --initial-prompt-file)
+    let initial_prompt = match (&cli.initial_prompt, &cli.initial_prompt_file) {
+        (Some(p), _) => Some(p.clone()),
+        (_, Some(path)) => std::fs::read_to_string(path).ok(),
+        _ => None,
+    };
+
     let tui_config = tui::TuiConfig {
         cwd: agent.cwd.to_string_lossy().to_string(),
         is_oauth,
@@ -609,6 +625,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         no_splash: cli.no_splash,
         bus_commands,
         dashboard_handles: agent.dashboard_handles.clone(),
+        initial_prompt,
     };
     let tui_cancel = shared_cancel.clone();
     let tui_settings = shared_settings.clone();
