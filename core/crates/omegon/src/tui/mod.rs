@@ -405,6 +405,70 @@ impl App {
     /// Try to cancel the active agent turn. Returns true if cancelled.
     /// Queue a prompt to be sent when the agent finishes.
     /// Replaces any previously queued prompt with a warning.
+    /// Launch the interactive demo — clones the demo project and exec's omegon inside it.
+    fn launch_demo(&mut self) -> SlashResult {
+        // Don't exec during tests — the test runner would be replaced
+        if cfg!(test) || std::env::var("CARGO_TEST").is_ok() {
+            return SlashResult::Display("Demo: would clone and launch omegon-demo".into());
+        }
+
+        const DEMO_REPO: &str = "https://github.com/styrene-lab/omegon-demo.git";
+        let demo_dir = std::env::temp_dir().join("omegon-demo");
+
+        // Clone or pull
+        if demo_dir.join(".git").exists() {
+            let _ = std::process::Command::new("git")
+                .args(["pull", "--rebase"])
+                .current_dir(&demo_dir)
+                .output();
+        } else {
+            let _ = std::fs::remove_dir_all(&demo_dir);
+            let result = std::process::Command::new("git")
+                .args(["clone", "--depth=1", DEMO_REPO, &demo_dir.to_string_lossy()])
+                .output();
+            if result.is_err() || !demo_dir.join(".git").exists() {
+                return SlashResult::Display("Failed to clone demo project. Check network connectivity.".into());
+            }
+        }
+
+        let prompt_file = demo_dir.join(".omegon/prompts/demo.md");
+        if !prompt_file.exists() {
+            return SlashResult::Display("Demo project cloned but prompt file not found.".into());
+        }
+
+        let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("omegon"));
+
+        // Restore terminal before exec
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = io::stdout().execute(crossterm::terminal::LeaveAlternateScreen);
+        let _ = io::stdout().execute(crossterm::event::DisableBracketedPaste);
+        let _ = io::stdout().execute(crossterm::event::DisableMouseCapture);
+
+        // exec replaces this process
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            let err = std::process::Command::new(&exe)
+                .arg("--initial-prompt-file")
+                .arg(&prompt_file)
+                .arg("--no-splash")
+                .current_dir(&demo_dir)
+                .exec();
+            SlashResult::Display(format!("Failed to launch demo: {err}"))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = std::process::Command::new(&exe)
+                .arg("--initial-prompt-file")
+                .arg(&prompt_file)
+                .arg("--no-splash")
+                .current_dir(&demo_dir)
+                .spawn();
+            self.should_quit = true;
+            SlashResult::Handled
+        }
+    }
+
     fn queue_prompt(&mut self, text: String) {
         if let Some(ref prev) = self.queued_prompt {
             self.conversation.push_system(&format!("⏳ Replaced queued: {}", &prev[..prev.len().min(40)]));
@@ -781,6 +845,7 @@ impl App {
         ("delegate", "delegate task management",              &["status"]),
         ("status",   "show harness status (providers, MCP, secrets, routing)", &[]),
         ("focus",    "toggle instrument panel focus mode",   &[]),
+        ("demo",     "launch interactive demo (clones demo project)", &[]),
         ("splash",   "replay splash animation",              &[]),
         ("dashboard", "open web dashboard (alias for /dash open)", &[]),
         ("version",  "show build version and git sha",       &[]),
@@ -1158,6 +1223,10 @@ impl App {
                 self.focus_mode = !self.focus_mode;
                 let status = if self.focus_mode { "enabled" } else { "disabled" };
                 SlashResult::Display(format!("Instrument panel focus mode → {status}"))
+            }
+
+            "demo" => {
+                self.launch_demo()
             }
 
             "vault" => {
