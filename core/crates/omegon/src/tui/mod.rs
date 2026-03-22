@@ -492,12 +492,18 @@ impl App {
         // background (Color::Reset). Every pixel is ours.
         let bg = self.theme.surface_bg();
         let fg = self.theme.fg();
-        let base_style = Style::default().bg(bg).fg(fg);
+        frame.buffer_mut().reset();
         for y in area.top()..area.bottom() {
             for x in area.left()..area.right() {
-                frame.buffer_mut()[(x, y)].set_style(base_style);
+                let cell = &mut frame.buffer_mut()[(x, y)];
+                cell.reset();
+                cell.set_char(' ');
+                cell.set_bg(bg);
+                cell.set_fg(fg);
             }
         }
+
+        
 
         // ── Horizontal split: main area | dashboard panel ───────────
         // Dashboard appears as a right-side panel when terminal is wide enough.
@@ -699,43 +705,34 @@ impl App {
         frame.render_widget(&self.toasts, frame.area());
 
         // ── Final bg cleanup pass ───────────────────────────────────
-        // Any cell that widgets left with Color::Reset bg gets the theme bg.
-        // This catches spans/paragraphs that use Style::default() without
-        // explicit .bg() — they'd otherwise show the terminal's default color.
-        // Also force ALL cells to have explicit theme bg unless they have a
-        // deliberate non-default, non-reset color.
+        // Force every cell to have a known-good background color.
+        // If a cell's bg isn't in our allow-list of intentional colors,
+        // override it to the theme base bg. This is the nuclear option
+        // that ensures NO foreign color can appear in the final buffer.
         {
-            let bg = self.theme.surface_bg();
+            let base = self.theme.surface_bg();
             let card = self.theme.card_bg();
+            let err_bg = Color::Rgb(30, 8, 16);    // tool_error_bg
+            let diff_add = Color::Rgb(4, 22, 12);  // diff_added_bg
+            let diff_rm = Color::Rgb(22, 4, 4);    // diff_removed_bg
             let buf = frame.buffer_mut();
-            // Diagnostic: on first frame, log unique bg colors
-            if self.turn == 0 && self.tool_calls == 0 {
-                let mut color_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
-                for y in area.top()..area.bottom() {
-                    for x in area.left()..area.right() {
-                        let cell = &buf[(x, y)];
-                        let key = format!("{:?}", cell.bg);
-                        *color_counts.entry(key).or_insert(0) += 1;
-                    }
-                }
-                let mut counts: Vec<_> = color_counts.into_iter().collect();
-                counts.sort_by(|a, b| b.1.cmp(&a.1));
-                tracing::warn!("=== BG COLOR AUDIT ===");
-                for (color, count) in counts.iter().take(15) {
-                    tracing::warn!("  {count:>6} cells: {color}");
-                }
-            }
             for y in area.top()..area.bottom() {
                 for x in area.left()..area.right() {
                     let cell = &mut buf[(x, y)];
-                    if cell.bg == Color::Reset {
-                        cell.set_bg(bg);
+                    let bg = cell.bg;
+                    match bg {
+                        // Known-good: theme backgrounds
+                        c if c == base || c == card => {}
+                        // Known-good: semantic backgrounds
+                        c if c == err_bg || c == diff_add || c == diff_rm => {}
+                        // Known-good: fractal colors (teal range from HSV renderer)
+                        Color::Rgb(r, g, b) if r <= 12 && g <= 50 && b <= 50
+                            && (g > 20 || b > 20) => {}
+                        // Everything else: override to base
+                        _ => { cell.set_bg(base); }
                     }
                 }
             }
-            // Second pass: catch any remaining non-theme bg colors that
-            // aren't deliberate semantic colors (card_bg, diff, error).
-            let _ = card; // card_bg is a legitimate distinct color
         }
     }
 
