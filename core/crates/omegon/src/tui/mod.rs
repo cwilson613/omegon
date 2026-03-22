@@ -115,6 +115,8 @@ pub struct App {
     selector_kind: Option<SelectorKind>,
     /// Last tool name from ToolStart — used to track memory mutations.
     last_tool_name: Option<String>,
+    /// Tool name that completed this frame — consumed by instrument telemetry
+    completed_tool_name: Option<String>,
     /// Current spinner verb — rotates on each tool call.
     working_verb: &'static str,
     /// When true, replay the splash animation.
@@ -194,6 +196,7 @@ impl App {
             selector: None,
             selector_kind: None,
             last_tool_name: None,
+            completed_tool_name: None,
             working_verb: "Working",
             replay_splash: false,
             plugin_registry: Some(crate::plugins::registry::PluginRegistry::new(
@@ -665,23 +668,17 @@ impl App {
                 crate::settings::ThinkingLevel::Medium => "medium",
                 crate::settings::ThinkingLevel::High => "high",
             };
-            // Compute tool call delta (not cumulative count)
-            let tool_delta = self.tool_calls.saturating_sub(self.prev_tool_calls);
-            self.prev_tool_calls = self.tool_calls;
 
             // Consume memory ops accumulated since last telemetry update.
             // These accumulate from ToolEnd events between draws.
-            // Tool name: pass the last tool that fired (if any this frame)
-            let tool_name = if tool_delta > 0 {
-                self.last_tool_name.as_deref()
-            } else { None };
+            // Tool name: use the completed tool name (set on ToolEnd, consumed here)
+            let tool_name = self.completed_tool_name.take();
 
-            // Memory op: determine direction from tool name
+            // Memory op: determine direction from completed tool name
             let mem_op = if self.memory_ops_this_frame > 0 {
-                let dir = if self.last_tool_name.as_deref() == Some("memory_recall")
-                    || self.last_tool_name.as_deref() == Some("memory_query")
-                    || self.last_tool_name.as_deref() == Some("memory_episodes")
-                    || self.last_tool_name.as_deref() == Some("memory_search_archive")
+                let dir = if matches!(tool_name.as_deref(),
+                    Some("memory_recall") | Some("memory_query") |
+                    Some("memory_episodes") | Some("memory_search_archive"))
                 {
                     instruments::WaveDirection::Left // recall = leftward
                 } else {
@@ -693,8 +690,8 @@ impl App {
 
             self.instrument_panel.update_telemetry(
                 self.footer_data.context_percent,
-                tool_name,
-                false, // tool_error set separately
+                tool_name.as_deref(),
+                false,
                 thinking,
                 mem_op,
                 self.agent_active,
@@ -1613,7 +1610,8 @@ impl App {
                         self.memory_ops_this_frame += 1;
                     }
                 }
-                self.last_tool_name = None;
+                // Save for instrument telemetry before clearing
+                self.completed_tool_name = self.last_tool_name.take();
             }
             AgentEvent::AgentEnd => {
                 self.agent_active = false;
