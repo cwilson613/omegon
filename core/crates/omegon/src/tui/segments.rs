@@ -204,15 +204,14 @@ fn render_assistant_text(
 ) {
     if area.width < 3 || area.height == 0 { return; }
 
-    // Subtle left gutter — dim accent dot on first line only
-    if let Some(cell) = buf.cell_mut((area.x, area.y)) {
-        cell.set_symbol(" ");
-    }
-    if area.x + 1 < area.right()
-        && let Some(cell) = buf.cell_mut((area.x + 1, area.y))
-    {
-        cell.set_symbol("│");
-        cell.set_style(Style::default().fg(t.border_dim()));
+    // Left gutter — accent-colored bar for the full height of the response
+    for row in 0..area.height {
+        if area.x + 1 < area.right() {
+            if let Some(cell) = buf.cell_mut((area.x + 1, area.y + row)) {
+                cell.set_symbol("│");
+                cell.set_style(Style::default().fg(t.success()));
+            }
+        }
     }
 
     let inner = Rect {
