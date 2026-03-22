@@ -140,6 +140,7 @@ enum SelectorKind {
 }
 
 /// Result of handling a slash command.
+#[derive(Debug)]
 enum SlashResult {
     /// Display this text as a system message.
     Display(String),

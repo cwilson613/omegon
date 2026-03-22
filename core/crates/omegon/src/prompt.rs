@@ -39,90 +39,6 @@ Current working directory: {cwd}"#,
 }
 
 /// Rich tool guidelines — how to use each tool well, not just what it does.
-fn build_tool_guidelines(tools: &[ToolDefinition]) -> String {
-    let mut guidelines = Vec::new();
-
-    // Only include guidelines for tools that are actually registered
-    let tool_names: std::collections::HashSet<&str> =
-        tools.iter().map(|t| t.name.as_str()).collect();
-
-    if tool_names.contains("bash") {
-        guidelines.push(
-            "**bash**: Execute shell commands. Output is tail-truncated to 2000 lines / 50KB.\n\
-             - Use for: running tests, git operations, installing dependencies, grepping across files\n\
-             - Don't use for: reading files (use `read`), writing files (use `write`)\n\
-             - Set timeout for potentially long commands: builds, test suites, network operations\n\
-             - Check exit codes in the result — non-zero means the command failed"
-        );
-    }
-
-    if tool_names.contains("read") {
-        guidelines.push(
-            "**read**: Read file contents. Use offset/limit for large files.\n\
-             - Always read a file before editing it — you need the exact text to match\n\
-             - For large files, use offset and limit to read specific sections\n\
-             - When exploring a codebase, read entry points and type definitions first"
-        );
-    }
-
-    if tool_names.contains("edit") {
-        guidelines.push(
-            "**edit**: Replace exact text in a file. The oldText must match exactly — every character, every whitespace.\n\
-             - Read the file first to get the exact text. Don't guess at indentation or whitespace.\n\
-             - If your edit fails with 'Could not find', read the file again — it may have changed.\n\
-             - If it fails with 'multiple occurrences', include more surrounding context to make the match unique.\n\
-             - Edit runs automatic validation (type check / lint) after every change — read the validation result.\n\
-             - Multiple edits in the same turn are applied atomically with rollback on failure."
-        );
-    }
-
-    if tool_names.contains("write") {
-        guidelines.push(
-            "**write**: Create or overwrite a file. Creates parent directories automatically.\n\
-             - Use for new files only. For existing files, prefer edit (preserves content you don't need to change).\n\
-             - Write runs automatic validation after creation."
-        );
-    }
-
-    if tool_names.contains("change") {
-        guidelines.push(
-            "**change**: Atomic multi-file edit with validation. Use when editing multiple related files.\n\
-             - All edits succeed or all roll back — no partial state.\n\
-             - validate: 'standard' (default) runs type checker; 'full' also runs affected tests; 'none' skips."
-        );
-    }
-
-    if tool_names.contains("speculate_start") {
-        guidelines.push(
-            "**speculate_start/check/commit/rollback**: Git checkpoint for exploratory changes.\n\
-             - Use when trying a risky approach. Start → make changes → check → commit or rollback.\n\
-             - Only one speculation can be active at a time."
-        );
-    }
-
-    if tool_names.contains("memory_query") || tool_names.contains("memory_recall") {
-        guidelines.push(
-            "**memory**: Project memory persists across sessions.\n\
-             - Use memory_recall(query) for targeted semantic search — more efficient than memory_query.\n\
-             - Store conclusions, not investigation steps. Current state, not transitions.\n\
-             - Before storing, check if an existing fact covers it — use memory_supersede to update."
-        );
-    }
-
-    if tool_names.contains("web_search") {
-        guidelines.push(
-            "**web_search**: Search the web via Brave, Tavily, or Serper.\n\
-             - Use 'compare' mode for research requiring cross-source verification.\n\
-             - Use 'quick' mode for simple lookups."
-        );
-    }
-
-    guidelines.join("\n\n")
-}
-
-/// Detect lifecycle artifacts in the project and inject awareness.
-/// Only injects if design docs or openspec changes actually exist —
-/// projects without lifecycle artifacts get no lifecycle prompt.
 fn detect_lifecycle_context(cwd: &Path, tools: &[ToolDefinition]) -> String {
     let repo_root = find_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
     let tool_names: std::collections::HashSet<&str> =
@@ -282,19 +198,8 @@ fn detect_project_conventions(cwd: &Path) -> String {
 }
 
 /// Truncate a directive string to a byte budget, breaking at a line boundary.
-fn truncate_directive(content: &str, max_bytes: usize) -> String {
-    if content.len() <= max_bytes {
-        return content.to_string();
-    }
-    let mut end = max_bytes;
-    while end > 0 && !content.is_char_boundary(end) {
-        end -= 1;
-    }
-    if let Some(nl) = content[..end].rfind('\n') {
-        format!("{}\n[truncated]", &content[..nl])
-    } else {
-        format!("{}…", &content[..end])
-    }
+fn truncate_directive(content: &str, max_width: usize) -> String {
+    crate::util::truncate(content, max_width)
 }
 
 /// Load project directives from AGENTS.md files.

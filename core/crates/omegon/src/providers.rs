@@ -13,6 +13,11 @@ use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
 use crate::bridge::{LlmBridge, LlmEvent, LlmMessage, StreamOptions};
+
+/// Claude Code CLI version for OAuth user-agent header.
+/// Must match what Anthropic expects for subscription recognition.
+/// Update when upstream Claude Code advances.
+const CLAUDE_CODE_UA: &str = "claude-cli/2.1.75";
 use omegon_traits::ToolDefinition;
 
 // ─── API Key Resolution ─────────────────────────────────────────────────────
@@ -474,7 +479,7 @@ impl LlmBridge for AnthropicClient {
             })
             .header("content-type", "application/json")
             // Claude Code identity headers for OAuth subscription recognition
-            .header("user-agent", if is_oauth { "claude-cli/2.1.75" } else { "omegon" })
+            .header("user-agent", if is_oauth { CLAUDE_CODE_UA } else { "omegon" })
             .header("x-app", "cli")
             .json(&body)
             .send()

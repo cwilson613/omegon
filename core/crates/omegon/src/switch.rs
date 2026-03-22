@@ -713,6 +713,8 @@ pub async fn list_versions() -> anyhow::Result<()> {
 
 /// `omegon switch <version>` — download (if needed) and activate.
 pub async fn switch_to_version(version: &str) -> anyhow::Result<()> {
+    // Normalize: always strip 'v' prefix so directory names are consistent
+    let version = version.strip_prefix('v').unwrap_or(version);
     let mut switcher = VersionSwitcher::new();
     let installed = switcher.list_installed_versions()?;
 

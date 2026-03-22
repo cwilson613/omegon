@@ -867,10 +867,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     (s.model.clone(), s.max_turns)
                 };
 
-                let extended_context = matches!(
-                    shared_settings.lock().map(|s| s.context_mode),
-                    Ok(settings::ContextMode::Extended)
-                );
                 let loop_config = r#loop::LoopConfig {
                     max_turns,
                     soft_limit_turns: if max_turns > 0 { max_turns * 2 / 3 } else { 0 },
@@ -878,7 +874,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     retry_delay_ms: 2000,
                     model,
                     cwd: agent.cwd.clone(),
-                    extended_context,
+                    extended_context: false,
                     settings: Some(shared_settings.clone()),
                     secrets: Some(agent.secrets.clone()),
                 };
@@ -919,10 +915,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     (s.model.clone(), s.max_turns)
                 };
 
-                let extended_context = matches!(
-                    shared_settings.lock().map(|s| s.context_mode),
-                    Ok(settings::ContextMode::Extended)
-                );
                 let loop_config = r#loop::LoopConfig {
                     max_turns,
                     soft_limit_turns: if max_turns > 0 { max_turns * 2 / 3 } else { 0 },
@@ -930,7 +922,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     retry_delay_ms: 2000,
                     model,
                     cwd: agent.cwd.clone(),
-                    extended_context,
+                    extended_context: false,
                     settings: Some(shared_settings.clone()),
                     secrets: Some(agent.secrets.clone()),
                 };

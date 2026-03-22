@@ -371,3 +371,65 @@ fn handled_commands_are_in_commands_table() {
         );
     }
 }
+
+#[test]
+fn slash_command_aliases_dispatch_correctly() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    // /dashboard should resolve (alias for /dash open)
+    let result = app.handle_slash_command("/dashboard", &tx);
+    assert!(!matches!(result, SlashResult::NotACommand),
+        "/dashboard should be handled, not fall through");
+
+    // /version should display build info
+    let result = app.handle_slash_command("/version", &tx);
+    assert!(matches!(result, SlashResult::Display(_)),
+        "/version should display version info");
+
+    // /q should quit
+    let result = app.handle_slash_command("/q", &tx);
+    assert!(matches!(result, SlashResult::Quit), "/q should quit");
+}
+
+#[test]
+fn unknown_slash_commands_show_error() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    // Unknown commands must NOT return NotACommand (which sends to agent)
+    let result = app.handle_slash_command("/foobar", &tx);
+    assert!(matches!(result, SlashResult::Display(_)),
+        "/foobar should show error, not go to agent");
+
+    let result = app.handle_slash_command("/secret", &tx);
+    assert!(matches!(result, SlashResult::Display(_)),
+        "/secret should show error, not go to agent");
+}
+
+#[test]
+fn slash_prefix_matching_unique() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    // /hel should uniquely prefix-match /help
+    let result = app.handle_slash_command("/hel", &tx);
+    assert!(matches!(result, SlashResult::Display(_)),
+        "/hel should prefix-match /help and show help text");
+}
+
+#[test]
+fn slash_prefix_matching_ambiguous() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    // /s matches multiple commands (stats, status, sessions, splash)
+    let result = app.handle_slash_command("/s", &tx);
+    match result {
+        SlashResult::Display(msg) => {
+            assert!(msg.contains("Did you mean") || msg.contains("Ambiguous"),
+                "/s should show ambiguous message, got: {msg}");
+        }
+        _ => panic!("/s should be ambiguous, got: {result:?}"),
+    }
+}
