@@ -110,7 +110,7 @@ impl FractalWidget {
         self.center.1 = 0.186 + (self.time * speed * 0.7).cos() * drift_radius;
     }
 
-    /// Render the fractal into a ratatui Buffer area.
+    /// Render the fractal into a ratatui Buffer area with Ω mask and border glow.
     /// Uses half-block characters for 2x vertical resolution.
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
         if area.width < 4 || area.height < 2 {
@@ -124,6 +124,13 @@ impl FractalWidget {
         let view_h = 2.5 / self.zoom;
         let view_w = view_h * aspect;
 
+        // Generate the Ω mask at current resolution
+        let mask = omega_mask(px_w, px_h);
+
+        // Border glow color — matches the active palette, pulsing gently
+        let glow_phase = (self.time * 0.8).sin() * 0.5 + 0.5; // 0..1 pulse
+        let glow_color = self.glow_color(glow_phase);
+
         for cy in (0..px_h).step_by(2) {
             let row = cy / 2;
             if row >= area.height as usize { break; }
@@ -131,12 +138,23 @@ impl FractalWidget {
             for cx in 0..px_w {
                 if cx >= area.width as usize { break; }
 
-                // Map pixel to complex coordinate
-                let top_iter = self.compute_pixel(cx, cy, px_w, px_h, view_w, view_h);
-                let bot_iter = self.compute_pixel(cx, cy + 1, px_w, px_h, view_w, view_h);
+                let top_mask = mask_value(&mask, cx, cy, px_w);
+                let bot_mask = mask_value(&mask, cx, cy + 1, px_w);
 
-                let top_color = self.iter_to_color(top_iter);
-                let bot_color = self.iter_to_color(bot_iter);
+                let top_color = match top_mask {
+                    MaskVal::Inside => self.iter_to_color(
+                        self.compute_pixel(cx, cy, px_w, px_h, view_w, view_h)
+                    ),
+                    MaskVal::Border => glow_color,
+                    MaskVal::Outside => Color::Rgb(6, 10, 18), // surface_bg
+                };
+                let bot_color = match bot_mask {
+                    MaskVal::Inside => self.iter_to_color(
+                        self.compute_pixel(cx, cy + 1, px_w, px_h, view_w, view_h)
+                    ),
+                    MaskVal::Border => glow_color,
+                    MaskVal::Outside => Color::Rgb(6, 10, 18),
+                };
 
                 let cell = buf.cell_mut(Position::new(
                     area.x + cx as u16,
@@ -148,6 +166,38 @@ impl FractalWidget {
                     cell.set_bg(bot_color);
                 }
             }
+        }
+    }
+
+    /// Border glow color — subdued, palette-matched pulse.
+    fn glow_color(&self, phase: f64) -> Color {
+        let intensity = 20.0 + phase * 25.0; // 20..45 brightness
+        match self.palette {
+            Palette::Ocean => Color::Rgb(
+                (intensity * 0.2) as u8,
+                (intensity * 0.6) as u8,
+                (intensity * 0.9) as u8,
+            ),
+            Palette::Amber => Color::Rgb(
+                (intensity * 0.9) as u8,
+                (intensity * 0.5) as u8,
+                (intensity * 0.1) as u8,
+            ),
+            Palette::Violet => Color::Rgb(
+                (intensity * 0.6) as u8,
+                (intensity * 0.2) as u8,
+                (intensity * 0.9) as u8,
+            ),
+            Palette::Split => Color::Rgb(
+                (intensity * 0.7) as u8,
+                (intensity * 0.4) as u8,
+                (intensity * 0.7) as u8,
+            ),
+            Palette::Muted => Color::Rgb(
+                (intensity * 0.4) as u8,
+                (intensity * 0.4) as u8,
+                (intensity * 0.45) as u8,
+            ),
         }
     }
 
@@ -260,6 +310,75 @@ fn simple_hash(s: &str) -> u64 {
         h = h.wrapping_mul(33).wrapping_add(b as u64);
     }
     h
+}
+
+// ─── Ω mask ─────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, PartialEq)]
+enum MaskVal {
+    Inside,  // fractal shows through
+    Border,  // glow edge
+    Outside, // background
+}
+
+/// Generate an Ω (omega) shaped mask at the given pixel resolution.
+/// The Ω is a circle open at the bottom with two feet.
+fn omega_mask(w: usize, h: usize) -> Vec<MaskVal> {
+    let mut mask = vec![MaskVal::Outside; w * h];
+    let cx = w as f64 / 2.0;
+    let cy = h as f64 / 2.0 - 1.0; // shift up slightly to make room for feet
+    let radius = (w.min(h) as f64 / 2.0) - 2.0; // leave margin for border
+    let border_width = 1.2;
+
+    for py in 0..h {
+        for px in 0..w {
+            let dx = px as f64 - cx;
+            let dy = py as f64 - cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+
+            // Angle from center (0 = right, π/2 = down)
+            let angle = dy.atan2(dx);
+
+            // The Ω shape: a circle with a gap at the bottom (~30° each side)
+            let gap_angle = 0.45; // radians from straight down
+            let in_gap = angle > std::f64::consts::FRAC_PI_2 - gap_angle
+                && angle < std::f64::consts::FRAC_PI_2 + gap_angle;
+
+            // Feet: two small rectangles at the bottom of the gap
+            let foot_y = cy + radius * 0.85;
+            let foot_width = radius * 0.22;
+            let left_foot_x = cx - radius * gap_angle.sin() - foot_width * 0.5;
+            let right_foot_x = cx + radius * gap_angle.sin() - foot_width * 0.5;
+            let is_foot = py as f64 >= foot_y && py as f64 <= foot_y + 2.5
+                && ((px as f64 >= left_foot_x && px as f64 <= left_foot_x + foot_width * 2.0)
+                    || (px as f64 >= right_foot_x && px as f64 <= right_foot_x + foot_width * 2.0));
+
+            let idx = py * w + px;
+            if is_foot {
+                // Check if this foot pixel is on the edge
+                let is_foot_edge = py as f64 <= foot_y + border_width
+                    || py as f64 >= foot_y + 2.5 - border_width
+                    || px as f64 <= left_foot_x + border_width
+                    || px as f64 >= left_foot_x + foot_width * 2.0 - border_width
+                    || px as f64 <= right_foot_x + border_width
+                    || px as f64 >= right_foot_x + foot_width * 2.0 - border_width;
+                mask[idx] = if is_foot_edge { MaskVal::Border } else { MaskVal::Inside };
+            } else if !in_gap && dist <= radius {
+                // Inside the circle (excluding gap)
+                if dist >= radius - border_width {
+                    mask[idx] = MaskVal::Border; // outer edge
+                } else {
+                    mask[idx] = MaskVal::Inside;
+                }
+            }
+        }
+    }
+    mask
+}
+
+fn mask_value(mask: &[MaskVal], x: usize, y: usize, w: usize) -> MaskVal {
+    let idx = y * w + x;
+    if idx < mask.len() { mask[idx] } else { MaskVal::Outside }
 }
 
 #[cfg(test)]
