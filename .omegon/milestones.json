@@ -1,0 +1,17 @@
+{
+  "0.15.0": {
+    "nodes": [
+      "tutorial-demo-project",
+      "terminal-responsive-degradation",
+      "theme-calibration"
+    ],
+    "frozen": false
+  },
+  "0.16.0": {
+    "nodes": [
+      "local-inference-guide",
+      "web-dashboard-redesign"
+    ],
+    "frozen": false
+  }
+}
