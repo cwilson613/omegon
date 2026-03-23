@@ -213,19 +213,12 @@ fn render_assistant_text(
 ) {
     if area.width < 3 || area.height == 0 { return; }
 
-    // Left gutter — accent-colored bar for the full height of the response
-    // Flush left at area.x, same position as user message bar
-    for row in 0..area.height {
-        if let Some(cell) = buf.cell_mut((area.x, area.y + row)) {
-            cell.set_symbol("│");
-            cell.set_style(Style::default().fg(t.success()));
-        }
-    }
-
+    // No gutter bar — agent text is the natural, undecorated state.
+    // Operator messages get the accent bar; agent output flows clean.
     let inner = Rect {
-        x: area.x + 2,
+        x: area.x + 1,
         y: area.y,
-        width: area.width.saturating_sub(3),
+        width: area.width.saturating_sub(2),
         height: area.height,
     };
 
