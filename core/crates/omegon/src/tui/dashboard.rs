@@ -152,6 +152,16 @@ impl DashboardHandles {
                 }
             }
             state.status_counts = counts;
+
+            // Collect degraded nodes
+            state.degraded_nodes = lp.degraded_nodes().iter().map(|d| {
+                DegradedNodeSummary {
+                    id: d.id.clone(),
+                    title: d.title.clone(),
+                    file_path: d.file_path.display().to_string(),
+                    reason: d.reason.to_string(),
+                }
+            }).collect();
         }
 
         // Cleave
@@ -186,6 +196,8 @@ pub struct DashboardState {
     pub actionable_nodes: Vec<NodeSummary>,
     /// All non-implemented nodes for tree rendering.
     pub all_nodes: Vec<NodeSummary>,
+    /// Nodes that were valid but are now broken (file exists, parse fails).
+    pub degraded_nodes: Vec<DegradedNodeSummary>,
     /// Tree widget selection state (managed by tui-tree-widget).
     pub tree_state: TreeState<String>,
     /// Whether the sidebar is currently receiving keyboard input.
@@ -278,6 +290,14 @@ pub struct FocusedNodeSummary {
     pub decisions: usize,
     pub readiness: f32,
     pub openspec_change: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct DegradedNodeSummary {
+    pub id: String,
+    pub title: String,
+    pub file_path: String,
+    pub reason: String,
 }
 
 #[derive(Clone)]
@@ -426,6 +446,12 @@ impl DashboardState {
                 Style::default().fg(t.warning()),
             ));
         }
+        if !self.degraded_nodes.is_empty() {
+            badge_parts.push(Span::styled(
+                format!(" ⚠{}", self.degraded_nodes.len()),
+                Style::default().fg(t.error()),
+            ));
+        }
         lines.push(Line::from(badge_parts));
 
         // Pipeline funnel bar
@@ -557,7 +583,26 @@ impl DashboardState {
 
     fn render_tree(&mut self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
         let focused_id = self.focused_node.as_ref().map(|n| n.id.as_str());
-        let items = build_tree_items(&self.all_nodes, focused_id, t);
+        let mut items = build_tree_items(&self.all_nodes, focused_id, t);
+
+        // Prepend degraded nodes — files that exist but no longer parse.
+        // Shown with ⚠ icon so the operator can trace the breakage.
+        for d in self.degraded_nodes.iter().rev() {
+            let text = Text::from(Line::from(vec![
+                Span::styled("⚠ ", Style::default().fg(t.error())),
+                Span::styled(
+                    d.id.clone(),
+                    Style::default().fg(t.error()).add_modifier(Modifier::ITALIC),
+                ),
+                Span::styled(
+                    format!(" ({})", d.reason),
+                    Style::default().fg(t.dim()),
+                ),
+            ]));
+            // Use a distinct ID prefix to avoid collisions with valid nodes
+            let item = TreeItem::new_leaf(format!("degraded:{}", d.id), text);
+            items.insert(0, item);
+        }
 
         // Auto-open root nodes on first render so tree isn't fully collapsed
         if self.tree_state.opened().is_empty() && !items.is_empty() {

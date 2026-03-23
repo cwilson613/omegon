@@ -10,6 +10,40 @@ use super::design;
 use super::spec;
 use super::types::*;
 
+/// A node that was previously parseable but is now broken.
+/// Kept visible so the operator can trace the breakage.
+#[derive(Debug, Clone)]
+pub struct DegradedNode {
+    /// The node ID as it was last known.
+    pub id: String,
+    /// The title from the last successful parse.
+    pub title: String,
+    /// The status from the last successful parse.
+    pub last_status: NodeStatus,
+    /// Path to the file that's still on disk but no longer parses.
+    pub file_path: PathBuf,
+    /// Why the node degraded.
+    pub reason: DegradedReason,
+}
+
+/// Why a previously-valid node became unparseable.
+#[derive(Debug, Clone, Copy)]
+pub enum DegradedReason {
+    /// File exists but frontmatter is missing or unparseable.
+    ParseFailed,
+    /// File exists but the `id` field was removed from frontmatter.
+    MissingId,
+}
+
+impl std::fmt::Display for DegradedReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ParseFailed => write!(f, "frontmatter parse failed"),
+            Self::MissingId => write!(f, "id field missing"),
+        }
+    }
+}
+
 /// Provides lifecycle context (design nodes + openspec changes) to the agent.
 pub struct LifecycleContextProvider {
     /// All design nodes, keyed by id.
@@ -22,6 +56,8 @@ pub struct LifecycleContextProvider {
     focused_node: Option<String>,
     /// The repo root for re-scanning.
     repo_path: PathBuf,
+    /// Nodes that were valid on a previous scan but broke on rescan.
+    degraded: Vec<DegradedNode>,
 }
 
 impl LifecycleContextProvider {
@@ -43,6 +79,7 @@ impl LifecycleContextProvider {
             changes,
             focused_node: None,
             repo_path: repo_path.to_path_buf(),
+            degraded: Vec::new(),
         }
     }
 
@@ -71,10 +108,69 @@ impl LifecycleContextProvider {
         &self.changes
     }
 
+    /// Get degraded nodes (previously valid, now broken).
+    pub fn degraded_nodes(&self) -> &[DegradedNode] {
+        &self.degraded
+    }
+
     /// Refresh by re-scanning (call after mutations from TS side).
+    /// Detects nodes that disappeared between scans — if the file still
+    /// exists on disk but no longer parses, the node is marked degraded
+    /// so the operator can trace the breakage.
     pub fn refresh(&mut self) {
         let docs_dir = self.repo_path.join("docs");
-        self.nodes = design::scan_design_docs(&docs_dir);
+        let new_nodes = design::scan_design_docs(&docs_dir);
+
+        // Detect degraded: nodes present before but missing now
+        let mut degraded = Vec::new();
+        for (id, old_node) in &self.nodes {
+            if !new_nodes.contains_key(id) && old_node.file_path.exists() {
+                // File still on disk but didn't parse — degraded.
+                // Determine reason: try reading the file to see what failed.
+                let reason = match std::fs::read_to_string(&old_node.file_path) {
+                    Ok(content) => {
+                        if let Some(fm) = design::parse_frontmatter(&content) {
+                            if fm.get("id").and_then(|v| v.as_str()).is_none() {
+                                DegradedReason::MissingId
+                            } else {
+                                DegradedReason::ParseFailed
+                            }
+                        } else {
+                            DegradedReason::ParseFailed
+                        }
+                    }
+                    Err(_) => DegradedReason::ParseFailed,
+                };
+
+                degraded.push(DegradedNode {
+                    id: id.clone(),
+                    title: old_node.title.clone(),
+                    last_status: old_node.status,
+                    file_path: old_node.file_path.clone(),
+                    reason,
+                });
+
+                tracing::warn!(
+                    node_id = %id,
+                    file = %old_node.file_path.display(),
+                    reason = %reason,
+                    "design node degraded — file exists but no longer parses"
+                );
+            }
+        }
+
+        // Nodes that reappear after being degraded → un-degrade them
+        self.degraded.retain(|d| !new_nodes.contains_key(&d.id));
+        // Add newly degraded nodes
+        for d in degraded {
+            if !self.degraded.iter().any(|existing| existing.id == d.id) {
+                self.degraded.push(d);
+            }
+        }
+        // Clear degraded nodes whose files were deleted (genuinely removed, not broken)
+        self.degraded.retain(|d| d.file_path.exists());
+
+        self.nodes = new_nodes;
         self.changes = spec::list_changes(&self.repo_path);
         self.sections_cache.clear();
     }
@@ -141,6 +237,7 @@ mod tests {
             changes: vec![],
             focused_node: None,
             repo_path: PathBuf::from("/nonexistent"),
+            degraded: Vec::new(),
         };
 
         let signals = ContextSignals {
@@ -173,6 +270,7 @@ mod tests {
             changes: vec![],
             focused_node: Some("test".to_string()),
             repo_path: tmp.clone(),
+            degraded: Vec::new(),
         };
 
         let signals = ContextSignals {
@@ -211,6 +309,7 @@ mod tests {
             }],
             focused_node: None,
             repo_path: PathBuf::from("/nonexistent"),
+            degraded: Vec::new(),
         };
 
         let signals = ContextSignals {
@@ -225,5 +324,50 @@ mod tests {
         let injection = provider.provide_context(&signals).unwrap();
         assert!(injection.content.contains("my-change"));
         assert!(injection.content.contains("5/8"));
+    }
+
+    #[test]
+    fn refresh_detects_degraded_nodes() {
+        // Create a temp dir with a valid design doc
+        let tmp = std::env::temp_dir().join("omegon-degraded-test");
+        let docs_dir = tmp.join("docs");
+        let _ = std::fs::create_dir_all(&docs_dir);
+        let doc_path = docs_dir.join("test-node.md");
+        std::fs::write(
+            &doc_path,
+            "---\nid: test-node\ntitle: Test Node\nstatus: exploring\n---\n\n# Test\n",
+        ).unwrap();
+
+        // Initial scan should find the node
+        let mut provider = LifecycleContextProvider::new(&tmp);
+        assert!(provider.all_nodes().contains_key("test-node"));
+        assert!(provider.degraded_nodes().is_empty());
+
+        // Break the frontmatter (remove id)
+        std::fs::write(&doc_path, "---\ntitle: Broken\nstatus: exploring\n---\n\n# Broken\n").unwrap();
+
+        // Refresh should detect the node as degraded
+        provider.refresh();
+        assert!(!provider.all_nodes().contains_key("test-node"));
+        assert_eq!(provider.degraded_nodes().len(), 1);
+        assert_eq!(provider.degraded_nodes()[0].id, "test-node");
+        assert!(matches!(provider.degraded_nodes()[0].reason, DegradedReason::MissingId));
+
+        // Fix the file — node should un-degrade
+        std::fs::write(
+            &doc_path,
+            "---\nid: test-node\ntitle: Fixed Node\nstatus: decided\n---\n\n# Fixed\n",
+        ).unwrap();
+        provider.refresh();
+        assert!(provider.all_nodes().contains_key("test-node"));
+        assert!(provider.degraded_nodes().is_empty());
+
+        // Delete the file — should not appear as degraded (genuinely removed)
+        std::fs::remove_file(&doc_path).unwrap();
+        provider.refresh();
+        assert!(!provider.all_nodes().contains_key("test-node"));
+        assert!(provider.degraded_nodes().is_empty());
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

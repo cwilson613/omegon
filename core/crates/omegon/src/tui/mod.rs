@@ -2782,12 +2782,23 @@ pub async fn run_tui(
                 if app.dashboard.sidebar_active {
                     if key.code == KeyCode::Enter {
                         if let Some(node_id) = app.dashboard.selected_node_id().map(|s| s.to_string()) {
-                            // Focus the selected node in agent context
-                            let _ = command_tx.send(TuiCommand::BusCommand {
-                                name: "design-focus".into(),
-                                args: node_id,
-                            }).await;
-                            app.dashboard.sidebar_active = false;
+                            if let Some(degraded_id) = node_id.strip_prefix("degraded:") {
+                                // Degraded node — show diagnostic info instead of focusing
+                                if let Some(d) = app.dashboard.degraded_nodes.iter().find(|d| d.id == degraded_id) {
+                                    app.conversation.push_system(&format!(
+                                        "⚠ Degraded node: {}\n  Title: {}\n  File: {}\n  Reason: {}\n\nThe file exists but no longer parses. Check git diff or git blame on the file to trace the change.",
+                                        d.id, d.title, d.file_path, d.reason
+                                    ));
+                                }
+                                app.dashboard.sidebar_active = false;
+                            } else {
+                                // Normal node — focus it in agent context
+                                let _ = command_tx.send(TuiCommand::BusCommand {
+                                    name: "design-focus".into(),
+                                    args: node_id,
+                                }).await;
+                                app.dashboard.sidebar_active = false;
+                            }
                         }
                         continue;
                     }
