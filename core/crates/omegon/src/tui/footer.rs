@@ -170,26 +170,19 @@ impl FooterData {
         }
         lines.push(Line::from(auth_parts));
 
-        // Line 4: context gauge
-        let bar_w = (inner.width as usize).saturating_sub(14).min(16);
-        let pct = self.context_percent.min(100.0);
-        let mut bar_spans: Vec<Span<'static>> = vec![Span::raw(" ")];
-        bar_spans.extend(widgets::gauge_bar(&widgets::GaugeConfig {
-            percent: pct,
-            bar_width: bar_w,
-            memory_blocks: 0,
-        }, t));
-        bar_spans.push(Span::styled(
-            format!(" {}%", pct as u32),
-            Style::default().fg(widgets::percent_color(pct, t)),
-        ));
+        // Line 4: context summary (gauge is in the inference panel)
+        let pct = self.context_percent.min(100.0) as u32;
+        let ctx_color = widgets::percent_color(self.context_percent.min(100.0), t);
+        let mut ctx_parts: Vec<Span<'static>> = vec![
+            Span::styled(format!(" {}%", pct), Style::default().fg(ctx_color)),
+        ];
         if self.context_window > 0 {
-            bar_spans.push(Span::styled(
+            ctx_parts.push(Span::styled(
                 format!(" / {}", widgets::format_tokens(self.context_window)),
                 Style::default().fg(t.dim()),
             ));
         }
-        lines.push(Line::from(bar_spans));
+        lines.push(Line::from(ctx_parts));
 
         // Line 5: tier + thinking level
         let tier_color = match self.model_tier.as_str() {
