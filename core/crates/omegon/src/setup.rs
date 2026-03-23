@@ -170,27 +170,12 @@ impl AgentSetup {
         // ─── Memory ─────────────────────────────────────────────────────
         let mind = "default".to_string();
         let project_root = find_project_root(&cwd);
-        // Primary: .omegon/memory/ — Omegon's own directory
-        // Fallback: .pi/memory/ — backward compat with pi-era projects
-        let memory_dir = project_root.join(".omegon").join("memory");
-        let legacy_memory_dir = project_root.join(".pi").join("memory");
-        let _ = std::fs::create_dir_all(&memory_dir);
-        let db_path = memory_dir.join("facts.db");
-        // Check primary jsonl, fall back to legacy .pi/ location
-        let jsonl_path = {
-            let primary = memory_dir.join("facts.jsonl");
-            if primary.exists() {
-                primary
-            } else {
-                let legacy = legacy_memory_dir.join("facts.jsonl");
-                if legacy.exists() {
-                    tracing::info!("using legacy .pi/memory/facts.jsonl (consider moving to .omegon/memory/)");
-                    legacy
-                } else {
-                    primary // doesn't exist either, but that's fine
-                }
-            }
-        };
+        // Memory: ai/memory/ → .omegon/memory/ → .pi/memory/ (fallback chain)
+        let mem_dir = crate::paths::memory_dir_write(&project_root);
+        let _ = std::fs::create_dir_all(&mem_dir);
+        let db_path = mem_dir.join("facts.db");
+        let jsonl_path = crate::paths::facts_jsonl(&project_root)
+            .unwrap_or_else(|| mem_dir.join("facts.jsonl"));
 
         let mut initial_fact_count: usize = 0;
 

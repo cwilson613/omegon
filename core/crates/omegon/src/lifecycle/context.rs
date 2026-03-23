@@ -61,9 +61,9 @@ pub struct LifecycleContextProvider {
 }
 
 impl LifecycleContextProvider {
-    /// Initialize by scanning docs/ and openspec/ directories.
+    /// Initialize by scanning design docs and openspec directories.
     pub fn new(repo_path: &Path) -> Self {
-        let docs_dir = repo_path.join("docs");
+        let docs_dir = crate::paths::design_docs_dir(repo_path);
         let nodes = design::scan_design_docs(&docs_dir);
         let changes = spec::list_changes(repo_path);
 
@@ -118,7 +118,7 @@ impl LifecycleContextProvider {
     /// exists on disk but no longer parses, the node is marked degraded
     /// so the operator can trace the breakage.
     pub fn refresh(&mut self) {
-        let docs_dir = self.repo_path.join("docs");
+        let docs_dir = crate::paths::design_docs_dir(&self.repo_path);
         let scan = design::scan_design_docs_full(&docs_dir);
         let new_nodes = scan.nodes;
 

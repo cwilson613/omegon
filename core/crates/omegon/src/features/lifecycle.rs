@@ -276,7 +276,7 @@ impl LifecycleFeature {
     fn execute_design_tree_update(&self, args: &Value) -> anyhow::Result<ToolResult> {
         let action = args["action"].as_str().unwrap_or("");
         let node_id = args["node_id"].as_str();
-        let docs_dir = self.repo_path.join("docs");
+        let docs_dir = crate::paths::design_docs_dir(&self.repo_path);
         // Helper macro-like pattern: read node data, drop borrow, then mutate
         let get_node_clone = |id: &str| -> anyhow::Result<DesignNode> {
             let p = self.provider.lock().unwrap();

@@ -467,6 +467,316 @@ fn save_thinking_to_profile(cwd: &Path, level: &str) {
     let _ = profile.save(cwd);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// /init — scan project for agent conventions and migrate to Omegon
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Detected agent convention in a project directory.
+struct DetectedConvention {
+    source: &'static str,
+    description: String,
+    path: PathBuf,
+    kind: ConventionKind,
+}
+
+enum ConventionKind {
+    /// Project instructions file → AGENTS.md
+    Instructions,
+    /// Memory/facts data → ai/memory/
+    Memory,
+    /// Design docs → ai/docs/
+    DesignDocs,
+    /// OpenSpec/lifecycle → ai/openspec/
+    Lifecycle,
+    /// Agent config → .omegon/
+    Config,
+}
+
+/// Scan the project for agent conventions from other tools, migrate what's
+/// found, and bootstrap the ai/ directory structure.
+pub fn init_project(cwd: &Path) -> String {
+    let mut lines: Vec<String> = vec![];
+    let detected = scan_conventions(cwd);
+    let mut actions = 0;
+
+    lines.push("## Project Scan\n".into());
+
+    if detected.is_empty() {
+        lines.push("No existing agent conventions detected.\n".into());
+    } else {
+        lines.push(format!("Found {} agent convention(s):\n", detected.len()));
+        for d in &detected {
+            lines.push(format!("  • **{}** — {} (`{}`)", d.source, d.description,
+                d.path.strip_prefix(cwd).unwrap_or(&d.path).display()));
+        }
+        lines.push(String::new());
+    }
+
+    // ── Migrate instructions to AGENTS.md ────────────────────────────
+    let agents_md = cwd.join("AGENTS.md");
+    let omegon_agents = cwd.join(".omegon/AGENTS.md");
+    if !agents_md.exists() && !omegon_agents.exists() {
+        // Find the best instructions file to convert
+        let instructions: Vec<&DetectedConvention> = detected.iter()
+            .filter(|d| matches!(d.kind, ConventionKind::Instructions))
+            .collect();
+        if let Some(best) = instructions.first() {
+            if let Ok(content) = std::fs::read_to_string(&best.path) {
+                let header = format!(
+                    "# Project Directives\n\n> Migrated from {} by Omegon /init\n\n",
+                    best.source
+                );
+                let _ = std::fs::write(&agents_md, format!("{header}{content}"));
+                lines.push(format!("✓ Created `AGENTS.md` from {}", best.source));
+                actions += 1;
+            }
+        }
+    } else if agents_md.exists() {
+        lines.push("✓ `AGENTS.md` already exists".into());
+    }
+
+    // ── Migrate memory facts (.pi/memory/ → ai/memory/) ─────────────
+    let ai_memory = cwd.join("ai/memory");
+    let pi_memory = cwd.join(".pi/memory");
+    let omegon_memory = cwd.join(".omegon/memory");
+    if !ai_memory.exists() {
+        // Find existing facts to migrate
+        let source_dir = if omegon_memory.join("facts.jsonl").exists() {
+            Some((&omegon_memory, ".omegon/memory"))
+        } else if pi_memory.join("facts.jsonl").exists() {
+            Some((&pi_memory, ".pi/memory"))
+        } else {
+            None
+        };
+
+        if let Some((src, label)) = source_dir {
+            let _ = std::fs::create_dir_all(&ai_memory);
+            // Copy facts.jsonl
+            if let Ok(content) = std::fs::read_to_string(src.join("facts.jsonl")) {
+                let _ = std::fs::write(ai_memory.join("facts.jsonl"), &content);
+                lines.push(format!("✓ Migrated facts.jsonl from {label} → ai/memory/"));
+                actions += 1;
+            }
+            // Copy facts.db if it exists
+            if src.join("facts.db").exists() {
+                let _ = std::fs::copy(src.join("facts.db"), ai_memory.join("facts.db"));
+                lines.push(format!("✓ Migrated facts.db from {label} → ai/memory/"));
+                actions += 1;
+            }
+        }
+    }
+
+    // ── Migrate design docs (docs/ → ai/docs/) ──────────────────────
+    let ai_docs = cwd.join("ai/docs");
+    let legacy_docs = cwd.join("docs");
+    if !ai_docs.exists() && legacy_docs.is_dir() {
+        // Check if docs/ actually has design tree markdown (frontmatter with status:)
+        let has_design_docs = std::fs::read_dir(&legacy_docs).ok()
+            .map(|entries| {
+                entries.filter_map(|e| e.ok())
+                    .any(|e| {
+                        e.path().extension().is_some_and(|ext| ext == "md")
+                            && std::fs::read_to_string(e.path()).ok()
+                                .is_some_and(|c| c.starts_with("---") && c.contains("status:"))
+                    })
+            })
+            .unwrap_or(false);
+
+        if has_design_docs {
+            lines.push(format!(
+                "📋 Design docs in `docs/` ({} files) — Omegon will read from here.\n\
+                 To adopt ai/ convention: `mv docs/ ai/docs/`",
+                std::fs::read_dir(&legacy_docs).map(|e| e.count()).unwrap_or(0)
+            ));
+        }
+    }
+
+    // ── Migrate OpenSpec (openspec/ → ai/openspec/) ──────────────────
+    let ai_openspec = cwd.join("ai/openspec");
+    let legacy_openspec = cwd.join("openspec");
+    if !ai_openspec.exists() && legacy_openspec.is_dir() {
+        lines.push(format!(
+            "📋 OpenSpec in `openspec/` — Omegon will read from here.\n\
+             To adopt ai/ convention: `mv openspec/ ai/openspec/`"
+        ));
+    }
+
+    // ── Migrate lifecycle state (.omegon/lifecycle/ → ai/lifecycle/) ─
+    let ai_lifecycle = cwd.join("ai/lifecycle");
+    let omegon_lifecycle = cwd.join(".omegon/lifecycle");
+    if !ai_lifecycle.exists() && omegon_lifecycle.join("state.json").exists() {
+        let _ = std::fs::create_dir_all(&ai_lifecycle);
+        let _ = std::fs::copy(
+            omegon_lifecycle.join("state.json"),
+            ai_lifecycle.join("state.json"),
+        );
+        lines.push("✓ Migrated lifecycle state → ai/lifecycle/".into());
+        actions += 1;
+    }
+
+    // ── Migrate milestones (.omegon/milestones.json → ai/) ──────────
+    let ai_milestones = cwd.join("ai/milestones.json");
+    let omegon_milestones = cwd.join(".omegon/milestones.json");
+    if !ai_milestones.exists() && omegon_milestones.exists() {
+        let _ = std::fs::create_dir_all(cwd.join("ai"));
+        let _ = std::fs::copy(&omegon_milestones, &ai_milestones);
+        lines.push("✓ Migrated milestones.json → ai/".into());
+        actions += 1;
+    }
+
+    // ── Bootstrap .omegon/ config dir if needed ──────────────────────
+    let config_dir = cwd.join(".omegon");
+    if !config_dir.exists() {
+        let _ = std::fs::create_dir_all(&config_dir);
+        lines.push("✓ Created `.omegon/` config directory".into());
+        actions += 1;
+    }
+
+    // ── Auto-migrate user-level auth (pi → omegon) ──────────────────
+    let h = home();
+    let omegon_auth = h.join(".config/omegon/auth.json");
+    let pi_auth = h.join(".pi/agent/auth.json");
+    if !omegon_auth.exists() && pi_auth.exists() {
+        let _ = std::fs::create_dir_all(omegon_auth.parent().unwrap());
+        let _ = std::fs::copy(&pi_auth, &omegon_auth);
+        lines.push("✓ Migrated auth.json from ~/.pi/agent/ → ~/.config/omegon/".into());
+        actions += 1;
+    }
+
+    // ── Summary ──────────────────────────────────────────────────────
+    lines.push(String::new());
+    if actions > 0 {
+        lines.push(format!("**{actions} action(s) completed.**"));
+    } else {
+        lines.push("Project is already configured for Omegon.".into());
+    }
+
+    // Show final directory layout
+    lines.push(String::new());
+    lines.push("### Directory Layout".into());
+    let ai_exists = cwd.join("ai").is_dir();
+    if ai_exists {
+        lines.push("```".into());
+        lines.push("ai/".into());
+        for sub in ["docs/", "openspec/", "memory/", "lifecycle/", "milestones.json"] {
+            let path = cwd.join("ai").join(sub);
+            let marker = if path.exists() { "✓" } else { " " };
+            lines.push(format!("  {marker} {sub}"));
+        }
+        lines.push(".omegon/          (tool config)".into());
+        lines.push("AGENTS.md         (project directives)".into());
+        lines.push("```".into());
+    } else {
+        lines.push("No `ai/` directory yet. Legacy paths (`docs/`, `openspec/`) are supported.".into());
+        lines.push("To adopt the `ai/` convention, move your design docs and OpenSpec there.".into());
+    }
+
+    lines.join("\n")
+}
+
+/// Scan for agent conventions in the project directory.
+fn scan_conventions(cwd: &Path) -> Vec<DetectedConvention> {
+    let mut found = Vec::new();
+
+    // Claude Code: CLAUDE.md or .claude/CLAUDE.md
+    for path in [cwd.join("CLAUDE.md"), cwd.join(".claude/CLAUDE.md")] {
+        if path.exists() {
+            found.push(DetectedConvention {
+                source: "Claude Code",
+                description: "Project instructions".into(),
+                path,
+                kind: ConventionKind::Instructions,
+            });
+            break;
+        }
+    }
+
+    // Codex: codex.md
+    if cwd.join("codex.md").exists() {
+        found.push(DetectedConvention {
+            source: "OpenAI Codex",
+            description: "Project instructions".into(),
+            path: cwd.join("codex.md"),
+            kind: ConventionKind::Instructions,
+        });
+    }
+
+    // Cursor: .cursor/rules or .cursorrules
+    for path in [cwd.join(".cursor/rules"), cwd.join(".cursorrules")] {
+        if path.exists() {
+            found.push(DetectedConvention {
+                source: "Cursor",
+                description: "Project rules".into(),
+                path,
+                kind: ConventionKind::Instructions,
+            });
+            break;
+        }
+    }
+
+    // Windsurf: .windsurfrules
+    if cwd.join(".windsurfrules").exists() {
+        found.push(DetectedConvention {
+            source: "Windsurf",
+            description: "Project rules".into(),
+            path: cwd.join(".windsurfrules"),
+            kind: ConventionKind::Instructions,
+        });
+    }
+
+    // Aider: .aider.conf.yml
+    if cwd.join(".aider.conf.yml").exists() {
+        found.push(DetectedConvention {
+            source: "Aider",
+            description: "Configuration".into(),
+            path: cwd.join(".aider.conf.yml"),
+            kind: ConventionKind::Config,
+        });
+    }
+
+    // Cline: .clinerules
+    if cwd.join(".clinerules").exists() {
+        found.push(DetectedConvention {
+            source: "Cline",
+            description: "Project rules".into(),
+            path: cwd.join(".clinerules"),
+            kind: ConventionKind::Instructions,
+        });
+    }
+
+    // GitHub Copilot: .github/copilot-instructions.md
+    if cwd.join(".github/copilot-instructions.md").exists() {
+        found.push(DetectedConvention {
+            source: "GitHub Copilot",
+            description: "Copilot instructions".into(),
+            path: cwd.join(".github/copilot-instructions.md"),
+            kind: ConventionKind::Instructions,
+        });
+    }
+
+    // pi / Omegon TS: .pi/memory/
+    if cwd.join(".pi/memory/facts.jsonl").exists() {
+        found.push(DetectedConvention {
+            source: "pi (Omegon TS)",
+            description: "Memory facts".into(),
+            path: cwd.join(".pi/memory"),
+            kind: ConventionKind::Memory,
+        });
+    }
+
+    // Legacy .omegon/memory/ (pre-ai/ convention)
+    if cwd.join(".omegon/memory/facts.jsonl").exists() && !cwd.join("ai/memory").exists() {
+        found.push(DetectedConvention {
+            source: "Omegon (legacy)",
+            description: "Memory facts in .omegon/".into(),
+            path: cwd.join(".omegon/memory"),
+            kind: ConventionKind::Memory,
+        });
+    }
+
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -556,5 +866,95 @@ mod tests {
         std::fs::write(cursor_dir.join("rules"), "Use Rust\nNo unwrap\n").unwrap();
         let report = migrate_cursor(dir.path());
         assert!(!report.items.is_empty(), "should find cursor rules");
+    }
+
+    // ── /init tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn scan_detects_claude_md() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "# My Rules\nBe nice").unwrap();
+        let found = scan_conventions(dir.path());
+        assert!(found.iter().any(|d| d.source == "Claude Code"), "should detect CLAUDE.md");
+    }
+
+    #[test]
+    fn scan_detects_copilot_instructions() {
+        let dir = tempfile::tempdir().unwrap();
+        let gh = dir.path().join(".github");
+        std::fs::create_dir_all(&gh).unwrap();
+        std::fs::write(gh.join("copilot-instructions.md"), "# Copilot\nUse TypeScript").unwrap();
+        let found = scan_conventions(dir.path());
+        assert!(found.iter().any(|d| d.source == "GitHub Copilot"), "should detect copilot-instructions.md");
+    }
+
+    #[test]
+    fn scan_detects_cline_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".clinerules"), "use strict mode").unwrap();
+        let found = scan_conventions(dir.path());
+        assert!(found.iter().any(|d| d.source == "Cline"), "should detect .clinerules");
+    }
+
+    #[test]
+    fn scan_detects_pi_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let mem = dir.path().join(".pi/memory");
+        std::fs::create_dir_all(&mem).unwrap();
+        std::fs::write(mem.join("facts.jsonl"), r#"{"_type":"fact"}"#).unwrap();
+        let found = scan_conventions(dir.path());
+        assert!(found.iter().any(|d| d.source == "pi (Omegon TS)"), "should detect .pi/memory");
+    }
+
+    #[test]
+    fn init_empty_project_creates_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = init_project(dir.path());
+        assert!(report.contains("Created `.omegon/` config directory"), "{report}");
+        assert!(dir.path().join(".omegon").is_dir());
+    }
+
+    #[test]
+    fn init_migrates_claude_md_to_agents_md() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "# Rules\nBe concise").unwrap();
+        let report = init_project(dir.path());
+        assert!(report.contains("Created `AGENTS.md`"), "{report}");
+        let content = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+        assert!(content.contains("Be concise"));
+        assert!(content.contains("Migrated from Claude Code"));
+    }
+
+    #[test]
+    fn init_migrates_pi_memory_to_ai() {
+        let dir = tempfile::tempdir().unwrap();
+        let pi_mem = dir.path().join(".pi/memory");
+        std::fs::create_dir_all(&pi_mem).unwrap();
+        std::fs::write(pi_mem.join("facts.jsonl"), r#"{"_type":"fact","id":"x"}"#).unwrap();
+        let report = init_project(dir.path());
+        assert!(report.contains("Migrated facts.jsonl"), "{report}");
+        assert!(dir.path().join("ai/memory/facts.jsonl").exists());
+    }
+
+    #[test]
+    fn init_migrates_omegon_lifecycle_to_ai() {
+        let dir = tempfile::tempdir().unwrap();
+        let lc = dir.path().join(".omegon/lifecycle");
+        std::fs::create_dir_all(&lc).unwrap();
+        std::fs::write(lc.join("state.json"), r#"{"version":1,"nodes":[]}"#).unwrap();
+        let report = init_project(dir.path());
+        assert!(report.contains("Migrated lifecycle state"), "{report}");
+        assert!(dir.path().join("ai/lifecycle/state.json").exists());
+    }
+
+    #[test]
+    fn init_existing_project_reports_already_configured() {
+        let dir = tempfile::tempdir().unwrap();
+        // Pre-create the config dir and AGENTS.md
+        std::fs::create_dir_all(dir.path().join(".omegon")).unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "# My Directives").unwrap();
+        let report = init_project(dir.path());
+        // Should mention AGENTS.md exists, not try to create it
+        assert!(report.contains("already exists"), "{report}");
     }
 }

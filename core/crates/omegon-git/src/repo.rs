@@ -224,11 +224,12 @@ impl RepoModel {
 
     /// Check if a path is a lifecycle artifact (OpenSpec, design-tree, memory).
     fn is_lifecycle_path(path: &str) -> bool {
-        path.starts_with("openspec/")
-            || path.starts_with("docs/")
-            || path.starts_with(".omegon/")
-            || path.starts_with(".pi/") // legacy compat
-            || path.starts_with("design/")
+        path.starts_with("ai/")           // canonical location
+            || path.starts_with("openspec/")  // legacy
+            || path.starts_with("docs/")      // legacy
+            || path.starts_with(".omegon/")   // tool config
+            || path.starts_with(".pi/")       // legacy compat
+            || path.starts_with("design/")    // legacy
     }
 
     /// Record a lifecycle file write (OpenSpec, design-tree).

@@ -648,8 +648,8 @@ impl App {
     /// Handle /milestone command — release milestone management.
     fn handle_milestone(&self, args: &str) -> SlashResult {
         let parts: Vec<&str> = args.splitn(3, ' ').collect();
-        let milestone_dir = std::path::Path::new(&self.footer_data.cwd).join(".omegon");
-        let milestone_file = milestone_dir.join("milestones.json");
+        let cwd_path = std::path::Path::new(&self.footer_data.cwd);
+        let milestone_file = crate::paths::milestones_file(cwd_path);
 
         match parts.as_slice() {
             // /milestone — list all milestones
@@ -700,7 +700,6 @@ impl App {
                 if !ms.nodes.contains(&node_id.to_string()) {
                     ms.nodes.push(node_id.to_string());
                 }
-                let _ = std::fs::create_dir_all(&milestone_dir);
                 let _ = save_milestones(&milestone_file, &milestones);
                 SlashResult::Display(format!("Added '{}' to milestone {}", node_id, version))
             }
@@ -1266,6 +1265,7 @@ impl App {
         ("logout",   "log out of provider",                   &["anthropic", "openai"]),
         ("auth",     "authentication management",             &["status", "login", "logout", "unlock"]),
         ("chronos",  "date/time context",                      &["week", "month", "quarter", "relative", "iso", "epoch", "tz", "range", "all"]),
+        ("init",     "initialize project — scan & migrate agent conventions", &["scan", "migrate"]),
         ("migrate",  "import from other tools",               &["auto", "claude-code", "pi", "codex", "cursor", "aider"]),
         ("dash",     "toggle dashboard panel / open web UI",  &["open"]),
         ("vault",    "Vault status and management",           &["status", "unseal", "login", "configure", "init-policy"]),
@@ -1596,6 +1596,12 @@ impl App {
                         }
                     }
                 }
+            }
+
+            "init" => {
+                let cwd = std::path::Path::new(&self.footer_data.cwd);
+                let report = crate::migrate::init_project(cwd);
+                SlashResult::Display(report)
             }
 
             "migrate" => {
@@ -2295,6 +2301,9 @@ fn load_milestones(path: &std::path::Path) -> std::collections::BTreeMap<String,
 }
 
 fn save_milestones(path: &std::path::Path, milestones: &std::collections::BTreeMap<String, Milestone>) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
     let json = serde_json::to_string_pretty(milestones)?;
     std::fs::write(path, json)
 }
@@ -2620,10 +2629,9 @@ pub async fn run_tui(
     // "First run" = no .omegon/tutorial_completed marker AND no memory facts exist.
     // A project with memory facts has been used before — don't nag.
     {
-        let omegon_dir = std::path::Path::new(&app.footer_data.cwd).join(".omegon");
-        let tutorial_done = omegon_dir.join("tutorial_completed");
-        let has_memory = omegon_dir.join("memory").join("facts.jsonl").exists()
-            || std::path::Path::new(&app.footer_data.cwd).join(".pi").join("memory").join("facts.jsonl").exists(); // legacy compat
+        let cwd_path = std::path::Path::new(&app.footer_data.cwd);
+        let tutorial_done = crate::paths::config_dir(cwd_path).join("tutorial_completed");
+        let has_memory = crate::paths::has_memory_facts(cwd_path);
         if !tutorial_done.exists() && !has_memory && app.queued_prompt.is_none() {
             app.show_toast(
                 "Welcome to Omegon! Type /tutorial for an interactive guide.",

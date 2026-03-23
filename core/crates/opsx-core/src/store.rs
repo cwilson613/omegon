@@ -35,7 +35,7 @@ pub trait StateStore: Send + Sync {
     fn save(&self, state: &LifecycleState) -> Result<(), OpsxError>;
 }
 
-/// JSON file store — writes to `.omegon/lifecycle/state.json`.
+/// JSON file store — writes to `ai/lifecycle/state.json` (or legacy `.omegon/lifecycle/`).
 /// The file is versioned by jj/git. The VCS operation log IS the transaction log.
 pub struct JsonFileStore {
     path: PathBuf,
@@ -43,9 +43,20 @@ pub struct JsonFileStore {
 
 impl JsonFileStore {
     pub fn new(project_root: &Path) -> Self {
-        Self {
-            path: project_root.join(".omegon").join("lifecycle").join("state.json"),
-        }
+        // Primary: ai/lifecycle/state.json
+        // Fallback: .omegon/lifecycle/state.json (pre-ai convention)
+        let ai_dir = project_root.join("ai").join("lifecycle");
+        let legacy_dir = project_root.join(".omegon").join("lifecycle");
+        let path = if ai_dir.join("state.json").exists() {
+            ai_dir.join("state.json")
+        } else if legacy_dir.join("state.json").exists() {
+            // Legacy exists but ai/ doesn't — use legacy to avoid data loss
+            legacy_dir.join("state.json")
+        } else {
+            // New project — write to ai/lifecycle/
+            ai_dir.join("state.json")
+        };
+        Self { path }
     }
 
     pub fn path(&self) -> &Path {
