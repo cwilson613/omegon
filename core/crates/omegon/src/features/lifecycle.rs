@@ -22,6 +22,8 @@ use omegon_traits::{
 use crate::lifecycle::context::LifecycleContextProvider;
 use crate::lifecycle::{design, spec, types::*};
 
+use opsx_core::{JsonFileStore, Lifecycle as OpsxLifecycle, NodeState as OpsxNodeState};
+
 /// The lifecycle Feature — wraps the LifecycleContextProvider and adds
 /// tools + commands for design-tree and openspec operations.
 ///
@@ -33,15 +35,25 @@ pub struct LifecycleFeature {
     repo_path: PathBuf,
     /// Counter for refresh throttling — only refresh every N turns.
     turn_counter: u32,
+    /// opsx-core lifecycle engine — validates state transitions before
+    /// markdown is written. The FSM is the authority for what transitions
+    /// are legal; markdown is the content store.
+    opsx: Mutex<OpsxLifecycle<JsonFileStore>>,
 }
 
 impl LifecycleFeature {
     pub fn new(repo_path: &std::path::Path) -> Self {
         let provider = LifecycleContextProvider::new(repo_path);
+        let store = JsonFileStore::new(repo_path);
+        let opsx = OpsxLifecycle::load(store).unwrap_or_else(|e| {
+            tracing::warn!("opsx-core load failed, starting fresh: {e}");
+            OpsxLifecycle::load(JsonFileStore::new(repo_path)).unwrap()
+        });
         Self {
             provider: Arc::new(Mutex::new(provider)),
             repo_path: repo_path.to_path_buf(),
             turn_counter: 0,
+            opsx: Mutex::new(opsx),
         }
     }
 
@@ -53,6 +65,22 @@ impl LifecycleFeature {
     /// Get a shared handle to the provider for live dashboard updates.
     pub fn shared_provider(&self) -> Arc<Mutex<LifecycleContextProvider>> {
         Arc::clone(&self.provider)
+    }
+
+    /// Bootstrap a markdown design node into opsx-core.
+    /// Creates the node and syncs state + open questions from the markdown source.
+    fn bootstrap_node_to_opsx(&self, opsx: &mut OpsxLifecycle<JsonFileStore>, node: &DesignNode) {
+        let current_opsx = OpsxNodeState::from_status_str(node.status.as_str())
+            .unwrap_or(OpsxNodeState::Seed);
+        // Create (parent validation is skipped — parent may not be in opsx yet)
+        let _ = opsx.create_node(&node.id, &node.title, None);
+        if current_opsx != OpsxNodeState::Seed {
+            let _ = opsx.force_transition_node(&node.id, current_opsx, "bootstrap sync from markdown");
+        }
+        // Sync open questions
+        for q in &node.open_questions {
+            let _ = opsx.add_question(&node.id, q);
+        }
     }
 
     // ── Tool dispatch ───────────────────────────────────────────────────
@@ -256,6 +284,23 @@ impl LifecycleFeature {
                     .unwrap_or_default();
                 let overview = args["overview"].as_str().unwrap_or("");
 
+                // Register in opsx-core FSM (parent validation is advisory here
+                // since markdown parent references aren't enforced by opsx-core yet)
+                {
+                    let mut opsx = self.opsx.lock().unwrap();
+                    // Don't require parent to exist in opsx-core — lazy sync
+                    let _ = opsx.create_node(id, title, None);
+                    // If a non-seed status was requested, transition to it
+                    if let Some(status_str) = status {
+                        if let Some(target) = OpsxNodeState::from_status_str(status_str) {
+                            if target != OpsxNodeState::Seed {
+                                // Use force_transition for bootstrap — the node was just created
+                                let _ = opsx.force_transition_node(id, target, "initial status on create");
+                            }
+                        }
+                    }
+                }
+
                 let node = design::create_node(&docs_dir, id, title, parent, status, &tags, overview)?;
                 self.provider.lock().unwrap().refresh();
                 Ok(text_result(&format!("Created design node '{id}' at {}", node.file_path.display())))
@@ -267,6 +312,21 @@ impl LifecycleFeature {
                 let status = NodeStatus::parse(status_str)
                     .ok_or_else(|| anyhow::anyhow!("Invalid status: {status_str}"))?;
 
+                // Validate transition via opsx-core FSM
+                let opsx_target = OpsxNodeState::from_status_str(status_str)
+                    .ok_or_else(|| anyhow::anyhow!("Invalid status for FSM: {status_str}"))?;
+
+                let mut opsx = self.opsx.lock().unwrap();
+                // Ensure the node exists in opsx-core (lazy sync from markdown)
+                if opsx.get_node(id).is_none() {
+                    let node = get_node_clone(id)?;
+                    self.bootstrap_node_to_opsx(&mut opsx, &node);
+                }
+                opsx.transition_node(id, opsx_target)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                drop(opsx);
+
+                // FSM approved — now write the markdown
                 let mut node = get_node_clone(id)?;
                 design::update_node(&mut node, |n| { n.status = status; })?;
                 self.provider.lock().unwrap().refresh();
@@ -413,7 +473,17 @@ impl LifecycleFeature {
                     anyhow::bail!("Node '{id}' must be in 'decided' status to implement (current: {})", node.status.as_str());
                 }
 
-                // Scaffold an OpenSpec change from the design node
+                // Validate transition via opsx-core FSM — this enforces milestone freeze
+                {
+                    let mut opsx = self.opsx.lock().unwrap();
+                    if opsx.get_node(id).is_none() {
+                        self.bootstrap_node_to_opsx(&mut opsx, &node);
+                    }
+                    opsx.transition_node(id, OpsxNodeState::Implementing)
+                        .map_err(|e| anyhow::anyhow!("{e}"))?;
+                }
+
+                // FSM approved — scaffold OpenSpec change
                 let change_name = id;
                 let title = node.title.clone();
                 let sections = design::read_node_sections(&node);
@@ -872,6 +942,14 @@ mod tests {
     fn design_tree_set_status() {
         let (_dir, repo) = setup_test_repo();
         let feature = LifecycleFeature::new(&repo);
+
+        // Remove open questions first — FSM requires no open questions for decided
+        feature.execute_design_tree_update(&json!({
+            "action": "remove_question",
+            "node_id": "test-node",
+            "question": "What about X?",
+        })).unwrap();
+
         feature.execute_design_tree_update(&json!({
             "action": "set_status",
             "node_id": "test-node",
@@ -989,6 +1067,13 @@ mod tests {
         let (_dir, repo) = setup_test_repo();
         let feature = LifecycleFeature::new(&repo);
 
+        // Remove open questions first — FSM requires no open questions for decided
+        feature.execute_design_tree_update(&json!({
+            "action": "remove_question",
+            "node_id": "test-node",
+            "question": "What about X?",
+        })).unwrap();
+
         // Set to decided first
         feature.execute_design_tree_update(&json!({
             "action": "set_status",
@@ -1009,5 +1094,82 @@ mod tests {
         let result = feature.execute_openspec_manage(&json!({"action": "status"})).unwrap();
         let text = result.content[0].as_text().unwrap();
         assert!(text.contains("test-node"), "openspec should have the change: {text}");
+    }
+
+    #[test]
+    fn fsm_rejects_invalid_transition() {
+        let (_dir, repo) = setup_test_repo();
+        let feature = LifecycleFeature::new(&repo);
+
+        // test-node starts as "exploring" — try to jump to "implemented"
+        let result = feature.execute_design_tree_update(&json!({
+            "action": "set_status",
+            "node_id": "test-node",
+            "status": "implemented",
+        }));
+        assert!(result.is_err(), "FSM should reject exploring → implemented");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("invalid transition") || err.contains("cannot go from"),
+            "error should mention invalid transition: {err}");
+    }
+
+    #[test]
+    fn fsm_allows_valid_transition() {
+        let (_dir, repo) = setup_test_repo();
+        let feature = LifecycleFeature::new(&repo);
+
+        // exploring → decided (valid, no open questions after removing them)
+        feature.execute_design_tree_update(&json!({
+            "action": "remove_question",
+            "node_id": "test-node",
+            "question": "What about X?",
+        })).unwrap();
+
+        feature.execute_design_tree_update(&json!({
+            "action": "set_status",
+            "node_id": "test-node",
+            "status": "decided",
+        })).unwrap();
+
+        // Verify status changed
+        let result = feature.execute_design_tree(&json!({"action": "node", "node_id": "test-node"})).unwrap();
+        let text = result.content[0].as_text().unwrap();
+        assert!(text.contains("decided"), "should be decided: {text}");
+    }
+
+    #[test]
+    fn fsm_blocks_decided_with_open_questions() {
+        let (_dir, repo) = setup_test_repo();
+        let feature = LifecycleFeature::new(&repo);
+
+        // test-node has open questions — try to decide
+        let result = feature.execute_design_tree_update(&json!({
+            "action": "set_status",
+            "node_id": "test-node",
+            "status": "decided",
+        }));
+        assert!(result.is_err(), "FSM should reject decided with open questions");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("open questions"), "error should mention open questions: {err}");
+    }
+
+    #[test]
+    fn create_registers_in_fsm() {
+        let (_dir, repo) = setup_test_repo();
+        let feature = LifecycleFeature::new(&repo);
+
+        feature.execute_design_tree_update(&json!({
+            "action": "create",
+            "node_id": "fsm-test",
+            "title": "FSM Test Node",
+        })).unwrap();
+
+        // The node should be in the FSM — trying an invalid transition should fail
+        let result = feature.execute_design_tree_update(&json!({
+            "action": "set_status",
+            "node_id": "fsm-test",
+            "status": "implemented",
+        }));
+        assert!(result.is_err(), "seed → implemented should be rejected by FSM");
     }
 }

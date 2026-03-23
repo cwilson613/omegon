@@ -361,6 +361,44 @@ impl<S: StateStore> Lifecycle<S> {
             });
         }
 
+        // Enforce preconditions — specs before code, plan before implementation
+        match target {
+            ChangeState::Specced => {
+                if change.specs.is_empty() {
+                    return Err(OpsxError::PreconditionFailed(
+                        format!("change '{}' has no specs — write Given/When/Then scenarios before marking as specced", name)
+                    ));
+                }
+            }
+            ChangeState::Planned => {
+                if change.specs.is_empty() {
+                    return Err(OpsxError::PreconditionFailed(
+                        format!("change '{}' has no specs — specs are required before planning", name)
+                    ));
+                }
+                if change.tasks_total == 0 {
+                    return Err(OpsxError::PreconditionFailed(
+                        format!("change '{}' has no tasks — generate a plan (tasks.md) before marking as planned", name)
+                    ));
+                }
+            }
+            ChangeState::Implementing => {
+                if change.specs.is_empty() {
+                    return Err(OpsxError::PreconditionFailed(
+                        format!("change '{}' has no specs — tests must be defined in specs before code is written", name)
+                    ));
+                }
+            }
+            ChangeState::Verifying => {
+                if change.tasks_done == 0 {
+                    return Err(OpsxError::PreconditionFailed(
+                        format!("change '{}' has no completed tasks — complete implementation before verifying", name)
+                    ));
+                }
+            }
+            _ => {}
+        }
+
         let from_str = from.as_str().to_string();
         let change = self.state.changes.iter_mut().find(|c| c.name == name).unwrap();
         change.state = target;
@@ -384,6 +422,17 @@ impl<S: StateStore> Lifecycle<S> {
         change.state = target;
         change.updated_at = iso_now();
         self.audit_and_save("change", name, &from_str, target.as_str(), Some(reason), true)
+    }
+
+    /// Register a spec domain on a change (e.g. "auth", "auth/tokens").
+    pub fn add_spec(&mut self, name: &str, domain: &str) -> Result<(), OpsxError> {
+        let change = self.state.changes.iter_mut().find(|c| c.name == name)
+            .ok_or_else(|| OpsxError::NotFound(format!("change '{name}'")))?;
+        if !change.specs.contains(&domain.to_string()) {
+            change.specs.push(domain.into());
+            change.updated_at = iso_now();
+        }
+        self.save()
     }
 
     /// Delete a change.
@@ -763,14 +812,88 @@ mod tests {
     fn change_lifecycle() {
         let (_tmp, mut lc) = test_lifecycle();
         lc.create_change("my-change", "My Change", None).unwrap();
+
+        // Must add specs before transitioning to specced
+        lc.add_spec("my-change", "core").unwrap();
         lc.transition_change("my-change", ChangeState::Specced).unwrap();
+
+        // Must add tasks before transitioning to planned
+        lc.update_change_progress("my-change", 3, 0).unwrap();
         lc.transition_change("my-change", ChangeState::Planned).unwrap();
+
         lc.transition_change("my-change", ChangeState::Implementing).unwrap();
+
+        // Must complete tasks before verifying
+        lc.update_change_progress("my-change", 3, 3).unwrap();
         lc.transition_change("my-change", ChangeState::Verifying).unwrap();
         lc.transition_change("my-change", ChangeState::Archived).unwrap();
 
         let change = lc.state().changes.iter().find(|c| c.name == "my-change").unwrap();
         assert_eq!(change.state, ChangeState::Archived);
+    }
+
+    #[test]
+    fn specced_requires_specs() {
+        let (_tmp, mut lc) = test_lifecycle();
+        lc.create_change("no-specs", "No Specs", None).unwrap();
+
+        // Try to go to specced without specs
+        let err = lc.transition_change("no-specs", ChangeState::Specced);
+        assert!(err.is_err());
+        let msg = err.unwrap_err().to_string();
+        assert!(msg.contains("no specs"), "should mention missing specs: {msg}");
+    }
+
+    #[test]
+    fn planned_requires_tasks() {
+        let (_tmp, mut lc) = test_lifecycle();
+        lc.create_change("no-tasks", "No Tasks", None).unwrap();
+        lc.add_spec("no-tasks", "core").unwrap();
+        lc.transition_change("no-tasks", ChangeState::Specced).unwrap();
+
+        // Try to go to planned without tasks
+        let err = lc.transition_change("no-tasks", ChangeState::Planned);
+        assert!(err.is_err());
+        let msg = err.unwrap_err().to_string();
+        assert!(msg.contains("no tasks"), "should mention missing tasks: {msg}");
+    }
+
+    #[test]
+    fn implementing_requires_specs() {
+        let (_tmp, mut lc) = test_lifecycle();
+        lc.create_change("impl-test", "Impl Test", None).unwrap();
+        lc.add_spec("impl-test", "core").unwrap();
+        lc.transition_change("impl-test", ChangeState::Specced).unwrap();
+        lc.update_change_progress("impl-test", 2, 0).unwrap();
+        lc.transition_change("impl-test", ChangeState::Planned).unwrap();
+
+        // Implementing is allowed (specs exist from specced stage)
+        lc.transition_change("impl-test", ChangeState::Implementing).unwrap();
+        assert_eq!(
+            lc.state().changes.iter().find(|c| c.name == "impl-test").unwrap().state,
+            ChangeState::Implementing
+        );
+    }
+
+    #[test]
+    fn verifying_requires_completed_tasks() {
+        let (_tmp, mut lc) = test_lifecycle();
+        lc.create_change("verify-test", "Verify Test", None).unwrap();
+        lc.add_spec("verify-test", "core").unwrap();
+        lc.transition_change("verify-test", ChangeState::Specced).unwrap();
+        lc.update_change_progress("verify-test", 2, 0).unwrap();
+        lc.transition_change("verify-test", ChangeState::Planned).unwrap();
+        lc.transition_change("verify-test", ChangeState::Implementing).unwrap();
+
+        // Try to verify with zero completed tasks
+        let err = lc.transition_change("verify-test", ChangeState::Verifying);
+        assert!(err.is_err());
+        let msg = err.unwrap_err().to_string();
+        assert!(msg.contains("no completed tasks"), "should mention incomplete tasks: {msg}");
+
+        // Complete tasks and try again
+        lc.update_change_progress("verify-test", 2, 2).unwrap();
+        lc.transition_change("verify-test", ChangeState::Verifying).unwrap();
     }
 
     #[test]
@@ -785,9 +908,12 @@ mod tests {
     fn archived_change_can_reopen() {
         let (_tmp, mut lc) = test_lifecycle();
         lc.create_change("reopen", "Reopen Test", None).unwrap();
+        lc.add_spec("reopen", "core").unwrap();
         lc.transition_change("reopen", ChangeState::Specced).unwrap();
+        lc.update_change_progress("reopen", 1, 0).unwrap();
         lc.transition_change("reopen", ChangeState::Planned).unwrap();
         lc.transition_change("reopen", ChangeState::Implementing).unwrap();
+        lc.update_change_progress("reopen", 1, 1).unwrap();
         lc.transition_change("reopen", ChangeState::Verifying).unwrap();
         lc.transition_change("reopen", ChangeState::Archived).unwrap();
         lc.transition_change("reopen", ChangeState::Proposed).unwrap();

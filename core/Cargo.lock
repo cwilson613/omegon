@@ -3650,6 +3650,7 @@ dependencies = [
  "omegon-secrets",
  "omegon-traits",
  "open",
+ "opsx-core",
  "ratatui",
  "ratatui-image",
  "ratatui-textarea",

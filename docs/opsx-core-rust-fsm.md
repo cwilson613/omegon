@@ -37,6 +37,11 @@ Replace markdown-as-source-of-truth with a Rust state machine that owns the life
 **Status:** decided
 **Rationale:** Bidirectional sync is a complexity trap. The JSON files are the source of truth. Markdown is generated/regenerated on state changes. If an operator edits markdown directly, the next FSM operation overwrites it. This is the same contract as generated code — edit the generator input, not the output. jj/git shows the conflict if someone edits markdown while the FSM also updates it.
 
+### Decision: opsx-core is state guardian, markdown is content store — dual storage by design
+
+**Status:** decided
+**Rationale:** opsx-core owns: state transitions (FSM validation), milestones (freeze enforcement), audit trail (who changed what when), and referential integrity (parent validation, delete guards). Markdown (docs/*.md) owns: rich content (research, decisions, questions, file scope, overview). Integration: design.rs calls opsx_core::transition_node() to validate before writing markdown. If the FSM rejects, the markdown write doesn't happen. Two stores, one authority per concern.
+
 ## Open Questions
 
 *No open questions.*

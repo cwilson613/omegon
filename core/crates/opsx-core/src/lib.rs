@@ -8,6 +8,7 @@ pub mod types;
 pub mod error;
 pub mod store;
 pub mod fsm;
+pub mod bridge;
 
 // Re-exports for convenience
 pub use types::{
