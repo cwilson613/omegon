@@ -688,6 +688,10 @@ impl App {
             } else { None };
             self.memory_ops_this_frame = 0;
 
+            self.instrument_panel.update_mind_facts(
+                self.footer_data.total_facts,
+                self.footer_data.working_memory,
+            );
             self.instrument_panel.update_telemetry(
                 self.footer_data.context_percent,
                 tool_name.as_deref(),

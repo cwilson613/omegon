@@ -112,14 +112,8 @@ impl FooterData {
             return;
         }
 
-        // Split into engine (top) and memory (bottom)
-        let halves = Layout::vertical([
-            Constraint::Percentage(50),
-            Constraint::Percentage(50),
-        ]).split(area);
-
-        self.render_engine_section(halves[0], frame, t);
-        self.render_memory_section(halves[1], frame, t);
+        // Engine only — memory is visualized in the inference panel
+        self.render_engine_section(area, frame, t);
     }
 
     fn render_engine_section(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {

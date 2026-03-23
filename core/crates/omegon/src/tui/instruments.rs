@@ -53,6 +53,7 @@ pub enum WaveDirection { Left, Right }
 struct MindState {
     name: String,
     active: bool,
+    fact_count: usize,
     wave: Vec<f64>,
     velocity: Vec<f64>,
     damping: f64,
@@ -61,7 +62,7 @@ struct MindState {
 impl MindState {
     fn new(name: &str, active: bool) -> Self {
         let w = 80;
-        Self { name: name.into(), active, wave: vec![0.0; w], velocity: vec![0.0; w], damping: 0.92 }
+        Self { name: name.into(), active, fact_count: 0, wave: vec![0.0; w], velocity: vec![0.0; w], damping: 0.92 }
     }
 
     fn pluck(&mut self, direction: WaveDirection) {
@@ -138,6 +139,12 @@ impl Default for InstrumentPanel {
 }
 
 impl InstrumentPanel {
+    /// Update mind fact counts from footer data.
+    pub fn update_mind_facts(&mut self, total_facts: usize, working_memory: usize) {
+        if !self.minds.is_empty() { self.minds[0].fact_count = total_facts; }
+        if self.minds.len() > 1 { self.minds[1].fact_count = working_memory; }
+    }
+
     /// Update telemetry from harness state.
     pub fn update_telemetry(
         &mut self,
@@ -145,7 +152,7 @@ impl InstrumentPanel {
         tool_name: Option<&str>,
         tool_error: bool,
         thinking_level: &str,
-        memory_op: Option<(usize, WaveDirection)>, // (mind_idx, direction)
+        memory_op: Option<(usize, WaveDirection)>,
         agent_active: bool,
         dt: f64,
     ) {
@@ -330,14 +337,19 @@ impl InstrumentPanel {
                 }
             }
 
-            // Mind name
+            // Mind name + fact count
             let name_start = 3usize;
             let name_color = if mind.max_amplitude() > 0.1 {
                 Color::Rgb(42, 180, 200)
             } else {
                 Color::Rgb(64, 88, 112)
             };
-            for (i, ch) in mind.name.chars().enumerate() {
+            let label = if mind.fact_count > 0 {
+                format!("{} ⌗{}", mind.name, mind.fact_count)
+            } else {
+                mind.name.clone()
+            };
+            for (i, ch) in label.chars().enumerate() {
                 let x = name_start + i;
                 if x >= w { break; }
                 if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, y)) {
@@ -348,7 +360,7 @@ impl InstrumentPanel {
             }
 
             // Sine wave
-            let wave_start = 13usize.min(name_start + mind.name.len() + 2);
+            let wave_start = (name_start + label.len() + 1).min(w / 3);
             let wave_w = w.saturating_sub(wave_start);
             let wave_len = mind.wave.len();
             for wx in 0..wave_w {
