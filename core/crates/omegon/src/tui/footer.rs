@@ -225,23 +225,14 @@ impl FooterData {
         // ── Row 3: spacer ──
         lines.push(Line::from(""));
 
-        // ── Row 4: Context gauge bar ──
-        {
-            let pct = self.context_percent.min(100.0);
-            let ctx_color = widgets::percent_color(pct, t);
-            let bar_w = w.saturating_sub(6).max(4); // reserve space for " XX%"
-            let filled = ((pct / 100.0) * bar_w as f32) as usize;
-            let empty = bar_w.saturating_sub(filled);
-            let pct_str = format!("{:>3}%", pct as u32);
+        // ── Row 4: Tier + thinking level ──
+        lines.push(Line::from(vec![
+            Span::styled(capitalize(&self.model_tier), Style::default().fg(tier_color)),
+            Span::styled(" · ", Style::default().fg(t.border_dim())),
+            Span::styled(format!("◎ {}", capitalize(&self.thinking_level)), Style::default().fg(think_color)),
+        ]));
 
-            lines.push(Line::from(vec![
-                Span::styled("▰".repeat(filled), Style::default().fg(ctx_color)),
-                Span::styled("▱".repeat(empty), Style::default().fg(t.border_dim())),
-                Span::styled(format!(" {pct_str}"), Style::default().fg(ctx_color)),
-            ]));
-        }
-
-        // ── Row 5: Context details ──
+        // ── Row 5: Context capacity (fill is shown by the inference panel) ──
         {
             let mut parts: Vec<Span<'static>> = Vec::new();
             if self.context_window > 0 {
@@ -260,13 +251,6 @@ impl FooterData {
 
         // ── Row 6: spacer ──
         lines.push(Line::from(""));
-
-        // ── Row 7: Tier + thinking level ──
-        lines.push(Line::from(vec![
-            Span::styled(capitalize(&self.model_tier), Style::default().fg(tier_color)),
-            Span::styled(" · ", Style::default().fg(t.border_dim())),
-            Span::styled(format!("◎ {}", capitalize(&self.thinking_level)), Style::default().fg(think_color)),
-        ]));
 
         // ── Row 8: Session counters ──
         lines.push(Line::from(vec![

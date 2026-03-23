@@ -274,15 +274,15 @@ impl InstrumentPanel {
         let active_minds: Vec<usize> = self.minds.iter().enumerate()
             .filter(|(_, m)| m.active).map(|(i, _)| i).collect();
 
-        // Idle state — show ready indicator when context is empty and no minds active
-        if self.context_fill < 0.001 && active_minds.is_empty() && !self.thinking_active {
+        // Idle state — show ready indicator when context is empty and no thinking
+        if self.context_fill < 0.001 && !self.thinking_active {
             let hints = [
-                ("", Color::Rgb(36, 52, 68)),
                 ("  ready", Color::Rgb(48, 80, 100)),
                 ("", Color::Rgb(36, 52, 68)),
-                ("  context and memory", Color::Rgb(36, 52, 68)),
+                ("  context fill and thinking", Color::Rgb(36, 52, 68)),
                 ("  activity shown here", Color::Rgb(36, 52, 68)),
             ];
+            // Show hints in upper portion
             for (row, (text, color)) in hints.iter().enumerate() {
                 let y = inner.y + row as u16;
                 if y >= inner.bottom() { break; }
@@ -293,6 +293,15 @@ impl InstrumentPanel {
                         cell.set_char(ch); cell.set_fg(*color); cell.set_bg(bg_color());
                     }
                 }
+            }
+            // Still render memory strings below the hints if minds exist
+            if !active_minds.is_empty() && inner.height > 5 {
+                let tree_area = Rect {
+                    x: area.x, y: inner.y + 5,
+                    width: inner.width + 1,
+                    height: inner.height.saturating_sub(5),
+                };
+                self.render_memory_strings(&active_minds, tree_area, buf);
             }
             return;
         }

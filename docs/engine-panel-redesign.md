@@ -1,10 +1,10 @@
 ---
 id: engine-panel-redesign
 title: Engine panel redesign — visual hierarchy and information density
-status: decided
+status: implemented
 parent: footer-idle-state
 open_questions: []
-jj_change_id: kvpkrlrksplwruroomolnlmotrnxtyzl
+jj_change_id: rlstoyvxnouqrkxzmsqxmtlvlwxukxzv
 ---
 
 # Engine panel redesign — visual hierarchy and information density
@@ -29,6 +29,11 @@ The engine panel currently shows 6 lines of text. Here's what each value IS and 
 
 **Status:** decided
 **Rationale:** The current 6-line text dump has no visual hierarchy — every value has the same weight. The redesign groups by operator importance: model identity (brightest, top), context gauge (visual bar, middle), tuning parameters (tier+thinking), session counters (dimmest, bottom). Context gets a ▰▱ gauge bar because it's the most dynamically changing value and deserves spatial treatment. Provider+auth merge onto one line. Context class right-aligns with model name.
+
+### Decision: Remove context gauge from engine — inference panel owns fill visualization. Engine shows capacity only.
+
+**Status:** decided
+**Rationale:** Context fill is displayed in two places: the inference gradient bar and the engine ▰▱ gauge. The inference bar is the primary visualization (spatial, color-coded, thinking glitch overlay). The engine gauge is a redundant text duplicate. Engine should show capacity (200k window, native/adaptive mode) on one compact line, not fill. This frees 2 rows in the engine panel for better spacing or additional info.
 
 ## Open Questions
 
