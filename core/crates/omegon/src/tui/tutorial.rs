@@ -292,12 +292,15 @@ impl Tutorial {
                 (_, Some(Highlight::InputBar)) => {
                     upper_rect(area, footer_height + 3) // extra 3 for input bar
                 }
-                // Steps highlighting dashboard → position in left portion
+                // Steps highlighting dashboard → center in the conversation area.
+                // Dashboard is ~40 cols wide on the right; overlay lives in the
+                // conversation zone to its left, visually paired with the sidebar.
                 (_, Some(Highlight::Dashboard)) => {
-                    // Dashboard is on the right — put overlay on the left
-                    let w = area.width.min(48).max(30);
-                    let h = area.height.saturating_sub(footer_height + 3).min(14);
-                    let x = area.x + 2;
+                    let dash_width: u16 = 40;
+                    let conv_width = area.width.saturating_sub(dash_width);
+                    let w = 50u16.min(conv_width.saturating_sub(4));
+                    let h = area.height.saturating_sub(footer_height + 4).min(16);
+                    let x = area.x + (conv_width.saturating_sub(w)) / 2;
                     let y = area.y + 2;
                     Rect { x, y, width: w, height: h }
                 }
