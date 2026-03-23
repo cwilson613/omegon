@@ -72,7 +72,7 @@ pub const STEPS: &[Step] = &[
     },
     Step {
         title: "Tool Activity",
-        body: "The right instrument panel shows tools:\n\n  \u{2022} Sorted list, most recently used at top\n  \u{2022} Recency bars (teal = just called)\n  \u{2022} Timestamps since last call\n\nType any message to the agent and watch\nthe tools light up!",
+        body: "The right instrument panel shows tools:\n\n  \u{2022} Sorted list, most recently used at top\n  \u{2022} Recency bars (teal = just called)\n  \u{2022} Timestamps since last call\n\nAsk the agent: \"what files are in this project?\"\nand watch the tools panel light up with 'bash'.",
         anchor: Anchor::Upper,
         trigger: Trigger::AnyInput,
         highlight: Some(Highlight::InstrumentPanel),

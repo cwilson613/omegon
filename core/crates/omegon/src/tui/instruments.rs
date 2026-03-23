@@ -251,22 +251,21 @@ impl InstrumentPanel {
             Constraint::Percentage(45),
         ]).split(area);
 
-        self.render_inference(panels[0], frame);
-        self.render_tools(panels[1], frame);
-
-        if highlight {
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.accent_bright()));
-            frame.render_widget(block, area);
-        }
+        let border_color = if highlight { theme.accent_bright() } else { Color::Rgb(20, 40, 55) };
+        self.render_inference_with_border(panels[0], frame, border_color);
+        self.render_tools_with_border(panels[1], frame, border_color);
     }
 
-    fn render_inference(&self, area: Rect, frame: &mut Frame) {
+    fn render_inference_with_border(&self, area: Rect, frame: &mut Frame, border_color: Color) {
+        let title_color = if border_color == Color::Rgb(20, 40, 55) {
+            Color::Rgb(64, 88, 112) // default muted title
+        } else {
+            border_color // highlight: title matches border
+        };
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(20, 40, 55)))
-            .title(Span::styled(" inference ", Style::default().fg(Color::Rgb(64, 88, 112))));
+            .border_style(Style::default().fg(border_color))
+            .title(Span::styled(" inference ", Style::default().fg(title_color)));
         let inner = block.inner(area);
         frame.render_widget(block, area);
         if inner.width < 10 || inner.height < 3 { return; }
@@ -436,11 +435,16 @@ impl InstrumentPanel {
         }
     }
 
-    fn render_tools(&self, area: Rect, frame: &mut Frame) {
+    fn render_tools_with_border(&self, area: Rect, frame: &mut Frame, border_color: Color) {
+        let title_color = if border_color == Color::Rgb(20, 40, 55) {
+            Color::Rgb(64, 88, 112)
+        } else {
+            border_color
+        };
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(20, 40, 55)))
-            .title(Span::styled(" tools ", Style::default().fg(Color::Rgb(64, 88, 112))));
+            .border_style(Style::default().fg(border_color))
+            .title(Span::styled(" tools ", Style::default().fg(title_color)));
         let inner = block.inner(area);
         frame.render_widget(block, area);
         if inner.width < 15 || inner.height < 2 { return; }

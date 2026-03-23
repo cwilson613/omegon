@@ -98,12 +98,29 @@ impl FooterData {
     /// Render with optional tutorial highlight — pulses the border bright.
     pub fn render_left_panel_with_highlight(&self, area: Rect, frame: &mut Frame, t: &dyn Theme, highlight: bool) {
         self.render_left_panel(area, frame, t);
-        if highlight {
-            // Render a bright border over the panel
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(t.accent_bright()));
-            frame.render_widget(block, area);
+        if highlight && area.height >= 2 && area.width >= 2 {
+            // Tint the top and bottom border rows with accent color
+            // without overwriting cell content — just change fg color
+            let style = Style::default().fg(t.accent_bright());
+            let buf = frame.buffer_mut();
+            for x in area.x..area.right() {
+                if area.y < buf.area().height {
+                    buf[(x, area.y)].set_style(style);
+                }
+                let bot = area.bottom().saturating_sub(1);
+                if bot < buf.area().height {
+                    buf[(x, bot)].set_style(style);
+                }
+            }
+            for y in area.y..area.bottom() {
+                if y < buf.area().height {
+                    buf[(area.x, y)].set_style(style);
+                    let right = area.right().saturating_sub(1);
+                    if right < buf.area().width {
+                        buf[(right, y)].set_style(style);
+                    }
+                }
+            }
         }
     }
 
