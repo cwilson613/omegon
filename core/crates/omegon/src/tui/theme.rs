@@ -261,6 +261,150 @@ pub fn default_theme() -> Box<dyn Theme> {
     Box::new(Alpharius)
 }
 
+/// Load theme with calibration applied.
+pub fn calibrated_theme(cal: &crate::settings::CalibrationParams) -> Box<dyn Theme> {
+    let base = default_theme();
+    if cal.is_identity() {
+        return base;
+    }
+    Box::new(CalibratedTheme::new(base, *cal))
+}
+
+// ─── HSL ↔ RGB conversion ──────────────────────────────────────────
+
+/// Convert RGB (0–255 each) to HSL (h: 0–360, s: 0–1, l: 0–1).
+fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let r = r as f32 / 255.0;
+    let g = g as f32 / 255.0;
+    let b = b as f32 / 255.0;
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let l = (max + min) / 2.0;
+
+    if (max - min).abs() < 1e-6 {
+        return (0.0, 0.0, l); // achromatic
+    }
+
+    let d = max - min;
+    let s = if l > 0.5 {
+        d / (2.0 - max - min)
+    } else {
+        d / (max + min)
+    };
+
+    let h = if (max - r).abs() < 1e-6 {
+        let mut h = (g - b) / d;
+        if g < b { h += 6.0; }
+        h
+    } else if (max - g).abs() < 1e-6 {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+
+    (h * 60.0, s, l)
+}
+
+/// Convert HSL (h: 0–360, s: 0–1, l: 0–1) to RGB (0–255 each).
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
+    if s.abs() < 1e-6 {
+        let v = (l * 255.0).round() as u8;
+        return (v, v, v);
+    }
+
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
+    let p = 2.0 * l - q;
+    let h = h / 360.0;
+
+    let hue_to_rgb = |p: f32, q: f32, mut t: f32| -> f32 {
+        if t < 0.0 { t += 1.0; }
+        if t > 1.0 { t -= 1.0; }
+        if t < 1.0 / 6.0 {
+            p + (q - p) * 6.0 * t
+        } else if t < 0.5 {
+            q
+        } else if t < 2.0 / 3.0 {
+            p + (q - p) * (2.0 / 3.0 - t) * 6.0
+        } else {
+            p
+        }
+    };
+
+    let r = (hue_to_rgb(p, q, h + 1.0 / 3.0) * 255.0).round() as u8;
+    let g = (hue_to_rgb(p, q, h) * 255.0).round() as u8;
+    let b = (hue_to_rgb(p, q, h - 1.0 / 3.0) * 255.0).round() as u8;
+    (r, g, b)
+}
+
+/// Apply calibration transforms to a single color.
+fn calibrate_color(
+    color: Color,
+    cal: &crate::settings::CalibrationParams,
+) -> Color {
+    match color {
+        Color::Rgb(r, g, b) => {
+            let (mut h, mut s, mut l) = rgb_to_hsl(r, g, b);
+            // Hue shift
+            h = (h + cal.hue_shift).rem_euclid(360.0);
+            // Saturation scale
+            s = (s * cal.saturation).clamp(0.0, 1.0);
+            // Gamma (lightness curve)
+            l = l.powf(1.0 / cal.gamma).clamp(0.0, 1.0);
+            let (r, g, b) = hsl_to_rgb(h, s, l);
+            Color::Rgb(r, g, b)
+        }
+        other => other, // non-RGB colors pass through
+    }
+}
+
+// ─── Calibrated theme wrapper ───────────────────────────────────────
+
+/// A theme wrapper that applies HSL calibration to all colors from a base theme.
+struct CalibratedTheme {
+    base: Box<dyn Theme>,
+    cal: crate::settings::CalibrationParams,
+}
+
+impl CalibratedTheme {
+    fn new(base: Box<dyn Theme>, cal: crate::settings::CalibrationParams) -> Self {
+        Self { base, cal }
+    }
+
+    fn cal(&self, color: Color) -> Color {
+        calibrate_color(color, &self.cal)
+    }
+}
+
+impl Theme for CalibratedTheme {
+    fn bg(&self) -> Color { self.cal(self.base.bg()) }
+    fn card_bg(&self) -> Color { self.cal(self.base.card_bg()) }
+    fn surface_bg(&self) -> Color { self.cal(self.base.surface_bg()) }
+    fn border(&self) -> Color { self.cal(self.base.border()) }
+    fn border_dim(&self) -> Color { self.cal(self.base.border_dim()) }
+    fn fg(&self) -> Color { self.cal(self.base.fg()) }
+    fn muted(&self) -> Color { self.cal(self.base.muted()) }
+    fn dim(&self) -> Color { self.cal(self.base.dim()) }
+    fn accent(&self) -> Color { self.cal(self.base.accent()) }
+    fn accent_muted(&self) -> Color { self.cal(self.base.accent_muted()) }
+    fn accent_bright(&self) -> Color { self.cal(self.base.accent_bright()) }
+    fn success(&self) -> Color { self.cal(self.base.success()) }
+    fn error(&self) -> Color { self.cal(self.base.error()) }
+    fn warning(&self) -> Color { self.cal(self.base.warning()) }
+    fn caution(&self) -> Color { self.cal(self.base.caution()) }
+    fn footer_bg(&self) -> Color { self.cal(self.base.footer_bg()) }
+    fn user_msg_bg(&self) -> Color { self.cal(self.base.user_msg_bg()) }
+    fn tool_success_bg(&self) -> Color { self.cal(self.base.tool_success_bg()) }
+    fn tool_error_bg(&self) -> Color { self.cal(self.base.tool_error_bg()) }
+    fn diff_added(&self) -> Color { self.cal(self.base.diff_added()) }
+    fn diff_removed(&self) -> Color { self.cal(self.base.diff_removed()) }
+    fn diff_added_bg(&self) -> Color { self.cal(self.base.diff_added_bg()) }
+    fn diff_removed_bg(&self) -> Color { self.cal(self.base.diff_removed_bg()) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,6 +429,104 @@ mod tests {
     fn derived_styles_have_correct_color() {
         let t = Alpharius;
         assert_eq!(t.style_accent().fg, Some(t.accent()));
+    }
+
+    #[test]
+    fn hsl_rgb_round_trip() {
+        // Test a few known colors
+        let cases: Vec<(u8, u8, u8)> = vec![
+            (255, 0, 0),     // pure red
+            (0, 255, 0),     // pure green
+            (0, 0, 255),     // pure blue
+            (42, 180, 200),  // alpharius accent
+            (0, 1, 3),       // alpharius bg (near black)
+            (196, 216, 228), // alpharius fg
+            (128, 128, 128), // gray
+            (0, 0, 0),       // black
+            (255, 255, 255), // white
+        ];
+        for (r, g, b) in cases {
+            let (h, s, l) = rgb_to_hsl(r, g, b);
+            let (r2, g2, b2) = hsl_to_rgb(h, s, l);
+            assert!(
+                (r as i16 - r2 as i16).unsigned_abs() <= 1
+                    && (g as i16 - g2 as i16).unsigned_abs() <= 1
+                    && (b as i16 - b2 as i16).unsigned_abs() <= 1,
+                "round trip failed for ({r},{g},{b}) → HSL({h},{s},{l}) → ({r2},{g2},{b2})"
+            );
+        }
+    }
+
+    #[test]
+    fn identity_calibration_preserves_colors() {
+        let cal = crate::settings::CalibrationParams::default();
+        assert!(cal.is_identity());
+        let color = Color::Rgb(42, 180, 200);
+        let result = calibrate_color(color, &cal);
+        assert_eq!(result, color, "identity calibration should not change color");
+    }
+
+    #[test]
+    fn hue_shift_rotates_color() {
+        let cal = crate::settings::CalibrationParams {
+            gamma: 1.0,
+            saturation: 1.0,
+            hue_shift: 180.0, // opposite side of color wheel
+        };
+        let color = Color::Rgb(255, 0, 0); // red
+        let result = calibrate_color(color, &cal);
+        // Red shifted 180° → cyan
+        if let Color::Rgb(r, g, b) = result {
+            assert!(r < 10, "red channel should be low after 180° shift: {r}");
+            assert!(g > 200, "green should be high: {g}");
+            assert!(b > 200, "blue should be high: {b}");
+        } else {
+            panic!("expected Rgb color");
+        }
+    }
+
+    #[test]
+    fn saturation_zero_produces_gray() {
+        let cal = crate::settings::CalibrationParams {
+            gamma: 1.0,
+            saturation: 0.0, // fully desaturated
+            hue_shift: 0.0,
+        };
+        let color = Color::Rgb(42, 180, 200); // teal
+        let result = calibrate_color(color, &cal);
+        if let Color::Rgb(r, g, b) = result {
+            // All channels should be equal (gray)
+            assert!(
+                (r as i16 - g as i16).unsigned_abs() <= 1
+                    && (g as i16 - b as i16).unsigned_abs() <= 1,
+                "should be gray: ({r},{g},{b})"
+            );
+        }
+    }
+
+    #[test]
+    fn gamma_brightens() {
+        let cal = crate::settings::CalibrationParams {
+            gamma: 2.0, // brighter
+            saturation: 1.0,
+            hue_shift: 0.0,
+        };
+        let color = Color::Rgb(42, 180, 200);
+        let result = calibrate_color(color, &cal);
+        if let Color::Rgb(r, _g, _b) = result {
+            assert!(r > 42, "gamma 2.0 should brighten: original r=42, got {r}");
+        }
+    }
+
+    #[test]
+    fn non_rgb_colors_pass_through() {
+        let cal = crate::settings::CalibrationParams {
+            gamma: 2.0,
+            saturation: 0.5,
+            hue_shift: 90.0,
+        };
+        assert_eq!(calibrate_color(Color::Reset, &cal), Color::Reset);
+        assert_eq!(calibrate_color(Color::Red, &cal), Color::Red);
     }
 
     #[test]

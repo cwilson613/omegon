@@ -176,6 +176,14 @@ impl App {
             let s = settings.lock().unwrap();
             (s.model.clone(), s.provider().to_string())
         };
+        // Load calibration from project profile if available
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let profile = crate::settings::Profile::load(&cwd);
+        let theme = if let Some(cal) = profile.calibration {
+            theme::calibrated_theme(&cal)
+        } else {
+            theme::default_theme()
+        };
         Self {
             editor: Editor::new(),
             conversation: ConversationView::new(),
@@ -195,7 +203,7 @@ impl App {
             },
             instrument_panel: InstrumentPanel::default(),
             focus_mode: false,
-            theme: theme::default_theme(),
+            theme,
             settings,
             cancel: std::sync::Arc::new(std::sync::Mutex::new(None)),
             last_ctrl_c: None,
@@ -419,6 +427,64 @@ impl App {
     }
 
     /// Try to cancel the active agent turn. Returns true if cancelled.
+    /// Handle /calibrate — adjust display colors.
+    fn handle_calibrate(&mut self, args: &str) -> SlashResult {
+        let cwd = std::path::PathBuf::from(&self.footer_data.cwd);
+        let mut profile = crate::settings::Profile::load(&cwd);
+        let mut cal = profile.calibration.unwrap_or_default();
+
+        match args.trim() {
+            "" | "status" => {
+                SlashResult::Display(format!(
+                    "Display calibration:\n  gamma:      {:.2} (lightness, >1 = brighter)\n  saturation: {:.2} (color vividity, >1 = more vivid)\n  hue shift:  {:.1}° (color wheel rotation)\n\nAdjust: /calibrate gamma 1.2\n        /calibrate saturation 0.8\n        /calibrate hue 15\n        /calibrate reset",
+                    cal.gamma, cal.saturation, cal.hue_shift
+                ))
+            }
+            "reset" => {
+                profile.calibration = None;
+                let _ = profile.save_global();
+                self.theme = theme::default_theme();
+                SlashResult::Display("Calibration reset to defaults".into())
+            }
+            _ => {
+                // Parse: /calibrate <param> <value>
+                let parts: Vec<&str> = args.trim().split_whitespace().collect();
+                if parts.len() != 2 {
+                    return SlashResult::Display(
+                        "Usage: /calibrate <gamma|saturation|hue> <value>\n       /calibrate reset".into()
+                    );
+                }
+                let Ok(value) = parts[1].parse::<f32>() else {
+                    return SlashResult::Display(format!("Invalid value: {}", parts[1]));
+                };
+                match parts[0] {
+                    "gamma" | "g" => {
+                        cal.gamma = value.clamp(0.2, 5.0);
+                    }
+                    "saturation" | "sat" | "s" => {
+                        cal.saturation = value.clamp(0.0, 3.0);
+                    }
+                    "hue" | "h" => {
+                        cal.hue_shift = value.rem_euclid(360.0);
+                    }
+                    other => {
+                        return SlashResult::Display(format!(
+                            "Unknown parameter: {other}\nAvailable: gamma, saturation, hue"
+                        ));
+                    }
+                }
+                profile.calibration = Some(cal);
+                let _ = profile.save_global();
+                // Apply live — rebuild theme with new calibration
+                self.theme = theme::calibrated_theme(&cal);
+                SlashResult::Display(format!(
+                    "Calibration updated:\n  gamma={:.2}  saturation={:.2}  hue={:.1}°\n\nChanges applied live and saved to profile.",
+                    cal.gamma, cal.saturation, cal.hue_shift
+                ))
+            }
+        }
+    }
+
     /// Queue a prompt to be sent when the agent finishes.
     /// Handle /tutorial — start, resume, or manage the interactive tutorial.
     fn handle_tutorial(&mut self, args: &str) -> SlashResult {
@@ -1189,6 +1255,7 @@ impl App {
         ("focus",    "toggle instrument panel focus mode",   &[]),
         ("tutorial", "interactive tutorial",                           &["status", "reset"]),
         ("milestone","release milestone management",                 &["freeze", "status"]),
+        ("calibrate","adjust display colors (gamma, saturation, hue)", &["reset"]),
         ("splash",   "replay splash animation",              &[]),
         ("dashboard", "open web dashboard (alias for /dash open)", &[]),
         ("version",  "show build version and git sha",       &[]),
@@ -1566,6 +1633,10 @@ impl App {
                 self.focus_mode = !self.focus_mode;
                 let status = if self.focus_mode { "enabled" } else { "disabled" };
                 SlashResult::Display(format!("Instrument panel focus mode → {status}"))
+            }
+
+            "calibrate" => {
+                self.handle_calibrate(args)
             }
 
             "milestone" => {
