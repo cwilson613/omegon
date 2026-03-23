@@ -31,6 +31,34 @@ lint:
 build:
     cd core && cargo build --release
 
+# Link the dev-release binary onto $PATH so it can be run as `omegon` system-wide.
+# Resolution order: /opt/homebrew/bin (macOS+Homebrew) → /usr/local/bin → ~/.local/bin
+# Creates ~/.local/bin if needed and reminds you to add it to PATH if it's missing.
+link:
+    #!/usr/bin/env bash
+    set -e
+    BINARY="$(pwd)/core/target/dev-release/omegon"
+    if [ ! -f "$BINARY" ]; then
+        echo "Binary not found — run 'just update' first"
+        exit 1
+    fi
+    # Pick first writable candidate in PATH-order
+    if [ -d "/opt/homebrew/bin" ] && [ -w "/opt/homebrew/bin" ]; then
+        DEST="/opt/homebrew/bin/omegon"
+    elif [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
+        DEST="/usr/local/bin/omegon"
+    else
+        mkdir -p "$HOME/.local/bin"
+        DEST="$HOME/.local/bin/omegon"
+        if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
+            echo "⚠  ~/.local/bin is not in \$PATH — add it to your shell profile:"
+            echo "   export PATH=\"\$HOME/.local/bin:\$PATH\""
+        fi
+    fi
+    ln -sf "$BINARY" "$DEST"
+    echo "✓ omegon → $DEST"
+    "$DEST" --version
+
 # Pull latest and build (handles Cargo.lock conflicts from version bumps)
 # Uses dev-release profile: optimized but fast link (~90% perf, ~10% link time)
 update:
