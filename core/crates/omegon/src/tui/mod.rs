@@ -2015,11 +2015,37 @@ pub fn open_browser(url: &str) {
     { let _ = std::process::Command::new("cmd").args(["/c", "start", url]).spawn(); }
 }
 
+/// Monotonic counter for unique clipboard temp filenames.
+static CLIPBOARD_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Clipboard format markers → (extension, pasteboard type for AppleScript).
+/// `osascript -e 'clipboard info'` outputs markers like «class PNGf»,
+/// JPEG picture, TIFF picture — NOT UTI strings like public.png.
+const CLIPBOARD_FORMATS: &[(&str, &str, &str)] = &[
+    ("PNGf",           "png",  "«class PNGf»"),
+    ("JPEG picture",   "jpg",  "«class JPEG»"),
+    ("JPEG",           "jpg",  "«class JPEG»"),
+    ("TIFF picture",   "tiff", "«class TIFF»"),
+    ("TIFF",           "tiff", "«class TIFF»"),
+    ("GIF picture",    "gif",  "«class GIFf»"),
+    ("GIFf",           "gif",  "«class GIFf»"),
+    ("BMP",            "bmp",  "«class BMP »"),
+];
+
+/// Match clipboard info output against known image format markers.
+/// Returns (extension, pasteboard_type) if a known image format is found.
+#[cfg(target_os = "macos")]
+fn match_clipboard_image_format(info_str: &str) -> Option<(&'static str, &'static str)> {
+    CLIPBOARD_FORMATS.iter()
+        .find(|(marker, _, _)| info_str.contains(marker))
+        .map(|(_, ext, pb)| (*ext, *pb))
+}
+
 /// Try to read image data from the system clipboard and save to a temp file.
 ///
 /// Supports PNG, JPEG, TIFF, GIF, BMP, and WebP. On macOS uses `osascript`
-/// to probe clipboard info and `pbpaste` or AppleScript for extraction.
-/// On Linux uses `xclip`. Returns the temp file path on success.
+/// to probe clipboard info and AppleScript for extraction.
+/// On Linux uses `xclip` or `wl-paste`. Returns the temp file path on success.
 fn clipboard_image_to_temp() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "macos")]
     {
@@ -2030,23 +2056,7 @@ fn clipboard_image_to_temp() -> Option<std::path::PathBuf> {
             .ok()?;
         let info_str = String::from_utf8_lossy(&info.stdout);
 
-        // Map clipboard info markers → (extension, pasteboard type for AppleScript).
-        // `osascript -e 'clipboard info'` outputs markers like «class PNGf»,
-        // JPEG picture, TIFF picture — NOT UTI strings like public.png.
-        let formats: &[(&str, &str, &str)] = &[
-            ("PNGf",           "png",  "«class PNGf»"),
-            ("JPEG picture",   "jpg",  "«class JPEG»"),
-            ("JPEG",           "jpg",  "«class JPEG»"),
-            ("TIFF picture",   "tiff", "«class TIFF»"),
-            ("TIFF",           "tiff", "«class TIFF»"),
-            ("GIF picture",    "gif",  "«class GIFf»"),
-            ("GIFf",           "gif",  "«class GIFf»"),
-            ("BMP",            "bmp",  "«class BMP »"),
-        ];
-
-        let (ext, pb_type) = formats.iter()
-            .find(|(marker, _, _)| info_str.contains(marker))
-            .map(|(_, ext, pb)| (*ext, *pb))?;
+        let (ext, pb_type) = match_clipboard_image_format(&info_str)?;
 
         // Read the raw image data via AppleScript
         let script = format!(
@@ -2064,7 +2074,7 @@ fn clipboard_image_to_temp() -> Option<std::path::PathBuf> {
         // osascript returns the data with a «data ....» wrapper — extract raw bytes
         // Actually, osascript binary output is unreliable. Use a write-to-file approach instead.
         let tmp_dir = std::env::temp_dir();
-        let filename = format!("omegon-clipboard-{}.{ext}", std::process::id());
+        let filename = format!("omegon-clipboard-{}-{}.{ext}", std::process::id(), CLIPBOARD_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         let tmp_path = tmp_dir.join(&filename);
 
         let write_script = format!(
@@ -2117,7 +2127,7 @@ close access fileRef"#,
                 if let Some(output) = output {
                     if output.status.success() && !output.stdout.is_empty() {
                         let tmp_dir = std::env::temp_dir();
-                        let filename = format!("omegon-clipboard-{}.{ext}", std::process::id());
+                        let filename = format!("omegon-clipboard-{}-{}.{ext}", std::process::id(), CLIPBOARD_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
                         let tmp_path = tmp_dir.join(&filename);
                         std::fs::write(&tmp_path, &output.stdout).ok()?;
                         return Some(tmp_path);
@@ -2148,7 +2158,7 @@ close access fileRef"#,
         }
 
         let tmp_dir = std::env::temp_dir();
-        let filename = format!("omegon-clipboard-{}.{ext}", std::process::id());
+        let filename = format!("omegon-clipboard-{}-{}.{ext}", std::process::id(), CLIPBOARD_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         let tmp_path = tmp_dir.join(&filename);
 
         std::fs::write(&tmp_path, &output.stdout).ok()?;
@@ -2362,7 +2372,6 @@ pub async fn run_tui(
     cancel: SharedCancel,
     settings: crate::settings::SharedSettings,
 ) -> io::Result<()> {
-    // Set up terminal with mouse capture for scroll events
     enable_raw_mode()?;
 
     // Initialize image protocol detection AFTER raw mode (suppresses echo)
@@ -2655,20 +2664,21 @@ pub async fn run_tui(
                             }
                             KeyCode::Tab => {
                                 match &step_trigger {
-                                    tutorial::Trigger::Enter => {
+                                    tutorial::Trigger::Tab => {
                                         overlay.advance();
                                         // After advancing, check if the new step has an auto-prompt
                                         if let Some(prompt) = overlay.pending_auto_prompt() {
                                             let prompt = prompt.to_string();
                                             overlay.mark_auto_prompt_sent();
                                             if !app.agent_active {
-                                                app.conversation.push_user("[tutorial auto-prompt]");
+                                                app.conversation.push_system("▸ tutorial step");
                                                 app.agent_active = true;
                                                 let _ = command_tx.send(TuiCommand::UserPrompt(prompt)).await;
                                             } else {
                                                 app.queue_prompt(prompt);
                                             }
                                         }
+                                        continue;
                                     }
                                     tutorial::Trigger::AutoPrompt(prompt) => {
                                         if !overlay.auto_prompt_sent {
@@ -2676,7 +2686,7 @@ pub async fn run_tui(
                                             let prompt = prompt.to_string();
                                             overlay.mark_auto_prompt_sent();
                                             if !app.agent_active {
-                                                app.conversation.push_user("[tutorial auto-prompt]");
+                                                app.conversation.push_system("▸ tutorial step");
                                                 app.agent_active = true;
                                                 let _ = command_tx.send(TuiCommand::UserPrompt(prompt)).await;
                                             } else {
@@ -2684,13 +2694,12 @@ pub async fn run_tui(
                                             }
                                         }
                                         // If already sent, Tab does nothing — wait for agent
+                                        continue;
                                     }
                                     tutorial::Trigger::Command(_) | tutorial::Trigger::AnyInput => {
-                                        // Tab does nothing on Command/AnyInput steps — pass through
-                                        // (fall through to normal key handling below)
+                                        // Tab passes through to normal key handling (e.g., command completion)
                                     }
                                 }
-                                continue;
                             }
                             KeyCode::Left | KeyCode::Right if overlay.showing_choice() => {
                                 overlay.toggle_choice();

@@ -31,14 +31,13 @@ lint:
 build:
     cd core && cargo build --release
 
-# Pull latest and build (handles Cargo.lock conflicts from version bumps)
-# Uses dev-release profile: optimized but fast link (~90% perf, ~10% link time)
+# Pull latest and build release (handles Cargo.lock conflicts from version bumps)
 update:
     git checkout -- core/Cargo.lock 2>/dev/null || true
     git checkout -- .omegon/history 2>/dev/null || true
     git pull --rebase
-    cd core && cargo build --profile dev-release -p omegon
-    @echo "Updated to $(cd core && ./target/dev-release/omegon --version 2>/dev/null || echo 'build failed')"
+    cd core && cargo build --release -p omegon
+    @echo "Updated to $(cd core && ./target/release/omegon --version 2>/dev/null || echo 'build failed')"
 
 # Full release build (fat LTO, single codegen unit — slow link, smallest binary)
 build-release:

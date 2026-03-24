@@ -21,7 +21,7 @@ pub enum Anchor {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Trigger {
     /// Press Tab to continue (passive step).
-    Enter,
+    Tab,
     /// Wait for a specific slash command (e.g. "/focus").
     Command(&'static str),
     /// Wait for any user message to be sent.
@@ -57,7 +57,7 @@ const STEP_WELCOME_DEMO: Step = Step {
     title: "Welcome to the Omegon Demo",
     body: "You\u{2019}re looking at a broken sprint board \u{2014}\na browser-based task tracker with 4 bugs:\n\n  \u{2022} Wrong task count\n  \u{2022} Done column always empty\n  \u{2022} Add Task reloads the page\n  \u{2022} Changes lost on refresh\n\nYou\u{2019}re about to watch AI read the code,\nwrite a fix plan, then fix all 4 bugs\nat the same time in separate branches.\n\nTotal time: about 3 minutes.",
     anchor: Anchor::Center,
-    trigger: Trigger::Enter,
+    trigger: Trigger::Tab,
     highlight: None,
 };
 
@@ -65,7 +65,7 @@ const STEP_WELCOME_HANDS_ON: Step = Step {
     title: "Welcome to Omegon",
     body: "This is your AI coding agent.\n\nIt works in your terminal, remembers your\nproject across sessions, and can split work\ninto parallel branches.\n\nThis tour uses YOUR project. About 5 minutes.\nThe AI will read your code and do real work.",
     anchor: Anchor::Center,
-    trigger: Trigger::Enter,
+    trigger: Trigger::Tab,
     highlight: None,
 };
 
@@ -73,15 +73,15 @@ const STEP_COCKPIT: Step = Step {
     title: "Your Cockpit",
     body: "Quick orientation:\n\n  Bottom-left \u{2014} model, speed, context\n  Bottom-center \u{2014} live activity display\n  Right panel \u{2014} design notes & decisions\n\nThese all update live while the AI works.\nYou\u{2019}ll see them light up in the next step.",
     anchor: Anchor::Upper,
-    trigger: Trigger::Enter,
+    trigger: Trigger::Tab,
     highlight: Some(Highlight::InstrumentPanel),
 };
 
 const STEP_WEB_DASHBOARD: Step = Step {
     title: "Web Dashboard",
-    body: "Want a bigger view? Type /dash below\nto open the browser dashboard.\n\nIt shows everything from the right panel\nin a full web page \u{2014} design notes, specs,\nand a live feed of what\u{2019}s happening here.\n\nSame data, no polling, instant updates.\n\n(You can skip this \u{2014} just press Tab.)",
+    body: "Want a bigger view? Type /dash to open\nthe browser dashboard, or press Tab\nto skip ahead.\n\nIt shows everything from the right panel\nin a full web page \u{2014} design notes, specs,\nand a live feed of what\u{2019}s happening here.\n\nSame data, no polling, instant updates.",
     anchor: Anchor::Center,
-    trigger: Trigger::Command("dash"),
+    trigger: Trigger::Tab,
     highlight: None,
 };
 
@@ -173,7 +173,7 @@ Finally, briefly explain what was fixed and that the user can now use the board.
         title: "What Just Happened",
         body: "You watched the full workflow:\n\n  1. AI read the code and stored facts\n  2. AI made a design decision\n  3. Specs defined what each fix must do\n  4. 4 branches fixed 4 bugs in parallel\n  5. Fixes verified, app opened in browser\n\nThis same workflow works on YOUR project.\nType /help to see all commands.\n/tutorial to replay this demo.\nCtrl+C twice to quit.",
         anchor: Anchor::Center,
-        trigger: Trigger::Enter,
+        trigger: Trigger::Tab,
         highlight: None,
     },
 ];
@@ -245,13 +245,12 @@ This creates a real ai/openspec/ entry in your project."
         title: "What\u{2019}s Next",
         body: "You\u{2019}ve seen the core workflow:\n\n  1. AI reads code and remembers it\n  2. Design notes track decisions\n  3. Specs define what changes must do\n\nThe last piece: /cleave splits a spec\ninto parallel branches and fixes them\nall at once. To see that in action on\na prepared demo project:\n  /tutorial demo\n\nOr just start asking it to help with\nyour code. /help for all commands.\nCtrl+C twice to quit.",
         anchor: Anchor::Center,
-        trigger: Trigger::Enter,
+        trigger: Trigger::Tab,
         highlight: None,
     },
 ];
 
-/// Legacy alias — hands-on is the default for direct /tutorial invocations.
-pub const STEPS: &[Step] = STEPS_HANDS_ON;
+
 
 /// Which option is highlighted in the project-choice widget.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -427,7 +426,7 @@ impl Tutorial {
     /// Check if Enter was pressed and the current step accepts it.
     pub fn check_enter(&mut self) -> bool {
         if !self.active { return false; }
-        if self.step().trigger == Trigger::Enter {
+        if self.step().trigger == Trigger::Tab {
             self.advance();
             return true;
         }
@@ -510,7 +509,7 @@ impl Tutorial {
 
         // Build the call-to-action — prominent line inside the content
         let cta = match &step.trigger {
-            Trigger::Enter => "  \u{25b6} Press Tab to continue",
+            Trigger::Tab => "  \u{25b6} Press Tab to continue",
             Trigger::Command("focus") => "  \u{25b6} Type /focus in the input bar below",
             Trigger::Command(cmd) => {
                 return self.render_with_cta(overlay, buf, theme, &format!("  \u{25b6} Type /{cmd} in the input bar below"));
@@ -793,7 +792,7 @@ mod tests {
     #[test]
     fn check_enter_on_enter_step() {
         let mut tut = Tutorial::new();
-        // Step 0 has Trigger::Enter
+        // Step 0 has Trigger::Tab
         assert!(tut.check_enter());
         assert_eq!(tut.step_index(), 1);
     }
@@ -802,7 +801,7 @@ mod tests {
     fn check_enter_on_command_step_does_nothing() {
         let mut tut = Tutorial::new();
         // Advance to a Command trigger step
-        while tut.step().trigger == Trigger::Enter {
+        while tut.step().trigger == Trigger::Tab {
             tut.advance();
         }
         let idx = tut.step_index();
@@ -845,7 +844,7 @@ mod tests {
 
     #[test]
     fn all_steps_have_content() {
-        for (i, step) in STEPS.iter().enumerate() {
+        for (i, step) in STEPS_HANDS_ON.iter().enumerate() {
             assert!(!step.title.is_empty(), "STEPS_HANDS_ON step {i} has empty title");
             assert!(!step.body.is_empty(), "STEPS_HANDS_ON step {i} has empty body");
         }
@@ -860,10 +859,20 @@ mod tests {
         let tut = Tutorial::new_demo(true);
         assert!(tut.is_demo);
         assert_eq!(tut.steps().len(), STEPS_DEMO.len());
-        // Demo steps do NOT send user to /tutorial demo — they are in the demo
+        // Demo steps do NOT send user to /tutorial demo — they are in the demo.
+        // Hands-on steps MAY reference /tutorial demo (it's the upsell).
         for step in STEPS_DEMO {
             assert!(!step.body.contains("/tutorial demo"),
                 "STEPS_DEMO step '{}' tells user to run /tutorial demo — they're already in it",
+                step.title);
+        }
+        // Verify demo steps before the wrapup don't reference "YOUR project"
+        // (the final wrapup step may say "try this on YOUR project" as a CTA)
+        let wrapup_idx = STEPS_DEMO.iter().position(|s| s.title == "What Just Happened").unwrap();
+        for (i, step) in STEPS_DEMO.iter().enumerate() {
+            if i >= wrapup_idx { break; }
+            assert!(!step.body.contains("YOUR project"),
+                "STEPS_DEMO step '{}' references 'YOUR project' before wrapup — demo uses its own project",
                 step.title);
         }
     }
@@ -873,6 +882,25 @@ mod tests {
         let tut = Tutorial::with_context(false);
         assert!(!tut.is_demo);
         assert_eq!(tut.steps().len(), STEPS_HANDS_ON.len());
+    }
+
+    #[test]
+    fn hands_on_steps_order_is_correct() {
+        // Verify key narrative beats in hands-on mode
+        let read_idx = STEPS_HANDS_ON.iter().position(|s| s.title == "Reading Your Code");
+        let design_idx = STEPS_HANDS_ON.iter().position(|s| s.title == "Design Notes");
+        let spec_idx = STEPS_HANDS_ON.iter().position(|s| s.title == "Writing a Spec");
+        assert!(read_idx.is_some(), "Reading Your Code step missing from STEPS_HANDS_ON");
+        assert!(design_idx.is_some(), "Design Notes step missing from STEPS_HANDS_ON");
+        assert!(spec_idx.is_some(), "Writing a Spec step missing from STEPS_HANDS_ON");
+        assert!(
+            read_idx.unwrap() < design_idx.unwrap(),
+            "Reading Your Code must come before Design Notes in STEPS_HANDS_ON"
+        );
+        assert!(
+            design_idx.unwrap() < spec_idx.unwrap(),
+            "Design Notes must come before Writing a Spec in STEPS_HANDS_ON"
+        );
     }
 
     #[test]
@@ -949,7 +977,7 @@ mod tests {
     fn demo_check_enter_on_enter_step() {
         let mut tut = Tutorial::new_demo(true);
         // Find first Enter-triggered step in demo
-        while tut.step().trigger != Trigger::Enter {
+        while tut.step().trigger != Trigger::Tab {
             tut.advance();
         }
         let idx = tut.step_index();
@@ -1024,10 +1052,11 @@ mod tests {
 
     #[test]
     fn command_step_allows_check_command_to_advance() {
-        let mut tut = Tutorial::new();
+        // Use demo mode which has Command("cleave") step
+        let mut tut = Tutorial::new_demo(true);
         // Find a Command-triggered step
         while !matches!(tut.step().trigger, Trigger::Command(_)) {
-            tut.advance();
+            assert!(tut.advance(), "should have a Command step in STEPS_DEMO");
         }
         let idx = tut.step_index();
         let expected_cmd = if let Trigger::Command(cmd) = tut.step().trigger { cmd } else { unreachable!() };
