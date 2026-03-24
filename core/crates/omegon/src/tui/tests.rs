@@ -55,7 +55,7 @@ fn slash_status_returns_bootstrap_panel() {
     let result = app.handle_slash_command("/status", &tx);
     if let SlashResult::Display(text) = result {
         assert!(text.contains("Omegon"), "should contain Omegon: {text}");
-        assert!(text.contains("Routing"), "should contain Routing: {text}");
+        assert!(text.contains("Context:"), "should contain Context: {text}");
     } else {
         panic!("expected Display result");
     }

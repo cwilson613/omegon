@@ -21,100 +21,64 @@ pub fn render_bootstrap(status: &HarnessStatus, color: bool) -> String {
         ("", "", "", "", "", "", "")
     };
 
-    // Banner
-    out.push_str(&format!("\n{bold}{cyan}  Ω  Omegon{reset}\n"));
-    out.push_str(&format!("{dim}  Systems engineering harness{reset}\n\n"));
+    // Compact banner
+    out.push_str(&format!("\n{bold}{cyan}  Ω  Omegon{reset}\n\n"));
 
-    // Providers
-    out.push_str(&format!("  {bold}Cloud Providers{reset}\n"));
-    if status.providers.is_empty() {
-        out.push_str(&format!("    {dim}none configured{reset}\n"));
-    } else {
-        for p in &status.providers {
-            let icon = if p.authenticated { format!("{green}✓{reset}") } else { format!("{yellow}⚠{reset}") };
-            let model = p.model.as_deref().unwrap_or("-");
-            let auth = p.auth_method.as_deref().unwrap_or("none");
-            out.push_str(&format!("    {icon} {:<14} {:<24} {dim}({auth}){reset}\n", p.name, model));
+    // Providers — one line each, inline
+    let mut has_providers = false;
+    for p in &status.providers {
+        let icon = if p.authenticated { format!("{green}✓{reset}") } else { format!("{yellow}⚠{reset}") };
+        let auth = p.auth_method.as_deref().unwrap_or("none");
+        out.push_str(&format!("  {icon} {:<12} {dim}({auth}){reset}\n", p.name));
+        has_providers = true;
+    }
+    if !has_providers {
+        out.push_str(&format!("  {dim}no providers — /login to configure{reset}\n"));
+    }
+
+    // Local inference — single line
+    for b in &status.inference_backends {
+        if b.available {
+            let n = b.models.len();
+            out.push_str(&format!("  {green}✓{reset} {:<12} {dim}{n} model{}{reset}\n",
+                b.name, if n == 1 { "" } else { "s" }));
         }
     }
-    out.push('\n');
 
-    // Inference backends
-    out.push_str(&format!("  {bold}Local Inference{reset}\n"));
-    if status.inference_backends.is_empty() {
-        out.push_str(&format!("    {dim}none available{reset}\n"));
-    } else {
-        for b in &status.inference_backends {
-            let icon = if b.available { format!("{green}✓{reset}") } else { format!("{dim}○{reset}") };
-            let kind = &b.kind;
-            let models_str = if b.models.is_empty() {
-                "no models".into()
-            } else {
-                format!("{} model{}", b.models.len(), if b.models.len() == 1 { "" } else { "s" })
-            };
-            out.push_str(&format!("    {icon} {:<14} {dim}({kind}){reset}  {models_str}\n", b.name));
-        }
-    }
-    out.push('\n');
-
-    // MCP servers
-    if !status.mcp_servers.is_empty() {
-        out.push_str(&format!("  {bold}MCP Servers{reset}\n"));
-        for s in &status.mcp_servers {
-            let icon = if s.connected { format!("{green}✓{reset}") } else { format!("{red}✗{reset}") };
-            let mode = &s.transport_mode;
-            let tools = format!("{} tool{}", s.tool_count, if s.tool_count == 1 { "" } else { "s" });
-            out.push_str(&format!("    {icon} {:<14} {dim}({mode}){reset}  {tools}\n", s.name));
-            if let Some(ref err) = s.error {
-                out.push_str(&format!("      {red}{err}{reset}\n"));
-            }
-        }
-        out.push('\n');
-    }
-
-    // Secrets
-    if let Some(ref sec) = status.secret_backend {
-        out.push_str(&format!("  {bold}Secrets{reset}\n"));
-        let lock = if sec.locked { format!("{yellow}🔒{reset}") } else { format!("{green}🔓{reset}") };
-        out.push_str(&format!("    {lock} {:<14} {dim}{} stored{reset}\n", sec.backend, sec.stored_count));
-        out.push('\n');
-    }
-
-    // Container runtime
+    // Container — single line, only if present
     if let Some(ref cr) = status.container_runtime {
-        let icon = if cr.available { format!("{green}✓{reset}") } else { format!("{dim}○{reset}") };
-        let ver = cr.version.as_deref().unwrap_or("unknown");
-        out.push_str(&format!("  {bold}Container{reset}\n"));
-        out.push_str(&format!("    {icon} {:<14} {dim}{ver}{reset}\n\n", cr.runtime));
+        if cr.available {
+            let ver = cr.version.as_deref().unwrap_or("");
+            out.push_str(&format!("  {green}✓{reset} {:<12} {dim}{ver}{reset}\n", cr.runtime));
+        }
     }
 
-    // Active persona/tone
-    if status.active_persona.is_some() || status.active_tone.is_some() {
-        out.push_str(&format!("  {bold}Identity{reset}\n"));
-        if let Some(ref p) = status.active_persona {
-            out.push_str(&format!("    {cyan}{} {}{reset}  {dim}{} mind facts, {} skills{reset}\n",
-                p.badge, p.name, p.mind_facts_count, p.activated_skills.len()));
-        }
-        if let Some(ref t) = status.active_tone {
-            out.push_str(&format!("    {cyan}♪ {}{reset}  {dim}intensity: {}{reset}\n", t.name, t.intensity_mode));
-        }
-        out.push('\n');
+    // MCP — single line summary
+    if !status.mcp_servers.is_empty() {
+        let connected = status.mcp_servers.iter().filter(|s| s.connected).count();
+        let total = status.mcp_servers.len();
+        let tools: usize = status.mcp_servers.iter().map(|s| s.tool_count).sum();
+        out.push_str(&format!("  {green}✓{reset} mcp          {dim}{connected}/{total} connected, {tools} tools{reset}\n"));
     }
 
-    // Routing
-    out.push_str(&format!("  {bold}Routing{reset}\n"));
-    out.push_str(&format!("    Context:  {cyan}{}{reset}\n", status.context_class));
-    out.push_str(&format!("    Thinking: {cyan}{}{reset}\n", status.thinking_level));
-    out.push_str(&format!("    Tier:     {cyan}{}{reset}\n", status.capability_tier));
     out.push('\n');
 
-    // Memory
-    out.push_str(&format!("  {bold}Memory{reset}\n"));
-    out.push_str(&format!("    {dim}{} facts ({} active, {} project, {} persona, {} working){reset}\n",
-        status.memory.total_facts, status.memory.active_facts,
-        status.memory.project_facts, status.memory.persona_facts, status.memory.working_facts));
-    out.push_str(&format!("    {dim}{} episodes, {} edges{reset}\n",
-        status.memory.episodes, status.memory.edges));
+    // Routing — single line
+    out.push_str(&format!("  {dim}Context:{reset} {cyan}{}{reset}  {dim}Thinking:{reset} {cyan}{}{reset}  {dim}Tier:{reset} {cyan}{}{reset}\n",
+        status.context_class, status.thinking_level, status.capability_tier));
+
+    // Memory — single line
+    let mem = &status.memory;
+    if mem.total_facts > 0 {
+        out.push_str(&format!("  {dim}{} facts, {} episodes, {} edges{reset}\n",
+            mem.total_facts, mem.episodes, mem.edges));
+    }
+
+    // Active persona — single line
+    if let Some(ref p) = status.active_persona {
+        out.push_str(&format!("  {cyan}{} {}{reset}\n", p.badge, p.name));
+    }
+
     out.push('\n');
 
     out
@@ -129,8 +93,8 @@ mod tests {
         let status = HarnessStatus::default();
         let output = render_bootstrap(&status, false);
         assert!(output.contains("Omegon"));
-        assert!(output.contains("Routing"));
-        assert!(output.contains("Memory"));
+        assert!(output.contains("Context:"));
+        assert!(output.contains("Tier:"));
     }
 
     #[test]
@@ -188,14 +152,10 @@ mod tests {
         let output = render_bootstrap(&status, false);
 
         assert!(output.contains("Anthropic"), "should show Anthropic: {output}");
-        assert!(output.contains("Claude 4 Sonnet"), "should show model");
         assert!(output.contains("Ollama"), "should show Ollama");
-        assert!(output.contains("filesystem"), "should show MCP server");
-        assert!(output.contains("image not found"), "should show MCP error");
-        assert!(output.contains("passphrase"), "should show secret backend");
+        assert!(output.contains("mcp"), "should show MCP summary");
         assert!(output.contains("podman"), "should show container runtime");
         assert!(output.contains("Systems Engineer"), "should show persona");
-        assert!(output.contains("Concise"), "should show tone");
         assert!(output.contains("2440"), "should show fact count");
     }
 
