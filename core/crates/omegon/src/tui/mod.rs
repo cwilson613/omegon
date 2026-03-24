@@ -305,6 +305,11 @@ impl App {
         self.selector_kind = Some(SelectorKind::ContextClass);
     }
 
+    /// Shorthand for the current working directory as a Path.
+    fn cwd(&self) -> &std::path::Path {
+        std::path::Path::new(&self.footer_data.cwd)
+    }
+
     /// Generate a recovery hint for a tool error, if one applies.
     fn recovery_hint(tool_name: Option<&str>, error_text: &str) -> &'static str {
         let lower = error_text.to_lowercase();
@@ -315,15 +320,18 @@ impl App {
             }
             return "Service unreachable. Check if the target is running and the port is correct.";
         }
-        // Rate limiting
-        if lower.contains("rate limit") || lower.contains("429") || lower.contains("too many requests") {
+        // Rate limiting — match HTTP status codes as word boundaries, not substrings
+        if lower.contains("rate limit") || lower.contains("status 429") || lower.contains("http 429")
+            || lower.contains("too many requests") || lower.contains("error 429") {
             return "Rate limited. Use /model to switch provider, or wait a moment and retry.";
         }
-        // Authentication
-        if lower.contains("401") || lower.contains("unauthorized") || lower.contains("invalid api key") {
+        // Authentication — same boundary-aware matching
+        if lower.contains("status 401") || lower.contains("http 401") || lower.contains("error 401")
+            || lower.contains("unauthorized") || lower.contains("invalid api key") || lower.contains("invalid_api_key") {
             return "Authentication failed. Use /login to re-authenticate.";
         }
-        if lower.contains("403") || lower.contains("forbidden") || lower.contains("permission denied") {
+        if lower.contains("status 403") || lower.contains("http 403") || lower.contains("error 403")
+            || lower.contains("forbidden") || lower.contains("permission denied") {
             return "Permission denied. Check file permissions or API access scope.";
         }
         // Timeout
@@ -722,7 +730,7 @@ impl App {
                     }
                 }
                 // Check for lesson-based tutorial in this project
-                let tutorial_dir = std::path::Path::new(&self.footer_data.cwd)
+                let tutorial_dir = self.cwd()
                     .join(".omegon").join("tutorial");
 
                 if tutorial_dir.is_dir() {
@@ -866,7 +874,7 @@ impl App {
     /// Handle /milestone command — release milestone management.
     fn handle_milestone(&self, args: &str) -> SlashResult {
         let parts: Vec<&str> = args.splitn(3, ' ').collect();
-        let milestone_dir = std::path::Path::new(&self.footer_data.cwd).join(".omegon");
+        let milestone_dir = self.cwd().join(".omegon");
         let milestone_file = milestone_dir.join("milestones.json");
 
         match parts.as_slice() {
@@ -1762,7 +1770,7 @@ impl App {
 
             "migrate" => {
                 let source = if args.is_empty() { "auto" } else { args };
-                let cwd = std::path::Path::new(&self.footer_data.cwd);
+                let cwd = self.cwd();
                 let report = crate::migrate::run(source, cwd);
                 SlashResult::Display(report.summary())
             }
@@ -1956,19 +1964,24 @@ impl App {
                     // Show pending notes
                     return self.handle_slash_command("/notes", tx);
                 }
-                let notes_path = std::path::Path::new(&self.footer_data.cwd).join(".omegon").join("notes.md");
-                let _ = std::fs::create_dir_all(notes_path.parent().unwrap());
+                let notes_path = self.cwd().join(".omegon").join("notes.md");
+                if let Err(e) = std::fs::create_dir_all(notes_path.parent().unwrap()) {
+                    return SlashResult::Display(format!("❌ Can't create .omegon/: {e}"));
+                }
                 let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M");
                 let entry = format!("- [{timestamp}] {args}\n");
-                let _ = std::fs::OpenOptions::new()
+                match std::fs::OpenOptions::new()
                     .create(true).append(true).open(&notes_path)
-                    .and_then(|mut f| std::io::Write::write_all(&mut f, entry.as_bytes()));
-                SlashResult::Display(format!("📌 Noted. ({} entries)", Self::count_notes(&std::path::Path::new(&self.footer_data.cwd))))
+                    .and_then(|mut f| std::io::Write::write_all(&mut f, entry.as_bytes()))
+                {
+                    Ok(()) => SlashResult::Display(format!("📌 Noted. ({} entries)", Self::count_notes(self.cwd()))),
+                    Err(e) => SlashResult::Display(format!("❌ Failed to save note: {e}")),
+                }
             }
 
             // /notes [clear] — show or clear pending notes
             "notes" => {
-                let notes_path = std::path::Path::new(&self.footer_data.cwd).join(".omegon").join("notes.md");
+                let notes_path = self.cwd().join(".omegon").join("notes.md");
                 if args == "clear" {
                     let _ = std::fs::remove_file(&notes_path);
                     return SlashResult::Display("📌 Notes cleared.".into());
@@ -1986,10 +1999,11 @@ impl App {
             "checkin" => {
                 let mut sections: Vec<String> = Vec::new();
 
-                // Git status
+                // Git status (--no-optional-locks avoids contention with other git processes)
                 if let Ok(output) = std::process::Command::new("git")
-                    .args(["status", "--short"])
-                    .current_dir(&std::path::Path::new(&self.footer_data.cwd))
+                    .args(["--no-optional-locks", "status", "--short"])
+                    .current_dir(&self.cwd())
+                    .stderr(std::process::Stdio::null())
                     .output()
                 {
                     let status = String::from_utf8_lossy(&output.stdout);
@@ -2001,8 +2015,9 @@ impl App {
 
                 // Unpushed commits
                 if let Ok(output) = std::process::Command::new("git")
-                    .args(["log", "--oneline", "@{u}..", "--"])
-                    .current_dir(&std::path::Path::new(&self.footer_data.cwd))
+                    .args(["--no-optional-locks", "log", "--oneline", "@{u}..", "--"])
+                    .current_dir(&self.cwd())
+                    .stderr(std::process::Stdio::null())
                     .output()
                 {
                     let unpushed = String::from_utf8_lossy(&output.stdout);
@@ -2013,13 +2028,13 @@ impl App {
                 }
 
                 // Pending notes
-                let note_count = Self::count_notes(&std::path::Path::new(&self.footer_data.cwd));
+                let note_count = Self::count_notes(&self.cwd());
                 if note_count > 0 {
                     sections.push(format!("📌 {note_count} pending note{}", if note_count == 1 { "" } else { "s" }));
                 }
 
                 // OpenSpec changes in progress
-                let opsx_dir = std::path::Path::new(&self.footer_data.cwd).join("openspec").join("changes");
+                let opsx_dir = self.cwd().join("openspec").join("changes");
                 if opsx_dir.exists() {
                     if let Ok(entries) = std::fs::read_dir(&opsx_dir) {
                         let active: Vec<String> = entries.filter_map(|e| {
@@ -2245,35 +2260,24 @@ impl App {
                 self.last_tool_name = Some(name);
             }
             AgentEvent::ToolEnd { id, result, is_error } => {
-                let summary = result.content.first().and_then(|c| match c {
-                    omegon_traits::ContentBlock::Text { text } => Some(text.as_str()),
+                let summary_text = result.content.first().and_then(|c| match c {
+                    omegon_traits::ContentBlock::Text { text } => Some(text.clone()),
                     _ => None,
                 });
 
                 // Append recovery hint for tool errors
-                let display_summary = if is_error {
-                    if let Some(text) = summary {
+                let enriched: Option<String> = if is_error {
+                    summary_text.as_ref().and_then(|text| {
                         let hint = Self::recovery_hint(self.last_tool_name.as_deref(), text);
-                        if hint.is_empty() {
-                            Some(text)
-                        } else {
-                            // Store the enriched message in a temporary String
-                            let enriched = format!("{text}\n\n💡 {hint}");
-                            self.conversation.push_tool_end(&id, true, Some(&enriched));
-                            // Skip the normal push below
-                            if let Some(ref name) = self.last_tool_name {
-                                self.instrument_panel.set_tool_error(name);
-                            }
-                            // Jump past the normal flow
-                            return;
-                        }
-                    } else {
-                        summary
-                    }
+                        if hint.is_empty() { None } else { Some(format!("{text}\n\n💡 {hint}")) }
+                    })
                 } else {
-                    summary
+                    None
                 };
-                self.conversation.push_tool_end(&id, is_error, display_summary);
+
+                // Use enriched message if available, otherwise original summary
+                let display = enriched.as_deref().or(summary_text.as_deref());
+                self.conversation.push_tool_end(&id, is_error, display);
 
                 // Signal tool error to instrument panel
                 if is_error {
@@ -2287,7 +2291,7 @@ impl App {
                     && let Some(ref name) = self.last_tool_name
                     && matches!(name.as_str(), "view" | "render_diagram" | "generate_image_local"
                         | "render_excalidraw" | "render_composition_still" | "render_native_diagram")
-                    && let Some(text) = summary
+                    && let Some(ref text) = summary_text
                 {
                     for line in text.lines() {
                         let trimmed = line.trim();
@@ -3091,8 +3095,6 @@ pub async fn run_tui(
                                             expires: u64::MAX,
                                         };
                                         let _ = crate::auth::write_credentials(provider, &creds);
-                                        // Set env var for current session
-                                        unsafe { std::env::set_var(&label, &value); }
                                     }
                                 }
                             }

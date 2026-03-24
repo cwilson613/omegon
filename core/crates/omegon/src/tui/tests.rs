@@ -591,14 +591,31 @@ fn clipboard_format_matching() {
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
-fn slash_note_with_text_returns_display() {
+fn slash_note_with_text_persists_to_disk() {
+    let tmp = tempfile::tempdir().unwrap();
     let mut app = test_app();
+    app.footer_data.cwd = tmp.path().to_string_lossy().to_string();
     let tx = test_tx();
+
+    // Write a note
     let result = app.handle_slash_command("/note look into this later", &tx);
     if let SlashResult::Display(text) = result {
         assert!(text.contains("Noted"), "should confirm note: {text}");
+        assert!(text.contains("1 entries"), "should count 1 entry: {text}");
     } else {
         panic!("expected Display result");
+    }
+
+    // Verify file exists and contains the note
+    let notes_path = tmp.path().join(".omegon").join("notes.md");
+    let content = std::fs::read_to_string(&notes_path).expect("notes file should exist");
+    assert!(content.contains("look into this later"), "note text should be persisted: {content}");
+    assert!(content.starts_with("- ["), "should have timestamp prefix: {content}");
+
+    // Write a second note and verify count
+    let result2 = app.handle_slash_command("/note second thing", &tx);
+    if let SlashResult::Display(text) = result2 {
+        assert!(text.contains("2 entries"), "should count 2 entries: {text}");
     }
 }
 
@@ -631,14 +648,69 @@ fn slash_notes_clear_returns_display() {
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
-fn slash_checkin_returns_display() {
+fn slash_checkin_with_notes_shows_note_count() {
+    let tmp = tempfile::tempdir().unwrap();
     let mut app = test_app();
+    app.footer_data.cwd = tmp.path().to_string_lossy().to_string();
     let tx = test_tx();
+
+    // No notes → should NOT mention notes in checkin
     let result = app.handle_slash_command("/checkin", &tx);
-    match result {
-        SlashResult::Display(_) => {} // good — either "All clear" or triage output
-        _ => panic!("expected Display result"),
+    if let SlashResult::Display(text) = &result {
+        assert!(!text.contains("pending note"), "no notes yet: {text}");
     }
+
+    // Add a note
+    app.handle_slash_command("/note investigate flaky test", &tx);
+
+    // Now checkin should show the note count
+    let result2 = app.handle_slash_command("/checkin", &tx);
+    if let SlashResult::Display(text) = result2 {
+        assert!(text.contains("1 pending note"), "should show note count: {text}");
+    } else {
+        panic!("expected Display result");
+    }
+}
+
+#[test]
+fn slash_checkin_with_opsx_changes_shows_them() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = test_app();
+    app.footer_data.cwd = tmp.path().to_string_lossy().to_string();
+    let tx = test_tx();
+
+    // Create a fake OpenSpec change directory
+    let change_dir = tmp.path().join("openspec").join("changes").join("my-feature");
+    std::fs::create_dir_all(&change_dir).unwrap();
+
+    let result = app.handle_slash_command("/checkin", &tx);
+    if let SlashResult::Display(text) = result {
+        assert!(text.contains("OpenSpec"), "should show OpenSpec changes: {text}");
+        assert!(text.contains("my-feature"), "should name the change: {text}");
+    } else {
+        panic!("expected Display result");
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Recovery hints
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn slash_login_selector_opens_with_provider_catalog() {
+    let mut app = test_app();
+    app.open_login_selector();
+    assert!(app.selector.is_some(), "selector should be open");
+    let selector = app.selector.as_ref().unwrap();
+    assert!(selector.options.len() >= 9, "should have at least 9 providers, got {}", selector.options.len());
+    // Verify structure: each option has a value and label
+    for opt in &selector.options {
+        assert!(!opt.value.is_empty(), "option value should not be empty");
+        assert!(!opt.label.is_empty(), "option label should not be empty");
+    }
+    // Unconfigured providers should NOT have checkmark
+    let has_unconfigured = selector.options.iter().any(|o| !o.active);
+    assert!(has_unconfigured, "at least some providers should be unconfigured in test env");
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -653,8 +725,15 @@ fn recovery_hint_rate_limit() {
 
 #[test]
 fn recovery_hint_unauthorized() {
-    let hint = App::recovery_hint(None, "Error: 401 Unauthorized");
+    let hint = App::recovery_hint(None, "HTTP 401 Unauthorized");
     assert!(hint.contains("/login"), "should suggest login: {hint}");
+}
+
+#[test]
+fn recovery_hint_no_false_positive_on_status_codes() {
+    // A path containing "401" should NOT trigger the auth hint
+    let hint = App::recovery_hint(None, "Error reading /var/lib/app/401/config.json");
+    assert!(hint.is_empty(), "path with 401 should not trigger auth hint: {hint}");
 }
 
 #[test]

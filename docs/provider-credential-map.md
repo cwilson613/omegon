@@ -153,10 +153,10 @@ No prompts. Fresh token every time. The right answer for GitHub, npm, gcloud:
 /secrets set GITHUB_TOKEN cmd:gh auth token
 ```
 
-**4. File-based storage (you asked for it)**
-Stores secrets in auth.json (0600 permissions) instead of the OS keyring. No prompts. No hardware encryption. If someone gets read access to your home directory, they get your keys.
+**4. File-based storage — NOT YET IMPLEMENTED**
+Would store secrets in auth.json (0600 permissions) instead of the OS keyring. No prompts. No hardware encryption. If someone gets read access to your home directory, they get your keys.
 
-We will implement this if operators demand it. We will also judge them quietly.
+This does not exist yet. If enough operators request it, we'll build it. We'll also judge them quietly. There is no `secrets_backend` config key — don't add one to your settings expecting it to work.
 
 The default is keyring. The recommendation is "Always Allow." Everything else is your funeral.
 

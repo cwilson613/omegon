@@ -15,7 +15,7 @@ use crate::status::*;
 pub fn render_bootstrap(status: &HarnessStatus, color: bool) -> String {
     let mut out = String::with_capacity(2048);
 
-    let (bold, dim, cyan, green, yellow, red, reset) = if color {
+    let (bold, dim, cyan, green, yellow, _red, reset) = if color {
         ("\x1b[1m", "\x1b[2m", "\x1b[36m", "\x1b[32m", "\x1b[33m", "\x1b[31m", "\x1b[0m")
     } else {
         ("", "", "", "", "", "", "")
@@ -32,12 +32,19 @@ pub fn render_bootstrap(status: &HarnessStatus, color: bool) -> String {
         if !seen_providers.insert(key) { continue; } // skip duplicates
         let icon = if p.authenticated { format!("{green}✓{reset}") } else { format!("{yellow}⚠{reset}") };
         let auth = p.auth_method.as_deref().unwrap_or("none");
-        // Capitalize display name
+        // Capitalize display name — canonical map for known providers.
+        // When adding a new provider, add it here too.
         let display_name = match p.name.to_lowercase().as_str() {
             "anthropic" => "Anthropic",
             "openai" | "openai-codex" => "OpenAI",
             "openrouter" => "OpenRouter",
-            _ => &p.name,
+            "gemini" | "gemini-cli" => "Gemini",
+            "github-copilot" | "copilot" => "Copilot",
+            "groq" => "Groq",
+            "brave" => "Brave",
+            "tavily" => "Tavily",
+            "serper" => "Serper",
+            _ => &p.name, // fallback: display as-is
         };
         out.push_str(&format!("  {icon} {:<12} {dim}({auth}){reset}\n", display_name));
         has_providers = true;

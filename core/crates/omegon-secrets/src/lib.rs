@@ -162,9 +162,14 @@ impl SecretsManager {
                 return Some(cached.expose_secret().to_string());
             }
         }
-        // Cache miss — resolve from recipe, then cache for redaction + future lookups
-        let recipes = self.recipes.read().unwrap();
-        let resolved = resolve::resolve_secret(name, &recipes)?;
+        // Cache miss — clone recipe out of the lock so we don't hold it
+        // across keyring::get_password() which blocks on macOS Keychain UI
+        let recipe = {
+            let recipes = self.recipes.read().unwrap();
+            recipes.get(name).cloned()
+        };
+        let recipe = recipe?;
+        let resolved = resolve::execute_recipe(name, &recipe)?;
         let value = resolved.expose_secret().to_string();
         {
             let mut set = self.redaction_set.write().unwrap();
@@ -178,22 +183,47 @@ impl SecretsManager {
     /// Resolve a secret by name with async vault support.
     /// This is the preferred method for vault: recipes.
     pub async fn resolve_async(&self, name: &str) -> Option<String> {
+        // Check redaction cache first (same as sync path)
+        {
+            let set = self.redaction_set.read().unwrap();
+            if let Some(cached) = set.get(name) {
+                return Some(cached.expose_secret().to_string());
+            }
+        }
+
         let client = self.vault_client.lock().await;
         let vault_client = client.as_ref();
         
-        let recipes = self.recipes.read().unwrap();
-        if let Some(secret) = resolve_secret_async(name, &recipes, vault_client).await {
-            let value = secret.expose_secret().to_string();
-            
-            // Add to redaction set if it's a new value
-            {
-                let mut set = self.redaction_set.write().unwrap();
-                if !set.contains_key(name) {
+        // Clone recipe out of the lock — don't hold across keyring/vault I/O
+        let recipe = {
+            let recipes = self.recipes.read().unwrap();
+            recipes.get(name).cloned()
+        };
+        let recipe = recipe?;
+        // Check env var first (matches resolve_secret_async behavior)
+        if let Ok(val) = std::env::var(name) {
+            if !val.is_empty() {
+                let secret = SecretString::from(val);
+                let value = secret.expose_secret().to_string();
+                {
+                    let mut set = self.redaction_set.write().unwrap();
                     set.insert(name.to_string(), secret);
-                    // Rebuild redactor with new value
                     let new_redactor = Redactor::build(&set);
                     *self.redactor.write().unwrap() = new_redactor;
                 }
+                return Some(value);
+            }
+        }
+        // Execute recipe directly — don't hold recipes lock across I/O
+        if let Some(secret) = resolve::execute_recipe_async(name, &recipe, vault_client).await {
+            let value = secret.expose_secret().to_string();
+            
+            // Cache in redaction set
+            {
+                let mut set = self.redaction_set.write().unwrap();
+                set.insert(name.to_string(), secret);
+                let new_redactor = Redactor::build(&set);
+                *self.redactor.write().unwrap() = new_redactor;
             }
             
             Some(value)
