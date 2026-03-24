@@ -765,45 +765,46 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     let message = match parts.first().copied().unwrap_or("") {
                         "list" | "" => {
                             let names = agent.secrets.list_recipes();
+                            let mut out = String::new();
                             if names.is_empty() {
-                                "No secrets configured.\n\n\
-                                 Usage:\n\
-                                 \x20 /secrets set NAME VALUE        store in OS keyring\n\
-                                 \x20 /secrets set NAME env:VAR      resolve from env var\n\
-                                 \x20 /secrets set NAME cmd:COMMAND   resolve from shell command\n\
-                                 \x20 /secrets get NAME               retrieve value\n\
-                                 \x20 /secrets delete NAME            remove\n\
-                                 \x20 /secrets list                   list all".into()
+                                out.push_str("No secrets stored.\n");
                             } else {
-                                let mut out = format!("Configured secrets ({}):\n", names.len());
+                                out.push_str(&format!("🔐 Secrets ({})\n\n", names.len()));
                                 for (name, recipe) in &names {
-                                    out.push_str(&format!("  • {name:<24} {recipe}\n"));
+                                    out.push_str(&format!("  {name:<24} {recipe}\n"));
                                 }
-                                out
+                                out.push('\n');
                             }
+                            out.push_str("Store a secret:\n");
+                            out.push_str("  /secrets set MY_API_KEY sk-abc...     direct value → OS keyring\n");
+                            out.push_str("  /secrets set MY_KEY env:MY_ENV_VAR    resolve from env var\n");
+                            out.push_str("  /secrets set MY_KEY cmd:pass show x   resolve from command\n");
+                            out.push_str("  /secrets set MY_KEY vault:path/key    resolve from Vault\n\n");
+                            out.push_str("Retrieve or remove:\n");
+                            out.push_str("  /secrets get NAME\n");
+                            out.push_str("  /secrets delete NAME");
+                            out
                         }
                         "set" => {
                             if parts.len() < 3 {
-                                "Usage: /secrets set NAME VALUE\n\
-                                 \x20 /secrets set MY_KEY sk-abc123        (stores in OS keyring)\n\
-                                 \x20 /secrets set MY_KEY env:MY_ENV_VAR   (resolves from env var)\n\
-                                 \x20 /secrets set MY_KEY cmd:pass show x  (resolves from command)".into()
+                                "Usage: /secrets set NAME VALUE\n\n\
+                                 Examples:\n\
+                                 \x20 /secrets set OPENROUTER_KEY sk-or-abc123\n\
+                                 \x20 /secrets set DB_PASS env:DATABASE_PASSWORD\n\
+                                 \x20 /secrets set GITHUB_TOKEN cmd:gh auth token".into()
                             } else {
                                 let secret_name = parts[1];
                                 let secret_value = parts[2];
-                                // If value looks like a recipe (env:, cmd:, vault:, keyring:, file:), store as recipe.
-                                // Otherwise, store in keyring and create a keyring: recipe.
                                 let result = if secret_value.contains(':') && 
                                     ["env:", "cmd:", "vault:", "keyring:", "file:"].iter()
                                         .any(|p| secret_value.starts_with(p)) 
                                 {
                                     agent.secrets.set_recipe(secret_name, secret_value)
                                 } else {
-                                    // Store raw value in OS keyring
                                     agent.secrets.set_keyring_secret(secret_name, secret_value)
                                 };
                                 match result {
-                                    Ok(()) => format!("✓ Secret '{secret_name}' stored."),
+                                    Ok(()) => format!("✓ Secret '{secret_name}' stored (encrypted in OS keyring).\n  The agent will redact this value from all output."),
                                     Err(e) => format!("Error storing secret: {e}"),
                                 }
                             }
@@ -814,8 +815,8 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                             } else {
                                 let secret_name = parts[1];
                                 match agent.secrets.resolve(secret_name) {
-                                    Some(val) => format!("{secret_name} = {val}"),
-                                    None => format!("Secret '{secret_name}' not found or could not be resolved."),
+                                    Some(val) => format!("🔓 {secret_name} = {val}"),
+                                    None => format!("Secret '{secret_name}' not found.\n  Use /secrets to see stored secrets."),
                                 }
                             }
                         }
@@ -830,7 +831,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                 }
                             }
                         }
-                        sub => format!("Unknown secrets subcommand: {sub}\n\nUsage: /secrets [list|set|get|delete]"),
+                        sub => format!("Unknown: /secrets {sub}\n\nType /secrets to see usage."),
                     };
                     let _ = events_tx.send(AgentEvent::SystemNotification { message });
                 } else if name.starts_with("auth_") {
