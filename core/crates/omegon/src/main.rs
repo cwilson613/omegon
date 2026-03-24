@@ -775,23 +775,24 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                 }
                                 out.push('\n');
                             }
-                            out.push_str("Store a secret:\n");
-                            out.push_str("  /secrets set MY_API_KEY sk-abc...     direct value → OS keyring\n");
-                            out.push_str("  /secrets set MY_KEY env:MY_ENV_VAR    resolve from env var\n");
-                            out.push_str("  /secrets set MY_KEY cmd:pass show x   resolve from command\n");
-                            out.push_str("  /secrets set MY_KEY vault:path/key    resolve from Vault\n\n");
+                            out.push_str("Common secrets:\n");
+                            out.push_str("  /secrets set OPENROUTER_KEY sk-or-...         free cloud AI (openrouter.ai)\n");
+                            out.push_str("  /secrets set ANTHROPIC_API_KEY sk-ant-...      Anthropic API key\n");
+                            out.push_str("  /secrets set GITHUB_TOKEN cmd:gh auth token    GitHub via CLI\n");
+                            out.push_str("  /secrets set NPM_TOKEN env:NPM_TOKEN           from environment\n\n");
                             out.push_str("Retrieve or remove:\n");
-                            out.push_str("  /secrets get NAME\n");
-                            out.push_str("  /secrets delete NAME");
+                            out.push_str("  /secrets get OPENROUTER_KEY\n");
+                            out.push_str("  /secrets delete OPENROUTER_KEY");
                             out
                         }
                         "set" => {
                             if parts.len() < 3 {
                                 "Usage: /secrets set NAME VALUE\n\n\
                                  Examples:\n\
-                                 \x20 /secrets set OPENROUTER_KEY sk-or-abc123\n\
-                                 \x20 /secrets set DB_PASS env:DATABASE_PASSWORD\n\
-                                 \x20 /secrets set GITHUB_TOKEN cmd:gh auth token".into()
+                                 \x20 /secrets set OPENROUTER_KEY sk-or-v1-abc...    free AI provider\n\
+                                 \x20 /secrets set ANTHROPIC_API_KEY sk-ant-...       Anthropic API\n\
+                                 \x20 /secrets set GITHUB_TOKEN cmd:gh auth token    from CLI tool\n\
+                                 \x20 /secrets set AWS_SECRET env:AWS_SECRET_KEY     from env var".into()
                             } else {
                                 let secret_name = parts[1];
                                 let secret_value = parts[2];
