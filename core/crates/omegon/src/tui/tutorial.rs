@@ -93,6 +93,14 @@ const STEP_SIDEBAR: Step = Step {
     highlight: Some(Highlight::Dashboard),
 };
 
+const STEP_WEB_DASHBOARD: Step = Step {
+    title: "Web Dashboard",
+    body: "The terminal sidebar is at-a-glance.\nFor deep exploration, open the browser view.\n\nType /dash open in the input bar.\n\nOmegon starts a local server and opens your\nbrowser. You\u{2019}ll see the design tree you just\nexplored, the OpenSpec changes, and a live\nWebSocket feed of everything happening here.\n\nSame in-memory data as the TUI \u{2014} no files,\nno polling, instant updates.",
+    anchor: Anchor::Center,
+    trigger: Trigger::Command("dash"),
+    highlight: Some(Highlight::Dashboard),
+};
+
 // ─── Demo mode STEPS (pre-seeded project, specific content) ─────────────────
 
 /// Steps for the guided demo mode — run inside the bundled demo project.
@@ -136,6 +144,7 @@ Finally use action 'add_decision' to record a decision: should this project supp
     },
 
     // Act 3 — The Lifecycle
+    STEP_WEB_DASHBOARD,
     Step {
         title: "A Prepared Spec",
         body: "Look at the sidebar \u{2014} add-validation is\nmarked \u{25cf} decided and bound to an OpenSpec\nchange with Given/When/Then specs.\n\nThe agent will show you the spec and the\ntask plan that\u{2019}s ready for parallel execution.\n\nThis is the point where you\u{2019}d normally\nrun /cleave to split across branches.",
@@ -221,6 +230,7 @@ Explain what you did and why this node matters for the project."
         ),
         highlight: Some(Highlight::Dashboard),
     },
+    STEP_WEB_DASHBOARD,
 
     // Act 3 — The Lifecycle
     Step {
