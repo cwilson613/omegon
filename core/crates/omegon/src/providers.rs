@@ -125,31 +125,56 @@ fn resolve_api_key(provider: &str) -> Option<String> {
 /// Tries sync resolution first, then async (with token refresh) if needed.
 pub async fn auto_detect_bridge(model_spec: &str) -> Option<Box<dyn LlmBridge>> {
     let provider = model_spec.split(':').next().unwrap_or("anthropic");
-    match provider {
+
+    // Try the requested provider first
+    let primary: Option<Box<dyn LlmBridge>> = match provider {
         "anthropic" => {
-            // Try sync first (fast path — env var or unexpired token)
             if let Some(client) = AnthropicClient::from_env() {
-                return Some(Box::new(client));
+                Some(Box::new(client))
+            } else {
+                AnthropicClient::from_env_async().await.map(|c| Box::new(c) as Box<dyn LlmBridge>)
             }
-            // Try async (token refresh)
-            AnthropicClient::from_env_async().await.map(|c| Box::new(c) as Box<dyn LlmBridge>)
         }
         "openai" => OpenAIClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
         "openrouter" => OpenRouterClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
-        _ => {
-            // Fallback chain: Anthropic → OpenAI → OpenRouter
-            if let Some(client) = AnthropicClient::from_env() {
-                return Some(Box::new(client));
-            }
-            if let Some(client) = AnthropicClient::from_env_async().await {
-                return Some(Box::new(client));
-            }
-            if let Some(client) = OpenAIClient::from_env() {
-                return Some(Box::new(client));
-            }
-            OpenRouterClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>)
+        _ => None,
+    };
+
+    if primary.is_some() {
+        return primary;
+    }
+
+    // Primary provider not available — try the full fallback chain.
+    // This handles: user requests Anthropic but only has OpenAI credentials.
+    tracing::warn!(
+        requested = provider,
+        "requested provider not available — trying fallback chain"
+    );
+
+    if provider != "anthropic" {
+        if let Some(client) = AnthropicClient::from_env() {
+            tracing::info!("falling back to Anthropic");
+            return Some(Box::new(client));
+        }
+        if let Some(client) = AnthropicClient::from_env_async().await {
+            tracing::info!("falling back to Anthropic (after token refresh)");
+            return Some(Box::new(client));
         }
     }
+    if provider != "openai" {
+        if let Some(client) = OpenAIClient::from_env() {
+            tracing::info!("falling back to OpenAI");
+            return Some(Box::new(client));
+        }
+    }
+    if provider != "openrouter" {
+        if let Some(client) = OpenRouterClient::from_env() {
+            tracing::info!("falling back to OpenRouter");
+            return Some(Box::new(client));
+        }
+    }
+
+    None
 }
 
 // ─── SSE Helpers ────────────────────────────────────────────────────────────

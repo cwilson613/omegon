@@ -8,6 +8,7 @@
 
 use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::layer::SubscriberExt;
@@ -547,13 +548,22 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 native
             }
             None => {
-                // Fall back to subprocess bridge
+                // No native provider available — try Node.js bridge as last resort
                 let bridge_path = SubprocessBridge::default_bridge_path();
-                tracing::info!(bridge = %bridge_path.display(), "no native provider — falling back to Node.js bridge");
-                Box::new(SubprocessBridge::spawn(&bridge_path, &cli.node).await?)
+                if bridge_path.exists() {
+                    tracing::info!(bridge = %bridge_path.display(), "no native provider — falling back to Node.js bridge");
+                    Box::new(SubprocessBridge::spawn(&bridge_path, &cli.node).await?)
+                } else {
+                    // No provider, no bridge — start TUI anyway with a null bridge
+                    // so the user can /login from within the session
+                    tracing::warn!("no LLM provider available — TUI will start but messages will fail until /login");
+                    Box::new(bridge::NullBridge)
+                }
             }
         }
     };
+    let bridge: Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>> =
+        Arc::new(tokio::sync::RwLock::new(bridge));
 
     // ─── Event channel ──────────────────────────────────────────────────
     let (events_tx, events_rx) = broadcast::channel::<AgentEvent>(256);
@@ -857,6 +867,8 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                             let events_tx_clone = events_tx.clone();
                             let progress_tx = events_tx.clone();
                             let provider_clone = provider.to_string();
+                            let bridge_clone = bridge.clone();
+                            let model_for_redetect = cli.model.clone();
                             tokio::spawn(async move {
                                 let progress: auth::LoginProgress = Box::new(move |msg| {
                                     let _ = progress_tx.send(AgentEvent::SystemNotification {
@@ -872,11 +884,23 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                     }
                                     _ => Err(anyhow::anyhow!("Unknown provider: {}. Use: anthropic, openai", provider_clone)),
                                 };
-                                let message = match result {
+                                let message = match &result {
                                     Ok(_) => format!("✓ Successfully logged in to {}", provider_clone),
                                     Err(e) => format!("❌ Login failed: {}", e),
                                 };
                                 let _ = events_tx_clone.send(AgentEvent::SystemNotification { message });
+
+                                // Hot-swap the bridge if login succeeded and current bridge is NullBridge
+                                if result.is_ok() {
+                                    if let Some(new_bridge) = providers::auto_detect_bridge(&model_for_redetect).await {
+                                        let mut guard = bridge_clone.write().await;
+                                        *guard = new_bridge;
+                                        tracing::info!("bridge hot-swapped after successful login");
+                                        let _ = events_tx_clone.send(AgentEvent::SystemNotification {
+                                            message: "Provider connected — you can send messages now.".to_string(),
+                                        });
+                                    }
+                                }
                             });
                         }
                         "auth_logout" => {
@@ -1003,8 +1027,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     *guard = Some(cancel.clone());
                 }
 
+                let bridge_guard = bridge.read().await;
                 if let Err(e) = r#loop::run(
-                    bridge.as_ref(),
+                    bridge_guard.as_ref(),
                     &mut agent.bus,
                     &mut agent.context_manager,
                     &mut agent.conversation,
@@ -1012,6 +1037,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     cancel,
                     &loop_config,
                 ).await {
+                    drop(bridge_guard); // release before error handling
                     let user_msg = format_agent_error(&e);
                     tracing::error!("Agent loop error: {e}");
                     let _ = events_tx.send(AgentEvent::SystemNotification {
@@ -1051,8 +1077,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     *guard = Some(cancel.clone());
                 }
 
+                let bridge_guard = bridge.read().await;
                 if let Err(e) = r#loop::run(
-                    bridge.as_ref(),
+                    bridge_guard.as_ref(),
                     &mut agent.bus,
                     &mut agent.context_manager,
                     &mut agent.conversation,
@@ -1060,6 +1087,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     cancel,
                     &loop_config,
                 ).await {
+                    drop(bridge_guard);
                     // Surface a concise error to the user, not the raw JSON blob
                     let user_msg = format_agent_error(&e);
                     tracing::error!("Agent loop error: {e}");
@@ -1090,7 +1118,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         let _ = profile.save(&agent.cwd);
     }
 
-    bridge.shutdown().await;
+    bridge.read().await.shutdown().await;
     tui_handle.abort();
     Ok(())
 }

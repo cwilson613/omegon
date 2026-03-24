@@ -184,6 +184,31 @@ pub trait LlmBridge: Send + Sync {
     async fn shutdown(&self) {}
 }
 
+// ─── Null bridge (no provider configured) ──────────────────────────────────
+
+/// Placeholder bridge used when no LLM provider is available.
+/// Every stream call returns an error telling the user to /login.
+pub struct NullBridge;
+
+#[async_trait]
+impl LlmBridge for NullBridge {
+    async fn stream(
+        &self,
+        _system_prompt: &str,
+        _messages: &[LlmMessage],
+        _tools: &[ToolDefinition],
+        _options: &StreamOptions,
+    ) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
+        anyhow::bail!(
+            "No LLM provider configured. Use /login to authenticate:\n\
+             • /login anthropic  — Claude Pro/Max (OAuth)\n\
+             • /login openai     — ChatGPT Plus/Pro (OAuth)\n\
+             • /login openrouter — Free tier, API key\n\
+             Or: export ANTHROPIC_API_KEY=sk-..."
+        );
+    }
+}
+
 // ─── Subprocess bridge ─────────────────────────────────────────────────────
 
 pub struct SubprocessBridge {
@@ -543,5 +568,15 @@ mod tests {
         assert_eq!(resp.id, 2);
         assert!(resp.event.is_none());
         assert_eq!(resp.error.unwrap(), "connection refused");
+    }
+
+    #[tokio::test]
+    async fn null_bridge_returns_login_error() {
+        let bridge = NullBridge;
+        let result = bridge.stream("", &[], &[], &StreamOptions::default()).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("/login"), "should mention /login: {err}");
+        assert!(err.contains("No LLM provider"), "should explain no provider: {err}");
     }
 }
