@@ -142,6 +142,8 @@ pub struct App {
     pending_image: Option<std::path::PathBuf>,
     /// Previous harness status for diffing on HarnessStatusChanged.
     previous_harness_status: Option<crate::status::HarnessStatus>,
+    /// Capability tier detected at startup by systems check probes.
+    pub capability_tier: Option<crate::startup::CapabilityTier>,
     /// Tutorial state — active when running /tutorial (lesson-based).
     tutorial: Option<TutorialState>,
     /// Tutorial overlay — game-style first-play advisor.
@@ -219,6 +221,7 @@ impl App {
                 .build(),
             pending_image: None,
             previous_harness_status: None,
+            capability_tier: None,
             tutorial: None,
             tutorial_overlay: None,
         }
@@ -2416,7 +2419,7 @@ pub async fn run_tui(
 
     let mut app = App::new(settings);
     app.history = App::load_history(&config.cwd);
-    app.footer_data.cwd = config.cwd;
+    app.footer_data.cwd = config.cwd.clone();
     app.footer_data.is_oauth = config.is_oauth;
     app.bus_commands = config.bus_commands;
     app.dashboard_handles = config.dashboard_handles;
@@ -2450,14 +2453,19 @@ pub async fn run_tui(
         app.conversation.push_system(&welcome);
     }
 
-    // ── Splash screen ───────────────────────────────────────────────
+    // ── Splash screen with real systems check ─────────────────────
     if !config.no_splash {
         let size = terminal.size()?;
         if let Some(mut splash) = splash::SplashScreen::new(size.width, size.height) {
-            // Mark loading items done immediately — we load fast
-            splash.set_load_state("providers", splash::LoadState::Active);
-            splash.set_load_state("memory", splash::LoadState::Active);
-            splash.set_load_state("tools", splash::LoadState::Active);
+            // Mark all items as scanning
+            for item in &["cloud", "local", "hardware", "memory", "tools", "design", "secrets", "container", "mcp"] {
+                splash.set_load_state(item, splash::LoadState::Active);
+            }
+
+            // Spawn async probes — results arrive via channel
+            let (probe_tx, probe_rx) = std::sync::mpsc::channel();
+            let probe_cwd = config.cwd.clone();
+            tokio::spawn(crate::startup::run_probes(probe_tx, probe_cwd));
 
             // Run splash animation loop
             let splash_start = std::time::Instant::now();
@@ -2482,22 +2490,12 @@ pub async fn run_tui(
 
                 splash.tick();
 
-                // Cosmetic loading animation — the binary loads in ~50ms so
-                // real subsystem tracking would be invisible. These frame
-                // thresholds create a visual cascade for branding purposes.
-                if splash.frame >= 8 {
-                    splash.set_load_state("providers", splash::LoadState::Done);
-                }
-                if splash.frame >= 12 {
-                    splash.set_load_state("memory", splash::LoadState::Done);
-                }
-                if splash.frame >= 16 {
-                    splash.set_load_state("tools", splash::LoadState::Done);
+                // Receive probe results as they complete
+                while let Ok(result) = probe_rx.try_recv() {
+                    splash.receive_probe(result);
                 }
 
-                // Drain agent events to prevent broadcast buffer overflow.
-                // Events are silently discarded — the splash is a branding moment,
-                // not functional UI.
+                // Drain agent events to prevent broadcast buffer overflow
                 while events_rx.try_recv().is_ok() {}
 
                 // Safety timeout
@@ -2511,6 +2509,14 @@ pub async fn run_tui(
                     break;
                 }
             }
+
+            // Drain any remaining probe results after splash exits
+            let mut probe_results: Vec<crate::startup::ProbeResult> = Vec::new();
+            while let Ok(result) = probe_rx.try_recv() {
+                probe_results.push(result);
+            }
+            // Classify capability tier for tutorial/routing
+            app.capability_tier = Some(crate::startup::classify_tier(&probe_results));
         }
     }
 

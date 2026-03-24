@@ -31,6 +31,7 @@ mod providers;
 mod session;
 pub mod settings;
 mod setup;
+mod startup;
 mod plugin_cli;
 mod plugins;
 pub mod status;

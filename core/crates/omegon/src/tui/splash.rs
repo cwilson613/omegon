@@ -261,35 +261,64 @@ pub enum LoadState {
 pub struct LoadItem {
     pub label: &'static str,
     pub state: LoadState,
+    pub summary: Option<String>,
 }
 
 const SCAN_GLYPHS: &[&str] = &["░ ", "▒ ", "▓ ", "▒ ", "░ ", "▸ ", "▸ ", "▸ "];
 
-fn render_checklist<'a>(items: &[LoadItem], scan_frame: usize, t: &dyn Theme) -> Line<'a> {
-    let mut spans: Vec<Span<'a>> = Vec::new();
+/// Render the checklist as a multi-row grid (3 columns).
+fn render_grid<'a>(items: &[LoadItem], scan_frame: usize, col_width: usize, t: &dyn Theme) -> Vec<Line<'a>> {
+    let cols = 3usize;
+    let rows = (items.len() + cols - 1) / cols;
+    let mut output = Vec::with_capacity(rows);
 
-    for item in items {
-        let (indicator, label_style) = match item.state {
-            LoadState::Pending => {
-                ("· ", Style::default().fg(t.dim()))
+    for row in 0..rows {
+        let mut spans: Vec<Span<'a>> = Vec::new();
+        for col in 0..cols {
+            let idx = row + col * rows; // column-major: items fill down then right
+            if idx >= items.len() {
+                break;
             }
-            LoadState::Active => {
-                let glyph = SCAN_GLYPHS[scan_frame % SCAN_GLYPHS.len()];
-                (glyph, Style::default().fg(t.accent()))
-            }
-            LoadState::Done => {
-                ("✓ ", Style::default().fg(t.success()))
-            }
-            LoadState::Failed => {
-                ("✗ ", Style::default().fg(t.error()))
-            }
-        };
+            let item = &items[idx];
 
-        spans.push(Span::styled(indicator.to_string(), label_style));
-        spans.push(Span::styled(format!("{}  ", item.label), label_style));
+            let (indicator, ind_style) = match item.state {
+                LoadState::Pending => ("· ", Style::default().fg(t.dim())),
+                LoadState::Active => {
+                    let glyph = SCAN_GLYPHS[scan_frame % SCAN_GLYPHS.len()];
+                    (glyph, Style::default().fg(t.accent()))
+                }
+                LoadState::Done => ("✓ ", Style::default().fg(t.success())),
+                LoadState::Failed => ("✗ ", Style::default().fg(t.error())),
+            };
+
+            let label_style = match item.state {
+                LoadState::Pending => Style::default().fg(t.dim()),
+                LoadState::Active => Style::default().fg(t.accent()),
+                LoadState::Done => Style::default().fg(t.muted()),
+                LoadState::Failed => Style::default().fg(t.error()),
+            };
+
+            // Build cell text: "label (summary)" or just "label"
+            let cell_text = if let Some(ref summary) = item.summary {
+                if summary == "none" || summary == "not found" || summary == "empty" {
+                    item.label.to_string()
+                } else {
+                    format!("{} ({})", item.label, summary)
+                }
+            } else {
+                item.label.to_string()
+            };
+
+            // Pad to column width
+            let padded = format!("{:<width$}", cell_text, width = col_width);
+
+            spans.push(Span::styled(indicator.to_string(), ind_style));
+            spans.push(Span::styled(padded, label_style));
+        }
+        output.push(Line::from(spans));
     }
 
-    Line::from(spans)
+    output
 }
 
 // ─── Splash state machine ───────────────────────────────────────────────────
@@ -365,9 +394,15 @@ impl SplashScreen {
             anim_done: false,
             dismissed: false,
             items: vec![
-                LoadItem { label: "providers", state: LoadState::Pending },
-                LoadItem { label: "memory", state: LoadState::Pending },
-                LoadItem { label: "tools", state: LoadState::Pending },
+                LoadItem { label: "cloud", state: LoadState::Pending, summary: None },
+                LoadItem { label: "local", state: LoadState::Pending, summary: None },
+                LoadItem { label: "hardware", state: LoadState::Pending, summary: None },
+                LoadItem { label: "memory", state: LoadState::Pending, summary: None },
+                LoadItem { label: "tools", state: LoadState::Pending, summary: None },
+                LoadItem { label: "design", state: LoadState::Pending, summary: None },
+                LoadItem { label: "secrets", state: LoadState::Pending, summary: None },
+                LoadItem { label: "container", state: LoadState::Pending, summary: None },
+                LoadItem { label: "mcp", state: LoadState::Pending, summary: None },
             ],
             prompt_blink: false,
         })
@@ -410,6 +445,17 @@ impl SplashScreen {
     pub fn set_load_state(&mut self, label: &str, state: LoadState) {
         if let Some(item) = self.items.iter_mut().find(|i| i.label == label) {
             item.state = state;
+        }
+    }
+
+    /// Receive a probe result from the startup systems check.
+    pub fn receive_probe(&mut self, result: crate::startup::ProbeResult) {
+        if let Some(item) = self.items.iter_mut().find(|i| i.label == result.label) {
+            item.state = match result.state {
+                crate::startup::ProbeState::Done => LoadState::Done,
+                crate::startup::ProbeState::Failed => LoadState::Failed,
+            };
+            item.summary = Some(result.summary);
         }
     }
 
@@ -465,16 +511,25 @@ impl SplashScreen {
             lines.push(Line::from(padded_spans));
         }
 
-        // Checklist
+        // Checklist grid
         if !self.dismissed {
             lines.push(Line::from(""));
-            let checklist = render_checklist(&self.items, self.scan_frame, t);
-            // Center the checklist
-            let checklist_width: usize = self.items.iter().map(|i| 2 + i.label.len() + 2).sum();
-            let cl_pad = (area.width as usize).saturating_sub(checklist_width) / 2;
-            let mut padded = vec![Span::raw(" ".repeat(cl_pad))];
-            padded.extend(checklist.spans.iter().cloned());
-            lines.push(Line::from(padded));
+
+            // Calculate column width from terminal width
+            let cols = 3usize;
+            let indicator_width = 2; // "✓ "
+            let total_indicator = indicator_width * cols;
+            let available = (area.width as usize).saturating_sub(total_indicator + 6); // 6 for padding
+            let col_width = available / cols;
+            let grid_width = (col_width + indicator_width) * cols;
+            let cl_pad = (area.width as usize).saturating_sub(grid_width) / 2;
+
+            let grid_lines = render_grid(&self.items, self.scan_frame, col_width, t);
+            for grid_line in &grid_lines {
+                let mut padded = vec![Span::raw(" ".repeat(cl_pad))];
+                padded.extend(grid_line.spans.iter().cloned());
+                lines.push(Line::from(padded));
+            }
 
             // "press any key" prompt
             if self.ready_to_dismiss() {
