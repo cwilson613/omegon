@@ -140,6 +140,8 @@ pub struct InstrumentPanel {
     minds: Vec<MindState>,
     tools: Vec<ToolEntry>,
     pub focus_mode: bool,
+    /// True after the first tool call — panel borders brighten on first fire.
+    has_ever_fired: bool,
 }
 
 impl Default for InstrumentPanel {
@@ -157,6 +159,7 @@ impl Default for InstrumentPanel {
             ],
             tools: Vec::new(),
             focus_mode: false,
+            has_ever_fired: false,
         }
     }
 }
@@ -194,6 +197,9 @@ impl InstrumentPanel {
         self.thinking_intensity += (target - self.thinking_intensity) * dt * 3.0;
 
         // Tool: register call
+        if tool_name.is_some() {
+            self.has_ever_fired = true;
+        }
         if let Some(name) = tool_name {
             if let Some(entry) = self.tools.iter_mut().find(|t| t.name == name) {
                 entry.last_called = self.time;
@@ -245,20 +251,27 @@ impl InstrumentPanel {
     pub fn render(&mut self, area: Rect, frame: &mut Frame) {
         if area.width < 20 || area.height < 4 { return; }
 
+        // Dim borders at idle, bright after first tool call
+        let (border, label) = if self.has_ever_fired {
+            (Color::Rgb(36, 80, 104), Color::Rgb(72, 100, 124))
+        } else {
+            (Color::Rgb(20, 40, 55), Color::Rgb(48, 68, 88))
+        };
+
         let panels = Layout::horizontal([
             Constraint::Percentage(55),
             Constraint::Percentage(45),
         ]).split(area);
 
-        self.render_inference(panels[0], frame);
-        self.render_tools(panels[1], frame);
+        self.render_inference(panels[0], frame, border, label);
+        self.render_tools(panels[1], frame, border, label);
     }
 
-    fn render_inference(&self, area: Rect, frame: &mut Frame) {
+    fn render_inference(&self, area: Rect, frame: &mut Frame, border: Color, label: Color) {
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(20, 40, 55)))
-            .title(Span::styled(" inference ", Style::default().fg(Color::Rgb(64, 88, 112))));
+            .border_style(Style::default().fg(border))
+            .title(Span::styled(" inference ", Style::default().fg(label)));
         let inner = block.inner(area);
         frame.render_widget(block, area);
         if inner.width < 10 || inner.height < 3 { return; }
@@ -428,11 +441,11 @@ impl InstrumentPanel {
         }
     }
 
-    fn render_tools(&self, area: Rect, frame: &mut Frame) {
+    fn render_tools(&self, area: Rect, frame: &mut Frame, border: Color, label: Color) {
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(20, 40, 55)))
-            .title(Span::styled(" tools ", Style::default().fg(Color::Rgb(64, 88, 112))));
+            .border_style(Style::default().fg(border))
+            .title(Span::styled(" tools ", Style::default().fg(label)));
         let inner = block.inner(area);
         frame.render_widget(block, area);
         if inner.width < 15 || inner.height < 2 { return; }
