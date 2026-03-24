@@ -577,7 +577,11 @@ impl App {
                 .args(["clone", "--depth=1", TUTORIAL_REPO, &tutorial_dir.to_string_lossy()])
                 .output();
             if result.is_err() || !tutorial_dir.join(".git").exists() {
-                return SlashResult::Display("Failed to clone tutorial project. Check network connectivity.".into());
+                return SlashResult::Display(
+                    "Could not download the demo project.\n\n\
+                     Try /tutorial instead — it works with your current project,\n\
+                     no download needed. Or check your network and try /tutorial demo again.".into()
+                );
             }
         }
 
@@ -2451,6 +2455,14 @@ pub async fn run_tui(
         welcome.push_str("\n  Ctrl+R  search history      Ctrl+C  cancel/quit");
 
         app.conversation.push_system(&welcome);
+
+        // First-run hint: if no memory facts exist, this is likely a new user.
+        // Nudge them toward the tutorial without being pushy.
+        if facts == 0 {
+            app.conversation.push_system(
+                "💡 First time here? Type /tutorial for a guided tour, or just start typing."
+            );
+        }
     }
 
     // ── Splash screen with real systems check ─────────────────────
@@ -2723,10 +2735,15 @@ pub async fn run_tui(
                             KeyCode::Enter if overlay.showing_choice() => {
                                 overlay.confirm_choice();
                                 if overlay.choice == tutorial::TutorialChoice::Demo {
-                                    // Switch to demo mode
-                                    let has_design = app.dashboard.status_counts.total > 0;
-                                    *overlay = tutorial::Tutorial::new_demo(has_design);
+                                    // Demo mode needs the demo project — dismiss overlay
+                                    // and launch the clone+exec flow
+                                    overlay.dismiss();
+                                    let result = app.launch_tutorial_project();
+                                    if let SlashResult::Display(msg) = result {
+                                        app.conversation.push_system(&msg);
+                                    }
                                 }
+                                // MyProject: overlay stays, step 0 renders as welcome
                                 continue;
                             }
                             _ => {

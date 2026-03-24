@@ -640,7 +640,7 @@ impl Tutorial {
             .split(inner);
 
         // Intro line
-        let intro = Paragraph::new("No existing project detected. Choose a mode:")
+        let intro = Paragraph::new("Choose a tutorial mode:")
             .style(Style::default().fg(theme.muted()).bg(overlay_bg));
         intro.render(rows[0], buf);
 
