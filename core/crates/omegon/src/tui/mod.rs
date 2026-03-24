@@ -157,6 +157,7 @@ enum SelectorKind {
     ThinkingLevel,
     ContextClass,
     SecretName,
+    LoginProvider,
 }
 
 /// Result of handling a slash command.
@@ -304,6 +305,71 @@ impl App {
         self.selector_kind = Some(SelectorKind::ContextClass);
     }
 
+    fn open_login_selector(&mut self) {
+        let options = vec![
+            // LLM Providers
+            selector::SelectOption {
+                value: "anthropic".into(),
+                label: "Anthropic (Claude)".into(),
+                description: "OAuth — opens browser, Claude Pro/Max subscription".into(),
+                active: false,
+            },
+            selector::SelectOption {
+                value: "openai".into(),
+                label: "OpenAI (ChatGPT)".into(),
+                description: "OAuth — opens browser, ChatGPT Plus/Pro subscription".into(),
+                active: false,
+            },
+            selector::SelectOption {
+                value: "openrouter".into(),
+                label: "OpenRouter".into(),
+                description: "API key — free tier available, 27+ models".into(),
+                active: false,
+            },
+            // Other API key providers
+            selector::SelectOption {
+                value: "brave".into(),
+                label: "Brave Search".into(),
+                description: "API key — web search provider".into(),
+                active: false,
+            },
+            selector::SelectOption {
+                value: "tavily".into(),
+                label: "Tavily Search".into(),
+                description: "API key — AI-optimized web search".into(),
+                active: false,
+            },
+            selector::SelectOption {
+                value: "serper".into(),
+                label: "Serper (Google Search)".into(),
+                description: "API key — Google search results".into(),
+                active: false,
+            },
+            // Git forges
+            selector::SelectOption {
+                value: "github".into(),
+                label: "GitHub".into(),
+                description: "OAuth or token — git operations, API access".into(),
+                active: false,
+            },
+            selector::SelectOption {
+                value: "gitlab".into(),
+                label: "GitLab".into(),
+                description: "Token — git operations, API access".into(),
+                active: false,
+            },
+            // Infrastructure
+            selector::SelectOption {
+                value: "huggingface".into(),
+                label: "Hugging Face".into(),
+                description: "API key — models, datasets, spaces".into(),
+                active: false,
+            },
+        ];
+        self.selector = Some(selector::Selector::new("Login — choose provider", options));
+        self.selector_kind = Some(SelectorKind::LoginProvider);
+    }
+
     fn show_status_change_toasts(&mut self, prev: &crate::status::HarnessStatus, current: &crate::status::HarnessStatus) {
         // Check for persona changes
         if prev.active_persona != current.active_persona {
@@ -403,6 +469,51 @@ impl App {
                     Some(format!("Context class → {}", class.label()))
                 } else {
                     Some(format!("Unknown context class: {value}"))
+                }
+            }
+            SelectorKind::LoginProvider => {
+                // OAuth providers go through the auth login flow (opens browser)
+                // API key providers go through secret input mode (hidden input)
+                match value.as_str() {
+                    "anthropic" | "openai" => {
+                        let _ = tx.try_send(TuiCommand::BusCommand {
+                            name: "auth_login".to_string(),
+                            args: value.clone(),
+                        });
+                        Some(format!("Opening browser for {} login…", value))
+                    }
+                    "openrouter" | "brave" | "tavily" | "serper" | "huggingface" => {
+                        // Map to the correct env var name for storage
+                        let key_name = match value.as_str() {
+                            "openrouter" => "OPENROUTER_API_KEY",
+                            "brave" => "BRAVE_API_KEY",
+                            "tavily" => "TAVILY_API_KEY",
+                            "serper" => "SERPER_API_KEY",
+                            "huggingface" => "HUGGING_FACE_TOKEN",
+                            _ => unreachable!(),
+                        };
+                        self.editor.start_secret_input(key_name);
+                        Some(format!("🔒 Paste your {} API key (input is hidden):", value))
+                    }
+                    "github" => {
+                        // GitHub uses dynamic resolution via gh CLI
+                        let _ = tx.try_send(TuiCommand::BusCommand {
+                            name: "secrets".to_string(),
+                            args: "set GITHUB_TOKEN cmd:gh auth token".to_string(),
+                        });
+                        Some("✓ GITHUB_TOKEN → cmd:gh auth token (always fresh from gh CLI)".to_string())
+                    }
+                    "gitlab" => {
+                        self.editor.start_secret_input("GITLAB_TOKEN");
+                        Some("🔒 Paste your GitLab token (input is hidden):".to_string())
+                    }
+                    _ => {
+                        let _ = tx.try_send(TuiCommand::BusCommand {
+                            name: "auth_login".to_string(),
+                            args: value.clone(),
+                        });
+                        Some(format!("Logging in to {value}…"))
+                    }
                 }
             }
             SelectorKind::SecretName => {
@@ -1277,7 +1388,7 @@ impl App {
         ("context",  "select context class (Squad/Maniple/Clan/Legion)",       &["squad", "maniple", "clan", "legion"]),
         ("sessions", "list saved sessions",                  &[]),
         ("memory",   "memory stats",                        &[]),
-        ("login",    "log in to provider (default: anthropic)", &["anthropic", "openai", "openrouter"]),
+        ("login",    "log in to a provider or service",         &["anthropic", "openai", "openrouter", "github"]),
         ("logout",   "log out of provider",                   &["anthropic", "openai"]),
         ("auth",     "authentication management",             &["status", "login", "logout", "unlock"]),
         ("chronos",  "date/time context",                      &["week", "month", "quarter", "relative", "iso", "epoch", "tz", "range", "all"]),
@@ -1787,14 +1898,18 @@ impl App {
                 }
             }
 
-            // /login [provider] — alias for /auth login <provider>
+            // /login [provider] — open selector or login directly
             "login" => {
-                let provider = if args.is_empty() { "anthropic" } else { args };
-                let _ = tx.try_send(TuiCommand::BusCommand {
-                    name: "auth_login".to_string(),
-                    args: provider.to_string(),
-                });
-                SlashResult::Handled
+                if args.is_empty() {
+                    self.open_login_selector();
+                    SlashResult::Handled
+                } else {
+                    let _ = tx.try_send(TuiCommand::BusCommand {
+                        name: "auth_login".to_string(),
+                        args: args.to_string(),
+                    });
+                    SlashResult::Handled
+                }
             }
 
             // /logout [provider] — alias for /auth logout <provider>
