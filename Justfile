@@ -98,23 +98,23 @@ rc:
     # Update Cargo.toml
     sed -i '' "s/^version = \"${CURRENT}\"/version = \"${NEW_VERSION}\"/" core/Cargo.toml
 
-    # Build
-    echo "Building..."
-    cd core && cargo build --release -p omegon 2>&1 | tail -3
-    cd ..
-
-    # Test
+    # Test first (faster than build, catches errors early)
     echo "Testing..."
     cd core && cargo test -p omegon 2>&1 | tail -3
     cd ..
 
-    # Commit and tag
+    # Commit and tag BEFORE final build so the binary has the right sha
     git add core/Cargo.toml core/Cargo.lock
     git commit -m "chore(release): ${NEW_VERSION}"
     git tag "v${NEW_VERSION}"
 
+    # Build release (now the tag and commit are baked into the binary)
+    echo "Building..."
+    cd core && cargo build --release -p omegon 2>&1 | tail -3
+    cd ..
+
     echo ""
-    echo "✓ ${NEW_VERSION} — built, tested, committed, tagged."
+    echo "✓ ${NEW_VERSION} — tested, committed, tagged, built."
     echo "  To publish: git push origin v${NEW_VERSION}"
 
 # Cut a stable release: strip -rc.N, build, test, commit, tag.
@@ -139,10 +139,6 @@ release:
 
     sed -i '' "s/^version = \"${CURRENT}\"/version = \"${NEW_VERSION}\"/" core/Cargo.toml
 
-    echo "Building..."
-    cd core && cargo build --release -p omegon 2>&1 | tail -3
-    cd ..
-
     echo "Testing..."
     cd core && cargo test -p omegon 2>&1 | tail -3
     cd ..
@@ -151,8 +147,12 @@ release:
     git commit -m "chore(release): ${NEW_VERSION}"
     git tag "v${NEW_VERSION}"
 
+    echo "Building..."
+    cd core && cargo build --release -p omegon 2>&1 | tail -3
+    cd ..
+
     echo ""
-    echo "✓ ${NEW_VERSION} — built, tested, committed, tagged."
+    echo "✓ ${NEW_VERSION} — tested, committed, tagged, built."
     echo "  To publish: git push origin v${NEW_VERSION}"
 
 # ─── TypeScript (omegon-pi) ─────────────────────────────────
