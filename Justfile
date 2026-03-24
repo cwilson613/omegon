@@ -113,9 +113,86 @@ rc:
     cd core && cargo build --release -p omegon 2>&1 | tail -3
     cd ..
 
+    # Code sign with stable identity (avoids per-build macOS keychain prompts)
+    BINARY="core/target/release/omegon"
+    if security find-identity -v -p codesigning 2>/dev/null | grep -q "Omegon Local Dev"; then
+        codesign -f -s "Omegon Local Dev" --identifier "dev.styrene.omegon" "$BINARY"
+        echo "Signed with Omegon Local Dev certificate"
+    else
+        codesign -f -s - --identifier "dev.styrene.omegon" "$BINARY" 2>/dev/null || true
+        echo "Ad-hoc signed (run 'just setup-signing' to enable persistent keychain access)"
+    fi
+
     echo ""
     echo "✓ ${NEW_VERSION} — tested, committed, tagged, built."
     echo "  To publish: git push origin v${NEW_VERSION}"
+
+# One-time setup: create a self-signed code signing certificate.
+# This prevents macOS from asking for keychain permission on every RC build.
+# Requires sudo (to add trusted cert to System keychain).
+setup-signing:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if security find-identity -v -p codesigning 2>/dev/null | grep -q "Omegon Local Dev"; then
+        echo "✓ Omegon Local Dev signing identity already exists"
+        security find-identity -v -p codesigning | grep "Omegon"
+        exit 0
+    fi
+
+    echo "Creating self-signed code signing certificate: Omegon Local Dev"
+    echo "This is a one-time setup. You'll be asked for your password (sudo)."
+    echo ""
+
+    TMPDIR=$(mktemp -d)
+    cat > "$TMPDIR/cert.cfg" <<'CERT'
+    [ req ]
+    default_bits = 2048
+    prompt = no
+    default_md = sha256
+    distinguished_name = dn
+    x509_extensions = v3_code_sign
+
+    [ dn ]
+    CN = Omegon Local Dev
+    O = Styrene Lab
+
+    [ v3_code_sign ]
+    keyUsage = digitalSignature
+    extendedKeyUsage = codeSigning
+    basicConstraints = CA:false
+    CERT
+
+    openssl req -x509 -newkey rsa:2048 \
+        -keyout "$TMPDIR/key.pem" -out "$TMPDIR/cert.pem" \
+        -days 3650 -nodes -config "$TMPDIR/cert.cfg" 2>/dev/null
+
+    # Create a PKCS12 bundle (required for proper signing identity import)
+    openssl pkcs12 -export -out "$TMPDIR/omegon.p12" \
+        -inkey "$TMPDIR/key.pem" -in "$TMPDIR/cert.pem" \
+        -passout pass: 2>/dev/null
+
+    # Import into login keychain
+    security import "$TMPDIR/omegon.p12" -k ~/Library/Keychains/login.keychain-db \
+        -T /usr/bin/codesign -P "" 2>/dev/null
+
+    # Trust the certificate for code signing (requires sudo)
+    echo "Adding certificate to System keychain as trusted (requires sudo)..."
+    sudo security add-trusted-cert -d -r trustRoot \
+        -k /Library/Keychains/System.keychain "$TMPDIR/cert.pem"
+
+    rm -rf "$TMPDIR"
+
+    echo ""
+    if security find-identity -v -p codesigning 2>/dev/null | grep -q "Omegon Local Dev"; then
+        echo "✓ Signing identity created. All future RC builds will be signed."
+        echo "  macOS keychain prompts will persist across builds."
+        security find-identity -v -p codesigning | grep "Omegon"
+    else
+        echo "⚠ Certificate imported but not showing as valid signing identity."
+        echo "  Open Keychain Access → Certificates → Omegon Local Dev"
+        echo "  → Get Info → Trust → Code Signing → Always Trust"
+    fi
 
 # Cut a stable release: strip -rc.N, build, test, commit, tag.
 release:

@@ -119,13 +119,21 @@ If you don't trust your OS to store your keys, you have bigger problems than an 
 
 ### Prompt frequency and how to eliminate it
 
-The OS keychain prompts once per secret per session launch. If you have 3 secrets in the keyring, that's 3 prompts every time you start Omegon. This is friction, and we know it.
+macOS Keychain grants access based on the calling binary's **code signature hash**. When you click "Always Allow", that permission is bound to the specific binary that asked. If the binary changes (new build, new RC), macOS treats it as a new application and asks again.
 
-**To eliminate prompts permanently on macOS:** When the Keychain Access dialog appears, click **"Always Allow"**. This grants Omegon permanent access to *its own* keychain entries (service name `omegon`). It does NOT grant access to your browser passwords, SSH keys, or any other application's entries.
+**For release builds:** The binary is signed with a stable Apple Developer ID. "Always Allow" persists across updates.
 
-This is the recommended path. One click per secret, once ever, and you never see the prompt again.
+**For local dev / RC builds:** Each `just rc` produces a new binary. Without signing, you'll be prompted on every RC. To fix this:
 
-If you don't want to grant persistent keychain access, see "Opting out" below for alternatives.
+```sh
+just setup-signing
+```
+
+This creates a self-signed "Omegon Local Dev" code signing certificate (one-time setup, requires sudo). After this, `just rc` signs the binary with a stable identity, and "Always Allow" persists across builds.
+
+If you don't want to set up signing, the keychain prompts are per-build, not per-session — click "Always Allow" once per RC and you're good until the next build.
+
+If you don't want to grant persistent keychain access at all, see "Opting out" below for alternatives.
 
 ### Opting out of the OS keychain
 
