@@ -275,7 +275,7 @@ fn render_grid<'a>(items: &[LoadItem], scan_frame: usize, col_width: usize, t: &
     for row in 0..rows {
         let mut spans: Vec<Span<'a>> = Vec::new();
         for col in 0..cols {
-            let idx = row + col * rows; // column-major: items fill down then right
+            let idx = row * cols + col; // row-major: items fill left-to-right, top-to-bottom
             if idx >= items.len() {
                 break;
             }
@@ -635,5 +635,82 @@ mod tests {
             s.items.iter().find(|i| i.label == "memory").unwrap().state,
             LoadState::Done,
         );
+    }
+
+    #[test]
+    fn nine_items_initialized() {
+        let s = SplashScreen::new(120, 50).unwrap();
+        assert_eq!(s.items.len(), 9);
+        let labels: Vec<&str> = s.items.iter().map(|i| i.label).collect();
+        assert!(labels.contains(&"cloud"));
+        assert!(labels.contains(&"local"));
+        assert!(labels.contains(&"hardware"));
+        assert!(labels.contains(&"memory"));
+        assert!(labels.contains(&"tools"));
+        assert!(labels.contains(&"design"));
+        assert!(labels.contains(&"secrets"));
+        assert!(labels.contains(&"container"));
+        assert!(labels.contains(&"mcp"));
+    }
+
+    #[test]
+    fn receive_probe_updates_item() {
+        let mut s = SplashScreen::new(120, 50).unwrap();
+        s.receive_probe(crate::startup::ProbeResult {
+            label: "cloud",
+            state: crate::startup::ProbeState::Done,
+            summary: "anthropic, openai".into(),
+        });
+        let item = s.items.iter().find(|i| i.label == "cloud").unwrap();
+        assert_eq!(item.state, LoadState::Done);
+        assert_eq!(item.summary.as_deref(), Some("anthropic, openai"));
+    }
+
+    #[test]
+    fn receive_probe_failed_maps_correctly() {
+        let mut s = SplashScreen::new(120, 50).unwrap();
+        s.receive_probe(crate::startup::ProbeResult {
+            label: "container",
+            state: crate::startup::ProbeState::Failed,
+            summary: "not found".into(),
+        });
+        let item = s.items.iter().find(|i| i.label == "container").unwrap();
+        assert_eq!(item.state, LoadState::Failed);
+    }
+
+    #[test]
+    fn grid_renders_without_panic() {
+        let t = crate::tui::theme::Alpharius;
+        let items = vec![
+            LoadItem { label: "cloud", state: LoadState::Done, summary: Some("anthropic".into()) },
+            LoadItem { label: "local", state: LoadState::Active, summary: None },
+            LoadItem { label: "hardware", state: LoadState::Done, summary: Some("M2, 32GB".into()) },
+            LoadItem { label: "memory", state: LoadState::Failed, summary: Some("not found".into()) },
+            LoadItem { label: "tools", state: LoadState::Done, summary: Some("48 registered".into()) },
+            LoadItem { label: "design", state: LoadState::Pending, summary: None },
+        ];
+        let lines = render_grid(&items, 0, 24, &t);
+        assert_eq!(lines.len(), 2, "6 items / 3 cols = 2 rows");
+        // Each line should have spans
+        for line in &lines {
+            assert!(!line.spans.is_empty());
+        }
+    }
+
+    #[test]
+    fn grid_single_item() {
+        let t = crate::tui::theme::Alpharius;
+        let items = vec![
+            LoadItem { label: "test", state: LoadState::Done, summary: Some("ok".into()) },
+        ];
+        let lines = render_grid(&items, 0, 20, &t);
+        assert_eq!(lines.len(), 1);
+    }
+
+    #[test]
+    fn grid_empty() {
+        let t = crate::tui::theme::Alpharius;
+        let lines = render_grid(&[], 0, 20, &t);
+        assert!(lines.is_empty());
     }
 }

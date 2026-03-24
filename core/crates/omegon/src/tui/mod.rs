@@ -2466,6 +2466,7 @@ pub async fn run_tui(
             let (probe_tx, probe_rx) = std::sync::mpsc::channel();
             let probe_cwd = config.cwd.clone();
             tokio::spawn(crate::startup::run_probes(probe_tx, probe_cwd));
+            let mut collected_probes: Vec<crate::startup::ProbeResult> = Vec::new();
 
             // Run splash animation loop
             let splash_start = std::time::Instant::now();
@@ -2492,7 +2493,8 @@ pub async fn run_tui(
 
                 // Receive probe results as they complete
                 while let Ok(result) = probe_rx.try_recv() {
-                    splash.receive_probe(result);
+                    splash.receive_probe(result.clone());
+                    collected_probes.push(result);
                 }
 
                 // Drain agent events to prevent broadcast buffer overflow
@@ -2510,13 +2512,12 @@ pub async fn run_tui(
                 }
             }
 
-            // Drain any remaining probe results after splash exits
-            let mut probe_results: Vec<crate::startup::ProbeResult> = Vec::new();
+            // Drain any stragglers that arrived after the last loop iteration
             while let Ok(result) = probe_rx.try_recv() {
-                probe_results.push(result);
+                collected_probes.push(result);
             }
-            // Classify capability tier for tutorial/routing
-            app.capability_tier = Some(crate::startup::classify_tier(&probe_results));
+            // Classify capability tier from ALL collected results
+            app.capability_tier = Some(crate::startup::classify_tier(&collected_probes));
         }
     }
 

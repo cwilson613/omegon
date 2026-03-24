@@ -94,9 +94,10 @@ pub fn classify_tier(results: &[ProbeResult]) -> CapabilityTier {
     let has_good_local = local
         .is_some_and(|r| r.state == ProbeState::Done && !r.summary.contains("no models"));
     let has_beefy_hw = hw
-        .is_some_and(|r| r.state == ProbeState::Done && r.summary.contains("32GB")
-            || r.summary.contains("64GB") || r.summary.contains("96GB")
-            || r.summary.contains("128GB") || r.summary.contains("192GB"));
+        .is_some_and(|r| r.state == ProbeState::Done && (
+            r.summary.contains("32GB") || r.summary.contains("64GB")
+            || r.summary.contains("96GB") || r.summary.contains("128GB")
+            || r.summary.contains("192GB")));
 
     if has_good_local && has_beefy_hw {
         return CapabilityTier::BeefyLocal;
@@ -117,6 +118,35 @@ pub fn classify_tier(results: &[ProbeResult]) -> CapabilityTier {
     CapabilityTier::Offline
 }
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/// Run a subprocess with a timeout. Returns None if it times out or fails to spawn.
+fn timed_command(cmd: &str, args: &[&str], timeout_ms: u64) -> Option<std::process::Output> {
+    use std::process::Command;
+    let mut child = Command::new(cmd)
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+
+    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => return child.wait_with_output().ok(),
+            Ok(None) => {
+                if std::time::Instant::now() > deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
 // ─── Individual probes ──────────────────────────────────────────────────────
 
 fn probe_cloud() -> ProbeResult {
@@ -133,16 +163,15 @@ fn probe_cloud() -> ProbeResult {
         providers.push("openrouter");
     }
 
-    // Check stored credentials
-    if providers.is_empty() {
-        for name in &["anthropic", "openai-codex", "openrouter"] {
-            if crate::auth::read_credentials(name)
-                .is_some_and(|c| !c.access.is_empty())
-            {
-                let label = if *name == "openai-codex" { "openai" } else { name };
-                if !providers.contains(&label) {
-                    providers.push(label);
-                }
+    // Also check stored credentials (additive — user may have env var for
+    // one provider and stored credentials for another)
+    for name in &["anthropic", "openai-codex", "openrouter"] {
+        if crate::auth::read_credentials(name)
+            .is_some_and(|c| !c.access.is_empty())
+        {
+            let label = if *name == "openai-codex" { "openai" } else { name };
+            if !providers.contains(&label) {
+                providers.push(label);
             }
         }
     }
@@ -156,38 +185,41 @@ fn probe_cloud() -> ProbeResult {
 
 async fn probe_local() -> ProbeResult {
     let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_millis(150))
-        .timeout(Duration::from_millis(500))
+        .connect_timeout(Duration::from_millis(100))
+        .timeout(Duration::from_millis(300))
         .build()
         .unwrap_or_default();
 
-    let mut found = Vec::new();
+    // Probe all ports in parallel
+    let c1 = client.clone();
+    let c2 = client.clone();
+    let c3 = client;
 
-    // Ollama
-    if let Ok(resp) = client.get("http://localhost:11434/api/tags").send().await {
-        if let Ok(body) = resp.text().await {
-            let count = body.matches("\"name\"").count();
-            if count > 0 {
-                found.push(format!("ollama: {count}"));
-            } else {
-                found.push("ollama: no models".into());
+    let (ollama, lmstudio, vllm) = tokio::join!(
+        async {
+            match c1.get("http://localhost:11434/api/tags").send().await {
+                Ok(resp) => match resp.text().await {
+                    Ok(body) => {
+                        let count = body.matches("\"name\"").count();
+                        if count > 0 { Some(format!("ollama: {count}")) }
+                        else { Some("ollama: no models".into()) }
+                    }
+                    Err(_) => None,
+                },
+                Err(_) => None,
             }
-        }
-    }
+        },
+        async {
+            c2.get("http://localhost:1234/v1/models").send().await
+                .ok().filter(|r| r.status().is_success()).map(|_| "lmstudio".to_string())
+        },
+        async {
+            c3.get("http://localhost:8080/v1/models").send().await
+                .ok().filter(|r| r.status().is_success()).map(|_| "vllm".to_string())
+        },
+    );
 
-    // LM Studio
-    if let Ok(resp) = client.get("http://localhost:1234/v1/models").send().await {
-        if resp.status().is_success() {
-            found.push("lmstudio".into());
-        }
-    }
-
-    // vLLM / TGI
-    if let Ok(resp) = client.get("http://localhost:8080/v1/models").send().await {
-        if resp.status().is_success() {
-            found.push("vllm".into());
-        }
-    }
+    let found: Vec<String> = [ollama, lmstudio, vllm].into_iter().flatten().collect();
 
     if found.is_empty() {
         ProbeResult { label: "local", state: ProbeState::Failed, summary: "not found".into() }
@@ -201,22 +233,17 @@ fn probe_hardware() -> ProbeResult {
 
     #[cfg(target_os = "macos")]
     {
-        // Detect chip
-        if let Ok(out) = std::process::Command::new("sysctl").args(["-n", "machdep.cpu.brand_string"]).output() {
+        // Detect chip + RAM in one pass (single sysctl call already captured brand)
+        if let Some(out) = timed_command("sysctl", &["-n", "machdep.cpu.brand_string"], 500) {
             let brand = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if brand.contains("Apple") {
-                // Apple Silicon — get chip name from sysctl
-                if let Ok(chip) = std::process::Command::new("sysctl").args(["-n", "machdep.cpu.brand_string"]).output() {
-                    let s = String::from_utf8_lossy(&chip.stdout).trim().to_string();
-                    // Extract "M2 Pro" from "Apple M2 Pro"
-                    let name = s.strip_prefix("Apple ").unwrap_or(&s);
-                    parts.push(name.to_string());
-                }
+                let name = brand.strip_prefix("Apple ").unwrap_or(&brand);
+                parts.push(name.to_string());
             }
         }
 
         // RAM via sysctl
-        if let Ok(out) = std::process::Command::new("sysctl").args(["-n", "hw.memsize"]).output() {
+        if let Some(out) = timed_command("sysctl", &["-n", "hw.memsize"], 500) {
             if let Ok(bytes) = String::from_utf8_lossy(&out.stdout).trim().parse::<u64>() {
                 let gb = bytes / (1024 * 1024 * 1024);
                 parts.push(format!("{gb}GB"));
@@ -226,21 +253,19 @@ fn probe_hardware() -> ProbeResult {
 
     #[cfg(target_os = "linux")]
     {
-        // GPU via nvidia-smi
-        if let Ok(out) = std::process::Command::new("nvidia-smi")
-            .args(["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"])
-            .output()
+        // GPU via nvidia-smi (500ms timeout — nvidia-smi can be slow)
+        if let Some(out) = timed_command("nvidia-smi",
+            &["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"], 500)
         {
             if out.status.success() {
                 let line = String::from_utf8_lossy(&out.stdout).trim().to_string();
                 if let Some((name, vram)) = line.split_once(',') {
-                    let vram = vram.trim();
-                    parts.push(format!("{}, {vram}MB VRAM", name.trim()));
+                    parts.push(format!("{}, {}MB VRAM", name.trim(), vram.trim()));
                 }
             }
         }
 
-        // RAM via /proc/meminfo
+        // RAM via /proc/meminfo (no subprocess needed)
         if let Ok(content) = std::fs::read_to_string("/proc/meminfo") {
             if let Some(line) = content.lines().find(|l| l.starts_with("MemTotal:")) {
                 if let Some(kb_str) = line.split_whitespace().nth(1) {
@@ -254,7 +279,6 @@ fn probe_hardware() -> ProbeResult {
     }
 
     if parts.is_empty() {
-        // Fallback — at least report the architecture
         parts.push(std::env::consts::ARCH.to_string());
     }
 
@@ -306,9 +330,14 @@ fn probe_design(cwd: &str) -> ProbeResult {
         return ProbeResult { label: "design", state: ProbeState::Done, summary: "empty".into() };
     }
 
+    // Count .md files that have design-node frontmatter (id: field)
     let count = std::fs::read_dir(&docs_dir)
         .map(|entries| entries.filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+            .filter(|e| {
+                e.path().extension().is_some_and(|ext| ext == "md")
+                    && std::fs::read_to_string(e.path())
+                        .is_ok_and(|c| c.starts_with("---") && c.contains("\nid:"))
+            })
             .count())
         .unwrap_or(0);
 
@@ -320,23 +349,19 @@ fn probe_design(cwd: &str) -> ProbeResult {
 }
 
 fn probe_secrets() -> ProbeResult {
-    // Check if vault CLI is available
-    let vault_available = std::process::Command::new("vault")
-        .arg("status")
-        .output()
-        .is_ok();
-
-    if vault_available {
+    // Check vault availability with timeout (vault status can hang)
+    if timed_command("vault", &["version"], 500).is_some() {
         ProbeResult { label: "secrets", state: ProbeState::Done, summary: "vault".into() }
     } else {
+        // No vault — report keyring as fallback (always available on macOS/Linux)
         ProbeResult { label: "secrets", state: ProbeState::Done, summary: "keyring".into() }
     }
 }
 
 fn probe_container() -> ProbeResult {
-    // Try podman first, then docker
+    // Try podman first, then docker — with timeout (Docker Desktop can be slow)
     for (cmd, name) in &[("podman", "podman"), ("docker", "docker")] {
-        if let Ok(out) = std::process::Command::new(cmd).arg("--version").output() {
+        if let Some(out) = timed_command(cmd, &["--version"], 1000) {
             if out.status.success() {
                 let ver = String::from_utf8_lossy(&out.stdout);
                 let version = ver.split_whitespace()
@@ -435,8 +460,11 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let docs = tmp.path().join("docs");
         std::fs::create_dir_all(&docs).unwrap();
-        std::fs::write(docs.join("node-a.md"), "# A").unwrap();
-        std::fs::write(docs.join("node-b.md"), "# B").unwrap();
+        // Real design nodes have frontmatter with id:
+        std::fs::write(docs.join("node-a.md"), "---\nid: node-a\ntitle: A\n---\n# A").unwrap();
+        std::fs::write(docs.join("node-b.md"), "---\nid: node-b\ntitle: B\n---\n# B").unwrap();
+        // These should NOT count
+        std::fs::write(docs.join("readme.md"), "# Just a readme").unwrap();
         std::fs::write(docs.join("readme.txt"), "not md").unwrap();
         let result = probe_design(tmp.path().to_str().unwrap());
         assert_eq!(result.summary, "2 nodes");
