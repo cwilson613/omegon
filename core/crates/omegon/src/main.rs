@@ -691,13 +691,45 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
 
             tui::TuiCommand::SetModel(model) => {
                 tracing::info!(model = %model, "model switched via /model command");
+
+                // Detect provider change — swap bridge if needed
+                let old_provider = shared_settings.lock().ok()
+                    .map(|s| s.model.split(':').next().unwrap_or("anthropic").to_string())
+                    .unwrap_or_default();
+                let new_provider = model.split(':').next().unwrap_or("anthropic");
+
                 if let Ok(mut s) = shared_settings.lock() {
-                    s.model = model;
+                    s.model = model.clone();
                     s.context_window = settings::Settings::new(&s.model).context_window;
                     // Persist to project profile
                     let mut profile = settings::Profile::load(&agent.cwd);
                     profile.capture_from(&s);
                     let _ = profile.save(&agent.cwd);
+                }
+
+                // If provider changed, re-detect and hot-swap the bridge
+                if old_provider != new_provider {
+                    tracing::info!(
+                        old = %old_provider, new = %new_provider,
+                        "provider changed — re-detecting bridge"
+                    );
+                    let bridge_clone = bridge.clone();
+                    let model_clone = model.clone();
+                    let events_clone = events_tx.clone();
+                    tokio::spawn(async move {
+                        if let Some(new_bridge) = providers::auto_detect_bridge(&model_clone).await {
+                            let mut guard = bridge_clone.write().await;
+                            *guard = new_bridge;
+                            tracing::info!("bridge hot-swapped for provider {}", model_clone.split(':').next().unwrap_or("?"));
+                            let _ = events_clone.send(AgentEvent::SystemNotification {
+                                message: format!("Provider switched to {}.", model_clone.split(':').next().unwrap_or("?")),
+                            });
+                        } else {
+                            let _ = events_clone.send(AgentEvent::SystemNotification {
+                                message: format!("⚠ No credentials for {}. Use /login to authenticate.", model_clone.split(':').next().unwrap_or("?")),
+                            });
+                        }
+                    });
                 }
             }
 
