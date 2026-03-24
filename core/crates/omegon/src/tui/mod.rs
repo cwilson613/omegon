@@ -1136,10 +1136,16 @@ impl App {
             .border_style(Style::default().fg(t.accent_muted()).bg(t.surface_bg()))
             .title(editor_title);
 
-        if !editor_content.is_empty() {
-            // Reverse search mode — show the matched text
+        let is_secret_mode = matches!(self.editor.mode(), editor::EditorMode::SecretInput { .. });
+        if is_secret_mode || !editor_content.is_empty() {
+            // Secret mode or reverse search — render masked/matched text as Paragraph
+            let content_style = if is_secret_mode {
+                Style::default().fg(t.accent_muted()).bg(t.surface_bg())
+            } else {
+                Style::default().fg(t.fg()).bg(t.surface_bg())
+            };
             let editor_widget = Paragraph::new(editor_content)
-                .style(Style::default().fg(t.fg()).bg(t.surface_bg()))
+                .style(content_style)
                 .block(editor_block);
             frame.render_widget(editor_widget, chunks[1]);
         } else {
@@ -2737,10 +2743,12 @@ pub async fn run_tui(
                 }
                 // ── Paste — pass directly to textarea ──────────
                 Event::Paste(ref text) => {
-                    if text.is_empty() {
-                        // Empty paste — might be an image in the clipboard.
-                        // Some terminals send an empty Paste event when clipboard
-                        // has non-text content (e.g., an image from Cmd+V on macOS).
+                    if matches!(app.editor.mode(), editor::EditorMode::SecretInput { .. }) {
+                        // In secret mode, paste goes into the hidden buffer
+                        for c in text.chars() {
+                            app.editor.secret_insert(c);
+                        }
+                    } else if text.is_empty() {
                         app.try_paste_clipboard_image();
                     } else {
                         app.editor.textarea.insert_str(text);
@@ -2748,7 +2756,12 @@ pub async fn run_tui(
                 }
                 // ── Ctrl+V: check for clipboard image ──────────
                 Event::Key(KeyEvent { code: KeyCode::Char('v'), modifiers: KeyModifiers::CONTROL, .. }) => {
-                    app.try_paste_clipboard_image();
+                    if matches!(app.editor.mode(), editor::EditorMode::SecretInput { .. }) {
+                        // In secret mode, try to paste from clipboard into hidden buffer
+                        // (Ctrl+V may deliver text as a Key event on some terminals)
+                    } else {
+                        app.try_paste_clipboard_image();
+                    }
                 }
                 Event::Key(key) => {
                 // ── Selector popup intercepts all keys when open ────
