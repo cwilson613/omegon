@@ -14,7 +14,7 @@ use ratatui_textarea::TextArea;
 
 use super::theme::Theme;
 
-/// Editor mode — normal input or reverse search.
+/// Editor mode — normal input, reverse search, or secret input.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditorMode {
     Normal,
@@ -23,6 +23,12 @@ pub enum EditorMode {
         query: String,
         /// Index into history of the current match (None = no match).
         match_idx: Option<usize>,
+    },
+    /// Secret input — captures text but renders as dots. Used by /secrets set.
+    /// The label is shown as the editor title (e.g. "OPENROUTER_API_KEY").
+    SecretInput {
+        label: String,
+        buffer: String,
     },
 }
 
@@ -138,6 +144,72 @@ impl Editor {
     pub fn search_query(&self) -> Option<&str> {
         if let EditorMode::ReverseSearch { ref query, .. } = self.mode {
             Some(query)
+        } else {
+            None
+        }
+    }
+
+    // ─── Secret input mode ──────────────────────────────────────
+
+    /// Enter secret input mode — keystrokes are captured but displayed as dots.
+    pub fn start_secret_input(&mut self, label: &str) {
+        self.mode = EditorMode::SecretInput {
+            label: label.to_string(),
+            buffer: String::new(),
+        };
+    }
+
+    /// Insert a character into the secret buffer.
+    pub fn secret_insert(&mut self, c: char) {
+        if let EditorMode::SecretInput { ref mut buffer, .. } = self.mode {
+            buffer.push(c);
+        }
+    }
+
+    /// Backspace in secret mode.
+    pub fn secret_backspace(&mut self) {
+        if let EditorMode::SecretInput { ref mut buffer, .. } = self.mode {
+            buffer.pop();
+        }
+    }
+
+    /// Take the secret value and return to normal mode.
+    pub fn take_secret(&mut self) -> Option<(String, String)> {
+        if let EditorMode::SecretInput { ref label, ref buffer } = self.mode {
+            let result = Some((label.clone(), buffer.clone()));
+            self.mode = EditorMode::Normal;
+            result
+        } else {
+            None
+        }
+    }
+
+    /// Cancel secret input.
+    pub fn cancel_secret(&mut self) {
+        if matches!(self.mode, EditorMode::SecretInput { .. }) {
+            self.mode = EditorMode::Normal;
+        }
+    }
+
+    /// CRT noise glyphs for secret masking — same aesthetic as the splash screen.
+    const SECRET_GLYPHS: &'static [char] = &[
+        '▓', '▒', '░', '█', '▄', '▀', '▌', '▐', '▊', '▋', '▍', '▎',
+        '◆', '■', '□', '▪', '◇', '╬', '╪', '╫', '┼', '│', '─',
+    ];
+
+    /// Get the masked display string for secret mode — CRT noise glyphs
+    /// that change per-character based on the buffer position, giving the
+    /// appearance of live encrypted data.
+    pub fn secret_display(&self) -> Option<(&str, String)> {
+        if let EditorMode::SecretInput { ref label, ref buffer } = self.mode {
+            let masked: String = buffer.bytes().enumerate()
+                .map(|(i, b)| {
+                    // Deterministic but visually chaotic — hash position + byte value
+                    let idx = ((i as u8).wrapping_mul(7).wrapping_add(b).wrapping_mul(13)) as usize;
+                    Self::SECRET_GLYPHS[idx % Self::SECRET_GLYPHS.len()]
+                })
+                .collect();
+            Some((label, masked))
         } else {
             None
         }

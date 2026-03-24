@@ -407,21 +407,19 @@ impl App {
             }
             SelectorKind::SecretName => {
                 if value == "(custom)" {
-                    // Pre-fill editor for custom name entry
                     self.editor.set_text("/secrets set ");
-                    None // no system message — user types the rest
+                    Some("Type: /secrets set NAME VALUE".to_string())
                 } else {
-                    // Look up suggested recipe from catalog
                     let suggested = Self::SECRET_CATALOG.iter()
                         .find(|(name, _, _)| *name == value)
                         .map(|(_, recipe, _)| *recipe)
                         .unwrap_or("");
                     if suggested.is_empty() {
-                        // Direct value — pre-fill with name, user types the key
-                        self.editor.set_text(&format!("/secrets set {value} "));
-                        Some(format!("Paste the value for {value}:"))
+                        // Direct value — enter masked secret input mode
+                        self.editor.start_secret_input(&value);
+                        Some(format!("🔒 Enter value for {value} (input is hidden):"))
                     } else {
-                        // Dynamic recipe — offer to set it directly
+                        // Dynamic recipe — set immediately
                         let _ = tx.try_send(TuiCommand::BusCommand {
                             name: "secrets".to_string(),
                             args: format!("set {value} {suggested}"),
@@ -1100,8 +1098,16 @@ impl App {
         // Apply theme to textarea each frame (in case theme changed)
         self.editor.apply_theme(t.as_ref());
 
-        // Editor — shows reverse search prompt when active
-        let (editor_title, editor_content) = if let editor::EditorMode::ReverseSearch { ref query, ref match_idx } = *self.editor.mode() {
+        // Editor — shows reverse search prompt, secret input, or normal mode
+        let (editor_title, editor_content) = if let Some((label, masked)) = self.editor.secret_display() {
+            (
+                Span::styled(
+                    format!(" 🔒 {label} "),
+                    Style::default().fg(t.warning()).bg(t.surface_bg()).add_modifier(Modifier::BOLD),
+                ),
+                masked,
+            )
+        } else if let editor::EditorMode::ReverseSearch { ref query, ref match_idx } = *self.editor.mode() {
             let match_text = match_idx
                 .and_then(|i| self.history.get(i))
                 .map(|s| s.as_str())
@@ -2758,6 +2764,36 @@ pub async fn run_tui(
                         KeyCode::Esc => {
                             app.selector = None;
                             app.selector_kind = None;
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
+                // ── Secret input mode intercepts keys ────────────
+                if matches!(app.editor.mode(), editor::EditorMode::SecretInput { .. }) {
+                    match key.code {
+                        KeyCode::Char(c) => {
+                            app.editor.secret_insert(c);
+                        }
+                        KeyCode::Backspace => {
+                            app.editor.secret_backspace();
+                        }
+                        KeyCode::Enter => {
+                            if let Some((label, value)) = app.editor.take_secret() {
+                                if value.is_empty() {
+                                    app.conversation.push_system("Cancelled — no value entered.");
+                                } else {
+                                    let _ = command_tx.send(TuiCommand::BusCommand {
+                                        name: "secrets".to_string(),
+                                        args: format!("set {} {}", label, value),
+                                    }).await;
+                                }
+                            }
+                        }
+                        KeyCode::Esc => {
+                            app.editor.cancel_secret();
+                            app.conversation.push_system("Secret input cancelled.");
                         }
                         _ => {}
                     }
