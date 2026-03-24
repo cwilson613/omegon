@@ -191,41 +191,36 @@ impl SecretsManager {
             }
         }
 
-        let client = self.vault_client.lock().await;
-        let vault_client = client.as_ref();
-        
-        // Clone recipe out of the lock — don't hold across keyring/vault I/O
+        // Check env var before acquiring any locks
+        if let Ok(val) = std::env::var(name) {
+            if !val.is_empty() {
+                let secret = SecretString::from(val);
+                let value = secret.expose_secret().to_string();
+                let mut set = self.redaction_set.write().unwrap();
+                set.insert(name.to_string(), secret);
+                let new_redactor = Redactor::build(&set);
+                *self.redactor.write().unwrap() = new_redactor;
+                return Some(value);
+            }
+        }
+
+        // Clone recipe out — don't hold across I/O
         let recipe = {
             let recipes = self.recipes.read().unwrap();
             recipes.get(name).cloned()
         };
         let recipe = recipe?;
-        // Check env var first (matches resolve_secret_async behavior)
-        if let Ok(val) = std::env::var(name) {
-            if !val.is_empty() {
-                let secret = SecretString::from(val);
-                let value = secret.expose_secret().to_string();
-                {
-                    let mut set = self.redaction_set.write().unwrap();
-                    set.insert(name.to_string(), secret);
-                    let new_redactor = Redactor::build(&set);
-                    *self.redactor.write().unwrap() = new_redactor;
-                }
-                return Some(value);
-            }
-        }
-        // Execute recipe directly — don't hold recipes lock across I/O
+
+        // Acquire vault client only when we actually need it for recipe execution
+        let client = self.vault_client.lock().await;
+        let vault_client = client.as_ref();
+
         if let Some(secret) = resolve::execute_recipe_async(name, &recipe, vault_client).await {
             let value = secret.expose_secret().to_string();
-            
-            // Cache in redaction set
-            {
-                let mut set = self.redaction_set.write().unwrap();
-                set.insert(name.to_string(), secret);
-                let new_redactor = Redactor::build(&set);
-                *self.redactor.write().unwrap() = new_redactor;
-            }
-            
+            let mut set = self.redaction_set.write().unwrap();
+            set.insert(name.to_string(), secret);
+            let new_redactor = Redactor::build(&set);
+            *self.redactor.write().unwrap() = new_redactor;
             Some(value)
         } else {
             None
