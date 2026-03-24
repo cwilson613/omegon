@@ -103,6 +103,7 @@ pub fn read_credentials(provider: &str) -> Option<OAuthCredentials> {
 }
 
 /// Write credentials for a provider to auth.json.
+/// Sets file permissions to 0600 (owner-only read/write) on Unix.
 pub fn write_credentials(provider: &str, creds: &OAuthCredentials) -> anyhow::Result<()> {
     let path = auth_json_path().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
     let _ = std::fs::create_dir_all(path.parent().unwrap());
@@ -116,6 +117,15 @@ pub fn write_credentials(provider: &str, creds: &OAuthCredentials) -> anyhow::Re
 
     auth[provider] = serde_json::to_value(creds)?;
     std::fs::write(&path, serde_json::to_string_pretty(&auth)?)?;
+
+    // Restrict permissions — API keys and OAuth tokens are sensitive
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(&path, perms)?;
+    }
+
     Ok(())
 }
 
@@ -238,6 +248,7 @@ pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
     let env_keys: &[&str] = match provider {
         "anthropic" => &["ANTHROPIC_API_KEY"],
         "openai" => &["OPENAI_API_KEY"],
+        "openrouter" => &["OPENROUTER_API_KEY"],
         _ => &[],
     };
     for key in env_keys {
@@ -633,6 +644,14 @@ fn write_credentials_with_extra(provider: &str, creds: &OAuthCredentials, accoun
     }
     auth[provider] = entry;
     std::fs::write(&path, serde_json::to_string_pretty(&auth)?)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(&path, perms)?;
+    }
+
     Ok(())
 }
 
