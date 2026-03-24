@@ -16,6 +16,20 @@
 
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};
+use super::theme::Theme;
+
+/// Scale an RGB color's brightness.
+fn dim_color(c: Color, factor: f64) -> Color {
+    if let Color::Rgb(r, g, b) = c {
+        Color::Rgb(
+            (r as f64 * factor) as u8,
+            (g as f64 * factor) as u8,
+            (b as f64 * factor) as u8,
+        )
+    } else {
+        c
+    }
+}
 
 // ─── Color ramp (CIE L* perceptual) ────────────────────────────────────
 
@@ -248,14 +262,14 @@ impl InstrumentPanel {
 
     pub fn toggle_focus(&mut self) { self.focus_mode = !self.focus_mode; }
 
-    pub fn render(&mut self, area: Rect, frame: &mut Frame) {
+    pub fn render(&mut self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
         if area.width < 20 || area.height < 4 { return; }
 
-        // Dim borders at idle, bright after first tool call
+        // Dim borders at idle, theme-bright after first tool call
         let (border, label) = if self.has_ever_fired {
-            (Color::Rgb(36, 80, 104), Color::Rgb(72, 100, 124))
+            (t.border_dim(), t.dim())
         } else {
-            (Color::Rgb(20, 40, 55), Color::Rgb(48, 68, 88))
+            (dim_color(t.border_dim(), 0.5), dim_color(t.dim(), 0.55))
         };
 
         let panels = Layout::horizontal([
@@ -565,7 +579,8 @@ mod tests {
         let area = Rect::new(0, 0, 96, 12);
         let backend = ratatui::backend::TestBackend::new(96, 12);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
-        terminal.draw(|f| panel.render(area, f)).unwrap();
+        let t = crate::tui::theme::Alpharius;
+        terminal.draw(|f| panel.render(area, f, &t)).unwrap();
     }
 
     #[test]
