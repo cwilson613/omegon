@@ -3,6 +3,50 @@
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.15.2] - 2026-03-25
+
+### Added
+
+- **Serve tool** — long-lived background process manager for dev servers, watchers, MCP servers. Start, stop, list, logs, check. Auto-cleanup on session exit. Path traversal protection. Zombie prevention.
+- **Update checker** — background GitHub Releases API check at startup, toast notification, `/update` command with release notes.
+- **Headless smoke tests** (`omegon --smoke`) — 4 scripted tests through the LLM bridge validating response content and tool usage.
+- **SegmentMeta rendering** — assistant responses show dim header tag: model, provider, tier, thinking level, active persona.
+- **Editor improvements** — placeholder text, dynamic height (3-8 rows), model shortname in prompt, contextual keybinding hints.
+- **Ctrl+D sidebar navigation** — navigate the design tree with arrow keys/hjkl, Enter to focus a node, Esc to exit.
+- `/tree` slash command — operator access to design tree summary (list, frontier, ready, blocked).
+- `/update` slash command — check for and display available updates.
+- `just publish` recipe — end-to-end release: pre-flight, push+tags, docs build, link, smoke test.
+- `just build-linux-amd64` / `just build-linux-arm64` — local cross-compilation via cargo-zigbuild (zig linker, no containers).
+- `just package` — archive all targets with SHA-256 checksums.
+- Homebrew formula (`homebrew/Formula/omegon.rb`) with auto-update CI workflow.
+- Apple notarization pipeline — async submission via `xcrun notarytool`, Developer ID signing via YubiKey.
+
+### Fixed
+
+- **True single binary** — vendored libgit2 + OpenSSL. Zero runtime dependencies beyond OS system libraries. macOS: 19 MB, Linux: 25 MB.
+- **Border consistency** — all TUI panels use `BorderType::Rounded`. No square corners.
+- **Ctrl+O segment expansion** — pinned-segment model replaces Tab. Expand and lock a tool card visible.
+- **JSON pretty-print** — tool results detected as JSON are formatted with `serde_json::to_string_pretty`.
+- **`/focus` collision** — lifecycle bus commands renamed to `design-focus`/`design-unfocus` to avoid shadowing the TUI instrument panel toggle.
+- **Squash merge restoration** — Ctrl+D sidebar navigation and `/focus` dedup lost in squash merge re-applied.
+
+### Changed
+
+- Binary size 15 MB to 19 MB (macOS) due to vendored libgit2/OpenSSL — worth the zero-dependency guarantee.
+- Tool count 48 to 49 (added `serve`).
+- 883 tests (up from 874 in 0.15.1).
+
+### Documentation
+
+- Complete site overhaul for public release: 23 pages (was 13).
+- 10 new pages: providers, tutorial, TUI, plugins, sessions, security, contributing, FAQ, migration guide.
+- All pages rewritten with current reality — commands, stats, features.
+- 4 D2 diagrams: three-axis model, OpenSpec lifecycle, provider routing, cleave architecture.
+- Opinionated FAQ: Claude memory vs real memory, personas, license, migration from Claude Code/Codex/Cursor.
+- Cleave vs subagents comparison table.
+- All `omegon-core` links fixed to `omegon`. All pi references purged. License corrected (MIT conversion, not Apache).
+- Landing page with hero, feature grid, install snippet, brew alternative.
+
 ## [0.15.1] - 2026-03-25
 
 ### Added
