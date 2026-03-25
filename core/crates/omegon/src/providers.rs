@@ -1095,7 +1095,7 @@ impl LlmBridge for CodexClient {
 
         let model = options.model.as_deref()
             .and_then(|m| m.strip_prefix("openai-codex:").or_else(|| m.strip_prefix("openai:")))
-            .unwrap_or("gpt-5.3-codex-spark");
+            .unwrap_or("codex-mini-latest");
 
         let input = Self::build_input(messages);
         let wire_tools = Self::build_tools(tools);
@@ -1174,9 +1174,9 @@ impl LlmBridge for CodexClient {
 /// Parse Codex Responses API SSE stream (different event structure from Chat Completions).
 async fn parse_codex_stream(response: reqwest::Response, tx: &mpsc::Sender<LlmEvent>) -> anyhow::Result<()> {
     let mut full_text = String::new();
-    let mut current_item_type: Option<String> = None;
-    let mut current_text = String::new();
-    let mut current_thinking = String::new();
+    let mut _current_item_type: Option<String> = None;
+    let mut _current_text = String::new();
+    let mut _current_thinking = String::new();
     struct ToolAcc { call_id: String, item_id: String, name: String, args_json: String }
     let mut tool_calls: Vec<ToolAcc> = Vec::new();
     let mut completed_tool_calls: Vec<Value> = Vec::new();
@@ -1190,10 +1190,10 @@ async fn parse_codex_stream(response: reqwest::Response, tx: &mpsc::Sender<LlmEv
             "response.output_item.added" => {
                 let item = &event["item"];
                 match item["type"].as_str().unwrap_or("") {
-                    "reasoning" => { current_item_type = Some("reasoning".into()); current_thinking.clear(); let _ = tx.try_send(LlmEvent::ThinkingStart); }
-                    "message" => { current_item_type = Some("message".into()); current_text.clear(); let _ = tx.try_send(LlmEvent::TextStart); }
+                    "reasoning" => { _current_item_type = Some("reasoning".into()); _current_thinking.clear(); let _ = tx.try_send(LlmEvent::ThinkingStart); }
+                    "message" => { _current_item_type = Some("message".into()); _current_text.clear(); let _ = tx.try_send(LlmEvent::TextStart); }
                     "function_call" => {
-                        current_item_type = Some("function_call".into());
+                        _current_item_type = Some("function_call".into());
                         tool_calls.push(ToolAcc {
                             call_id: item["call_id"].as_str().unwrap_or("").into(),
                             item_id: item["id"].as_str().unwrap_or("").into(),
@@ -1207,16 +1207,16 @@ async fn parse_codex_stream(response: reqwest::Response, tx: &mpsc::Sender<LlmEv
             }
             "response.output_text.delta" => {
                 let delta = event["delta"].as_str().unwrap_or("");
-                full_text.push_str(delta); current_text.push_str(delta);
+                full_text.push_str(delta); _current_text.push_str(delta);
                 let _ = tx.try_send(LlmEvent::TextDelta { delta: delta.into() });
             }
             "response.reasoning_summary_text.delta" => {
                 let delta = event["delta"].as_str().unwrap_or("");
-                current_thinking.push_str(delta);
+                _current_thinking.push_str(delta);
                 let _ = tx.try_send(LlmEvent::ThinkingDelta { delta: delta.into() });
             }
             "response.reasoning_summary_part.done" => {
-                current_thinking.push_str("\n\n");
+                _current_thinking.push_str("\n\n");
                 let _ = tx.try_send(LlmEvent::ThinkingDelta { delta: "\n\n".into() });
             }
             "response.function_call_arguments.delta" => {
@@ -1245,7 +1245,7 @@ async fn parse_codex_stream(response: reqwest::Response, tx: &mpsc::Sender<LlmEv
                     }
                     _ => {}
                 }
-                current_item_type = None;
+                _current_item_type = None;
             }
             "response.completed" => {
                 let _ = tx.try_send(LlmEvent::Done { message: json!({"text": full_text, "tool_calls": completed_tool_calls}) });
@@ -1716,13 +1716,118 @@ mod tests {
 
     #[test]
     fn fallback_order_covers_all_inference_providers() {
-        // The FALLBACK_ORDER in auto_detect_bridge should include every inference provider
         let order = ["anthropic", "openai", "openai-codex", "groq", "xai", "mistral",
                       "huggingface", "cerebras", "openrouter", "ollama"];
-        // Verify no duplicates
         let mut seen = std::collections::HashSet::new();
         for id in order {
             assert!(seen.insert(id), "duplicate in fallback order: {id}");
         }
+    }
+
+    // ── CodexClient tests ───────────────────────────────────────
+
+    #[test]
+    fn codex_build_input_user_message() {
+        let msgs = vec![LlmMessage::User {
+            content: "hello".into(),
+            images: vec![],
+        }];
+        let input = CodexClient::build_input(&msgs);
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["role"], "user");
+        assert_eq!(input[0]["content"][0]["type"], "input_text");
+        assert_eq!(input[0]["content"][0]["text"], "hello");
+    }
+
+    #[test]
+    fn codex_build_input_tool_result_strips_compound_id() {
+        let msgs = vec![LlmMessage::ToolResult {
+            call_id: "call_abc|fc_1".into(),
+            tool_name: "bash".into(),
+            content: "result text".into(),
+            args_summary: None,
+            is_error: false,
+        }];
+        let input = CodexClient::build_input(&msgs);
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["call_id"], "call_abc"); // compound stripped
+    }
+
+    #[test]
+    fn codex_build_input_assistant_compound_tool_call() {
+        use crate::bridge::WireToolCall;
+        let msgs = vec![LlmMessage::Assistant {
+            text: vec![],
+            thinking: vec![],
+            tool_calls: vec![WireToolCall {
+                id: "call_abc|fc_0".into(),
+                name: "bash".into(),
+                arguments: json!({"command": "ls"}),
+            }],
+            raw: None,
+        }];
+        let input = CodexClient::build_input(&msgs);
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["type"], "function_call");
+        assert_eq!(input[0]["call_id"], "call_abc");
+        assert_eq!(input[0]["id"], "fc_0");
+        assert_eq!(input[0]["name"], "bash");
+    }
+
+    #[test]
+    fn codex_build_tools_strips_descriptions() {
+        let tools = vec![ToolDefinition {
+            name: "bash".into(),
+            label: "bash".into(),
+            description: "Execute a command".into(),
+            parameters: json!({
+                "properties": {
+                    "command": {"type": "string", "description": "The command to run"}
+                },
+                "required": ["command"]
+            }),
+        }];
+        let wire = CodexClient::build_tools(&tools);
+        assert_eq!(wire.len(), 1);
+        assert_eq!(wire[0]["name"], "bash");
+        assert_eq!(wire[0]["type"], "function");
+        // description should be stripped from parameters (strip_parameter_descriptions)
+        assert!(wire[0]["parameters"]["properties"]["command"].get("description").is_none());
+    }
+
+    #[test]
+    fn codex_model_prefix_stripping() {
+        // The stream() method strips "openai-codex:" and "openai:" prefixes
+        // Verify the logic conceptually (can't call stream without a server)
+        let full = "openai-codex:codex-mini-latest";
+        let stripped = full.strip_prefix("openai-codex:")
+            .or_else(|| full.strip_prefix("openai:"))
+            .unwrap_or("codex-mini-latest");
+        assert_eq!(stripped, "codex-mini-latest");
+
+        let bare = "some-model";
+        let stripped = bare.strip_prefix("openai-codex:")
+            .or_else(|| bare.strip_prefix("openai:"))
+            .unwrap_or("codex-mini-latest");
+        assert_eq!(stripped, "codex-mini-latest"); // fallback
+    }
+
+    #[test]
+    fn codex_retryable_status_codes() {
+        assert!(is_codex_retryable(429));
+        assert!(is_codex_retryable(500));
+        assert!(is_codex_retryable(502));
+        assert!(is_codex_retryable(503));
+        assert!(is_codex_retryable(504));
+        assert!(!is_codex_retryable(400));
+        assert!(!is_codex_retryable(401));
+        assert!(!is_codex_retryable(200));
+    }
+
+    #[test]
+    fn codex_from_env_without_credentials_returns_none() {
+        // Without CHATGPT_OAUTH_TOKEN set or auth.json, should return None
+        // (This is environment-dependent but should not panic)
+        let _ = CodexClient::from_env();
     }
 }

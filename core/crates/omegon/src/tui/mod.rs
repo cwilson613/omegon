@@ -149,8 +149,6 @@ pub struct App {
     /// Tutorial overlay — game-style first-play advisor.
     /// Renders on top of the UI and guides the operator through steps.
     tutorial_overlay: Option<tutorial::Tutorial>,
-    /// Provider inventory for routing — populated after splash probes.
-    provider_inventory: Option<std::sync::Arc<tokio::sync::RwLock<crate::routing::ProviderInventory>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -246,7 +244,6 @@ impl App {
             capability_tier: None,
             tutorial: None,
             tutorial_overlay: None,
-            provider_inventory: None,
         }
     }
 
@@ -2955,11 +2952,6 @@ pub async fn run_tui(
             app.capability_tier = Some(crate::startup::classify_tier(&collected_probes));
         }
     }
-
-    // Build provider inventory from credential checks (fast — env var probing only)
-    app.provider_inventory = Some(std::sync::Arc::new(
-        tokio::sync::RwLock::new(crate::routing::ProviderInventory::probe()),
-    ));
 
     // Queue startup reveal effects (footer sweep-in, conversation fade)
     {

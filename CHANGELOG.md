@@ -3,6 +3,27 @@
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.15.1-rc.76] - 2026-03-25
+
+### Added
+
+- **CodexClient** — OpenAI Responses API client for ChatGPT Pro/Plus OAuth JWT tokens. 350 lines covering: JWT resolution, token refresh, Responses API wire format, SSE parsing for 12 event types, compound tool call IDs, retry with backoff. 7 unit tests.
+- **OpenAICompatClient** — generic OpenAI Chat Completions client covering Groq, xAI, Mistral, Cerebras, HuggingFace, Ollama. 6 unit tests.
+- 6 missing providers restored to `auth::PROVIDERS`: openai-codex, groq, xai, mistral, cerebras, ollama.
+- `read_credential_extra()` and `extract_jwt_claim()` made public in auth.rs.
+- Tutorial: `--tutorial` CLI flag activates demo overlay in exec'd processes.
+- Tutorial: demo choice auto-advances to Welcome step on "My Project" selection.
+- Tool card separator uses error color (red) when `is_error` is true.
+
+### Changed
+
+- Provider matrix: 10/10 complete (was 3/10 after branch restore).
+- `auto_detect_bridge()` uses `resolve_provider()` for both primary and fallback, eliminating duplicated client construction.
+- CodexClient default model aligned with routing.rs: `codex-mini-latest`.
+- Removed dead `provider_inventory` field from App (CleaveFeature probes on demand).
+- `/tutorial` always starts the overlay; legacy lessons require explicit `/tutorial lessons`.
+- Dashboard opens when operator presses Tab to LEAVE the "Web Dashboard" step.
+
 ## [0.15.1-rc.70] - 2026-03-25
 
 ### Added
