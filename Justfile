@@ -239,32 +239,34 @@ sign:
     echo "Verifying signature..."
     codesign -dvvv "$BINARY" 2>&1 | grep -E "Authority|Team|Signature|Identifier"
 
-    # Notarize if keychain profile exists
-    if xcrun notarytool info --keychain-profile "omegon" 2>/dev/null | head -1 | grep -q "." 2>/dev/null || \
-       xcrun notarytool store-credentials --help >/dev/null 2>&1; then
+    # Submit for notarization (non-blocking)
+    if xcrun notarytool history --keychain-profile "omegon" >/dev/null 2>&1; then
         echo ""
-        echo "Notarizing with Apple..."
-        # Notary service requires zip/dmg/pkg — not bare Mach-O
+        echo "Submitting for Apple notarization..."
         NOTARY_ZIP="${BINARY}.zip"
         ditto -c -k --keepParent "$BINARY" "$NOTARY_ZIP"
 
-        xcrun notarytool submit "$NOTARY_ZIP" \
-            --keychain-profile "omegon" \
-            --wait
+        # Submit without --wait — returns immediately with a submission ID
+        SUBMIT_OUT=$(xcrun notarytool submit "$NOTARY_ZIP" \
+            --keychain-profile "omegon" 2>&1)
+        echo "$SUBMIT_OUT"
 
-        echo ""
-        echo "Stapling notarization ticket..."
-        xcrun stapler staple "$BINARY" 2>/dev/null || {
-            echo "  (staple requires a .app/.pkg — binary will pass Gatekeeper via online check)"
-        }
-
+        SUBMISSION_ID=$(echo "$SUBMIT_OUT" | grep -o '[0-9a-f-]\{36\}' | head -1)
         rm -f "$NOTARY_ZIP"
 
-        echo ""
-        echo "Verifying..."
-        spctl --assess -vv "$BINARY" 2>&1 || true
-        echo ""
-        echo "✓ Signed and notarized."
+        if [ -n "$SUBMISSION_ID" ]; then
+            echo ""
+            echo "Notarization submitted: $SUBMISSION_ID"
+            echo "Check status:  xcrun notarytool info $SUBMISSION_ID --keychain-profile omegon"
+            echo "View log:      xcrun notarytool log $SUBMISSION_ID --keychain-profile omegon"
+            echo "Full history:  xcrun notarytool history --keychain-profile omegon"
+            echo ""
+            echo "✓ Signed. Notarization in progress (Apple processes in 1-15 minutes)."
+            echo "  Gatekeeper will pass the binary once Apple approves it."
+        else
+            echo ""
+            echo "✓ Signed. Notarization submission may have failed — check output above."
+        fi
     else
         echo ""
         echo "✓ Signed (notarization skipped — run 'just setup-notarize' to enable)."

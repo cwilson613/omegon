@@ -14,7 +14,7 @@ jj-lib = ["dep:jj-lib"]
 
 [dependencies]
 jj-lib = { version = "0.39", optional = true }
-git2 = "0.20"
+git2 = { version = "0.20", features = ["vendored-libgit2", "vendored-openssl"] }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 
