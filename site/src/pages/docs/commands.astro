@@ -107,7 +107,7 @@ import Docs from "../../layouts/Docs.astro";
   </table>
 
   <h2>Agent Tools</h2>
-  <p>In addition to slash commands, the agent has access to 48 structured tools that it calls autonomously:</p>
+  <p>In addition to slash commands, the agent has access to 49 structured tools that it calls autonomously:</p>
   <ul>
     <li><code>set_model_tier</code> / <code>set_thinking_level</code> — adjust inference parameters mid-conversation</li>
     <li><code>memory_store</code> / <code>memory_recall</code> / <code>memory_query</code> / <code>memory_episodes</code> — manage project memory</li>
@@ -117,6 +117,7 @@ import Docs from "../../layouts/Docs.astro";
     <li><code>web_search</code> — multi-provider web search (Brave, Tavily, Serper)</li>
     <li><code>ask_local_model</code> / <code>manage_ollama</code> — delegate to local inference</li>
     <li><code>read</code> / <code>edit</code> / <code>write</code> / <code>bash</code> / <code>view</code> — file and system operations</li>
+    <li><code>serve</code> — manage long-lived background processes (dev servers, watchers, MCP servers). Start, stop, list, logs, check.</li>
     <li><code>chronos</code> — authoritative date/time (never calculates dates manually)</li>
     <li><code>whoami</code> — check auth status across all dev tools</li>
     <li><code>manage_tools</code> — enable/disable tools and profiles</li>
