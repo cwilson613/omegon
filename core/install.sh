@@ -164,7 +164,8 @@ fi
 
 EXISTING=""
 if [ -x "${INSTALL_DIR}/${BINARY}" ]; then
-  EXISTING=$("${INSTALL_DIR}/${BINARY}" --version 2>/dev/null | head -1 || echo "unknown version")
+  EXISTING=$(("${INSTALL_DIR}/${BINARY}" --version 2>/dev/null || true) | head -1)
+  [ -z "$EXISTING" ] && EXISTING="unknown"
 fi
 
 printf "${DIM}  ┌─────────────────────────────────────────────────────┐${RESET}\n"
@@ -245,7 +246,8 @@ if curl -fsSL -o "${TMP}/${CHECKSUMS}" "$CHECKSUMS_URL" 2>/dev/null; then
       https://github.com/${REPO}/releases/tag/${VERSION}"
   fi
 
-  ok "Checksum verified $(dimtext "${ACTUAL:0:12}…")"
+  SHORT_HASH=$(printf '%.12s' "$ACTUAL")
+  ok "Checksum verified $(dimtext "${SHORT_HASH}…")"
 else
   warn "Checksum file not available for this release — skipping verification"
 fi
@@ -268,10 +270,10 @@ if command -v cosign >/dev/null 2>&1; then
       warn "Signature verification failed — the binary may not have been built by the official CI"
     fi
   else
-    info "Signature files not available for this release"
+    warn "Signature files not available for this release"
   fi
 else
-  info "Install $(boldtext "cosign") for cryptographic signature verification"
+  step "Install cosign for cryptographic signature verification"
 fi
 
 # ── Extract ───────────────────────────────────────────────────
