@@ -164,7 +164,7 @@ fi
 
 EXISTING=""
 if [ -x "${INSTALL_DIR}/${BINARY}" ]; then
-  EXISTING=$(("${INSTALL_DIR}/${BINARY}" --version 2>/dev/null || true) | head -1)
+  EXISTING=$("${INSTALL_DIR}/${BINARY}" --version 2>/dev/null | head -1 || true)
   [ -z "$EXISTING" ] && EXISTING="unknown"
 fi
 
