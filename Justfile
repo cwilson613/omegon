@@ -76,6 +76,216 @@ build-release:
 run *args:
     core/target/dev-release/omegon {{args}}
 
+# ─── Release ─────────────────────────────────────────────────
+
+# Cut a release candidate: bump rc.N, test, commit, tag, build, sign.
+# Push the tag to trigger CI: git push origin main --tags
+rc:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Refuse to run with uncommitted changes
+    if [ -n "$(git status --porcelain -- core/)" ]; then
+        echo "✗ Uncommitted changes in core/. Commit or stash first."
+        exit 1
+    fi
+
+    # Read current version
+    CURRENT=$(grep '^version = ' core/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+    echo "Current version: $CURRENT"
+
+    # Bump RC number
+    if echo "$CURRENT" | grep -q '\-rc\.'; then
+        # Already an RC — increment the number
+        BASE=$(echo "$CURRENT" | sed 's/-rc\.[0-9]*//')
+        RC_NUM=$(echo "$CURRENT" | sed 's/.*-rc\.//')
+        NEW_RC=$((RC_NUM + 1))
+        NEW_VERSION="${BASE}-rc.${NEW_RC}"
+    else
+        # Stable version — start rc.1 on next patch
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+        NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))-rc.1"
+    fi
+
+    echo "New version: $NEW_VERSION"
+
+    # Update Cargo.toml
+    sed -i '' "s/^version = \"${CURRENT}\"/version = \"${NEW_VERSION}\"/" core/Cargo.toml
+
+    # Test first (faster than build, catches errors early)
+    echo "Testing..."
+    cd core && cargo test -p omegon 2>&1 | tail -3
+    cd ..
+
+    # Commit and tag BEFORE final build so the binary has the right sha
+    git add core/Cargo.toml core/Cargo.lock
+    git commit -m "chore(release): ${NEW_VERSION}"
+    git tag "v${NEW_VERSION}"
+
+    # Build release (now the tag and commit are baked into the binary)
+    echo "Building..."
+    cd core && cargo build --release -p omegon 2>&1 | tail -3
+    cd ..
+
+    # Code sign — run `just sign` separately if YubiKey isn't in env
+    BINARY="core/target/release/omegon"
+    if [ -n "${SMARTCARD_PIN:-}" ]; then
+        SCAN=$("$HOME/.cargo/bin/rcodesign" smartcard-scan 2>/dev/null || true)
+        if echo "$SCAN" | grep -q "Developer ID Application"; then
+            echo "Signing with Apple Developer ID (YubiKey)..."
+            echo "⚡ Touch YubiKey when it blinks"
+            "$HOME/.cargo/bin/rcodesign" sign \
+                --smartcard-slot 9c \
+                --smartcard-pin-env SMARTCARD_PIN \
+                --code-signature-flags runtime "$BINARY"
+            echo "Signed with Developer ID Application (YubiKey)"
+        fi
+    elif security find-identity -v -p codesigning 2>/dev/null | grep -q "Omegon Local Dev"; then
+        codesign -f -s "Omegon Local Dev" --identifier "dev.styrene.omegon" "$BINARY"
+        echo "Signed with Omegon Local Dev certificate"
+    else
+        codesign -f -s - --identifier "dev.styrene.omegon" "$BINARY" 2>/dev/null || true
+        echo "Ad-hoc signed (run 'just sign' to sign with Developer ID)"
+    fi
+
+    echo ""
+    echo "✓ ${NEW_VERSION} — tested, committed, tagged, built."
+    echo "  To publish: git push origin main --tags"
+
+# Cut a stable release: strip -rc.N, test, commit, tag, build.
+release:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [ -n "$(git status --porcelain -- core/)" ]; then
+        echo "✗ Uncommitted changes in core/. Commit or stash first."
+        exit 1
+    fi
+
+    CURRENT=$(grep '^version = ' core/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+
+    if ! echo "$CURRENT" | grep -q '\-rc\.'; then
+        echo "✗ Current version ($CURRENT) is not an RC. Bump to an RC first with: just rc"
+        exit 1
+    fi
+
+    NEW_VERSION=$(echo "$CURRENT" | sed 's/-rc\.[0-9]*//')
+    echo "Releasing: $CURRENT → $NEW_VERSION"
+
+    sed -i '' "s/^version = \"${CURRENT}\"/version = \"${NEW_VERSION}\"/" core/Cargo.toml
+
+    echo "Testing..."
+    cd core && cargo test -p omegon 2>&1 | tail -3
+    cd ..
+
+    git add core/Cargo.toml core/Cargo.lock
+    git commit -m "chore(release): ${NEW_VERSION}"
+    git tag "v${NEW_VERSION}"
+
+    echo "Building..."
+    cd core && cargo build --release -p omegon 2>&1 | tail -3
+    cd ..
+
+    echo ""
+    echo "✓ ${NEW_VERSION} — tested, committed, tagged, built."
+    echo "  To publish: git push origin main --tags"
+
+# Sign the release binary with Apple Developer ID (YubiKey).
+# Interactive — prompts for PIN and touch.
+# Run after `just rc` if SMARTCARD_PIN wasn't set.
+sign:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BINARY="core/target/release/omegon"
+    if [ ! -f "$BINARY" ]; then
+        echo "✗ No binary at $BINARY — run 'just rc' first."
+        exit 1
+    fi
+
+    SCAN=$("$HOME/.cargo/bin/rcodesign" smartcard-scan 2>/dev/null || true)
+    if ! echo "$SCAN" | grep -q "Developer ID Application"; then
+        echo "✗ No Developer ID Application certificate found on YubiKey."
+        echo "  Insert YubiKey and check: rcodesign smartcard-scan"
+        exit 1
+    fi
+
+    echo "Signing with Apple Developer ID (YubiKey)..."
+    echo "⚡ Enter PIN when prompted, then touch YubiKey when it blinks"
+    echo ""
+    "$HOME/.cargo/bin/rcodesign" sign \
+        --smartcard-slot 9c \
+        --code-signature-flags runtime \
+        "$BINARY"
+
+    echo ""
+    echo "Verifying..."
+    codesign -dvvv "$BINARY" 2>&1 | grep -E "Authority|Team|Signature|Identifier"
+    echo ""
+    echo "✓ Signed."
+
+# One-time setup: create a self-signed code signing certificate.
+# Prevents macOS keychain permission prompts on every RC build.
+# Requires sudo (to add trusted cert to System keychain).
+setup-signing:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if security find-identity -v -p codesigning 2>/dev/null | grep -q "Omegon Local Dev"; then
+        echo "✓ Omegon Local Dev signing identity already exists"
+        security find-identity -v -p codesigning | grep "Omegon"
+        exit 0
+    fi
+
+    echo "Creating self-signed code signing certificate: Omegon Local Dev"
+    echo "This is a one-time setup. You'll be asked for your password (sudo)."
+    echo ""
+
+    TMPDIR=$(mktemp -d)
+    cat > "$TMPDIR/cert.cfg" <<'CERT'
+    [ req ]
+    default_bits = 2048
+    prompt = no
+    default_md = sha256
+    distinguished_name = dn
+    x509_extensions = v3_code_sign
+
+    [ dn ]
+    CN = Omegon Local Dev
+    O = Styrene Lab
+
+    [ v3_code_sign ]
+    keyUsage = digitalSignature
+    extendedKeyUsage = codeSigning
+    basicConstraints = CA:false
+    CERT
+
+    openssl req -x509 -newkey rsa:2048 \
+        -keyout "$TMPDIR/key.pem" -out "$TMPDIR/cert.pem" \
+        -days 3650 -nodes -config "$TMPDIR/cert.cfg" 2>/dev/null
+
+    openssl pkcs12 -export -out "$TMPDIR/omegon.p12" \
+        -inkey "$TMPDIR/key.pem" -in "$TMPDIR/cert.pem" \
+        -passout pass: 2>/dev/null
+
+    security import "$TMPDIR/omegon.p12" -k ~/Library/Keychains/login.keychain-db \
+        -T /usr/bin/codesign -P "" 2>/dev/null
+
+    echo "Adding certificate to System keychain as trusted (requires sudo)..."
+    sudo security add-trusted-cert -d -r trustRoot \
+        -k /Library/Keychains/System.keychain "$TMPDIR/cert.pem"
+
+    rm -rf "$TMPDIR"
+
+    echo ""
+    if security find-identity -v -p codesigning 2>/dev/null | grep -q "Omegon Local Dev"; then
+        echo "✓ Signing identity created. All future RC builds will be signed."
+        security find-identity -v -p codesigning | grep "Omegon"
+    else
+        echo "⚠ Certificate imported but not showing as valid signing identity."
+        echo "  Open Keychain Access → Certificates → Omegon Local Dev"
+        echo "  → Get Info → Trust → Code Signing → Always Trust"
+    fi
+
 # ─── TypeScript (omegon-pi) ─────────────────────────────────
 
 # Run all TS tests
