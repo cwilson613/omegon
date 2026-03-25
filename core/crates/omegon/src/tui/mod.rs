@@ -1273,6 +1273,7 @@ impl App {
 
         let editor_block = Block::default()
             .borders(Borders::TOP)
+            .border_type(ratatui::widgets::BorderType::Rounded)
             .border_style(Style::default().fg(t.accent_muted()).bg(t.surface_bg()))
             .title(editor_title);
 
@@ -1317,6 +1318,7 @@ impl App {
                 let palette = Paragraph::new(items)
                     .block(Block::default()
                         .borders(Borders::ALL)
+                        .border_type(ratatui::widgets::BorderType::Rounded)
                         .border_style(t.style_border())
                         .title(Span::styled(" commands ", t.style_dim())));
 
@@ -3327,6 +3329,11 @@ pub async fn run_tui(
                     }
                     (KeyCode::Char('f'), KeyModifiers::ALT) => {
                         app.editor.move_word_forward();
+                    }
+
+                    // Ctrl+O: toggle pin/expand on nearest tool card
+                    (KeyCode::Char('o'), KeyModifiers::CONTROL) => {
+                        app.conversation.toggle_pin();
                     }
 
                     // Tab: command completion if typing, or toggle tool card expansion

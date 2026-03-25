@@ -16,6 +16,9 @@ pub struct ConversationView {
     pub conv_state: ConvState,
     /// Image render state — StatefulProtocol per segment index.
     pub image_cache: ImageCache,
+    /// Pinned segment index — when set, this segment stays expanded and visible
+    /// at the bottom of the viewport until explicitly unpinned (Ctrl+O again or Esc).
+    pub pinned_segment: Option<usize>,
 }
 
 impl ConversationView {
@@ -25,6 +28,7 @@ impl ConversationView {
             streaming: false,
             conv_state: ConvState::new(),
             image_cache: ImageCache::default(),
+            pinned_segment: None,
         }
     }
 
@@ -202,6 +206,34 @@ impl ConversationView {
                 *expanded = !*expanded;
                 self.conv_state.invalidate();
             }
+        }
+    }
+
+    /// Toggle pin on the nearest tool card. When pinned, the segment is expanded
+    /// and stays visible at the bottom of the conversation viewport. Pressing
+    /// Ctrl+O again (or Esc) unpins and collapses.
+    pub fn toggle_pin(&mut self) {
+        if let Some(pinned) = self.pinned_segment.take() {
+            // Unpin: collapse the segment
+            self.toggle_expand(pinned);
+        } else if let Some(idx) = self.focused_tool_card() {
+            // Pin: expand and lock focus
+            if let Some(seg) = self.segments.get_mut(idx) {
+                if let SegmentContent::ToolCard { expanded, .. } = &mut seg.content {
+                    if !*expanded {
+                        *expanded = true;
+                        self.conv_state.invalidate();
+                    }
+                }
+            }
+            self.pinned_segment = Some(idx);
+        }
+    }
+
+    /// Unpin the currently pinned segment (if any), collapsing it.
+    pub fn unpin(&mut self) {
+        if let Some(pinned) = self.pinned_segment.take() {
+            self.toggle_expand(pinned);
         }
     }
 
@@ -488,6 +520,46 @@ mod tests {
         if let SegmentContent::ToolCard { detail_result, .. } = &cv.segments[0].content {
             let dr = detail_result.as_ref().unwrap();
             assert_eq!(dr.lines().count(), 50, "full result should be stored, not truncated");
+        }
+    }
+
+    #[test]
+    fn toggle_pin_expands_and_pins() {
+        let mut cv = ConversationView::new();
+        cv.push_tool_start("t1", "bash", Some("ls"), Some("ls"));
+        cv.push_tool_end("t1", false, Some("file.txt"));
+
+        assert!(cv.pinned_segment.is_none());
+
+        // Pin should expand the card and record the index
+        cv.toggle_pin();
+        assert!(cv.pinned_segment.is_some());
+        let idx = cv.pinned_segment.unwrap();
+        if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[idx].content {
+            assert!(expanded, "pinned card should be expanded");
+        }
+
+        // Pin again should unpin and collapse
+        cv.toggle_pin();
+        assert!(cv.pinned_segment.is_none());
+        if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[idx].content {
+            assert!(!expanded, "unpinned card should be collapsed");
+        }
+    }
+
+    #[test]
+    fn unpin_collapses_pinned_segment() {
+        let mut cv = ConversationView::new();
+        cv.push_tool_start("t1", "bash", Some("ls"), Some("ls"));
+        cv.push_tool_end("t1", false, Some("file.txt"));
+
+        cv.toggle_pin();
+        assert!(cv.pinned_segment.is_some());
+
+        cv.unpin();
+        assert!(cv.pinned_segment.is_none());
+        if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[0].content {
+            assert!(!expanded, "should be collapsed after unpin");
         }
     }
 }

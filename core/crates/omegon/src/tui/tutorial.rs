@@ -543,6 +543,7 @@ impl Tutorial {
         let progress_label = format!("  {progress}");
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
             .border_style(Style::default().fg(theme.accent()).bg(overlay_bg))
             .style(Style::default().bg(overlay_bg))
             .title(Span::styled(&title_line, Style::default().fg(theme.accent()).bg(overlay_bg).bold()))
@@ -611,6 +612,7 @@ impl Tutorial {
 
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
             .border_style(Style::default().fg(theme.accent()).bg(overlay_bg))
             .style(Style::default().bg(overlay_bg))
             .title(Span::styled(
@@ -700,6 +702,7 @@ impl Tutorial {
 
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
             .border_style(border_style)
             .title(Span::styled(format!(" {title} "), title_style));
 

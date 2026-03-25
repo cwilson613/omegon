@@ -484,11 +484,25 @@ fn render_tool_card(
                     ]));
                 }
             }
-            "edit" => {
-                lines.push(Line::from(vec![
-                    Span::styled("▸ edit ", Style::default().fg(t.accent_muted()).bg(bg)),
-                    Span::styled(args.to_string(), Style::default().fg(t.dim()).bg(bg)),
-                ]));
+            "edit" | "change" => {
+                // Try to extract just the file path from JSON args
+                let file_path = serde_json::from_str::<serde_json::Value>(args)
+                    .ok()
+                    .and_then(|v| v.get("file").or(v.get("path")).and_then(|f| f.as_str().map(String::from)));
+                if let Some(path) = file_path {
+                    lines.push(Line::from(vec![
+                        Span::styled("▸ ", Style::default().fg(t.accent_muted()).bg(bg)),
+                        Span::styled(path, Style::default().fg(t.fg()).bg(bg)),
+                    ]));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::styled("▸ edit ", Style::default().fg(t.accent_muted()).bg(bg)),
+                        Span::styled(
+                            crate::util::truncate(args, 80),
+                            Style::default().fg(t.dim()).bg(bg),
+                        ),
+                    ]));
+                }
             }
             "read" | "write" => {
                 // File path — will be rendered as clickable link post-render
@@ -498,10 +512,21 @@ fn render_tool_card(
                 )));
             }
             _ => {
-                lines.push(Line::from(Span::styled(
-                    args.to_string(),
-                    Style::default().fg(t.dim()).bg(bg),
-                )));
+                // Pretty-print JSON args if applicable
+                let display_args = if args.starts_with('{') || args.starts_with('[') {
+                    serde_json::from_str::<serde_json::Value>(args)
+                        .ok()
+                        .and_then(|v| serde_json::to_string_pretty(&v).ok())
+                        .unwrap_or_else(|| args.to_string())
+                } else {
+                    args.to_string()
+                };
+                for line in display_args.lines().take(if expanded { 50 } else { 4 }) {
+                    lines.push(Line::from(Span::styled(
+                        line.to_string(),
+                        Style::default().fg(t.dim()).bg(bg),
+                    )));
+                }
             }
         }
     }
@@ -518,7 +543,19 @@ fn render_tool_card(
             )));
         }
 
-        let result_lines: Vec<&str> = result.lines().collect();
+        // Pretty-print JSON results — tool outputs often arrive as compact JSON
+        // with literal \n inside string values (e.g. commit messages).
+        let pretty_result: std::borrow::Cow<'_, str> = if result.starts_with('{') || result.starts_with('[') {
+            match serde_json::from_str::<serde_json::Value>(result) {
+                Ok(val) => std::borrow::Cow::Owned(
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| result.to_string())
+                ),
+                Err(_) => std::borrow::Cow::Borrowed(result),
+            }
+        } else {
+            std::borrow::Cow::Borrowed(result)
+        };
+        let result_lines: Vec<&str> = pretty_result.lines().collect();
         let max_lines = if expanded { 200 } else { 12 };
         let show = result_lines.len().min(max_lines);
         let display_text = result_lines[..show].join("\n");
@@ -586,7 +623,7 @@ fn render_tool_card(
             let hint = if expanded {
                 format!("  ── {} lines ── Tab to collapse", result_lines.len())
             } else {
-                format!("  ── {} more lines ── Tab to expand", result_lines.len() - show)
+                format!("  ── {} more lines ── Ctrl+O to expand", result_lines.len() - show)
             };
             lines.push(Line::from(Span::styled(
                 hint,

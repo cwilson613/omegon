@@ -114,6 +114,7 @@ impl Selector {
 
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
             .border_style(Style::default().fg(if true { t.accent() } else { t.border() }))
             .title(Span::styled(
                 format!(" {} ", self.title),

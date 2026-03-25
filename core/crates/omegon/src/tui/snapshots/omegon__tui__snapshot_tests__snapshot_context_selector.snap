@@ -5,9 +5,9 @@ expression: render_to_string(&terminal)
 
 
 
-┌ Context Class ───────────────────────┐
+╭ Context Class ───────────────────────╮
 │● Squad (128k)  Standard sessions     │
 │  Maniple (272k)  Extended analysis   │
 │  Clan (400k)  Large codebase         │
 │  Legion (1M+)  Massive context       │
-└──────────────────────────────────────┘
+╰──────────────────────────────────────╯
