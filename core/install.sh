@@ -442,3 +442,4 @@ printf "${DIM}  │${RESET}    ${DIM}rm -rf ~/.omegon/versions${RESET}          
 printf "${DIM}  │${RESET}    ${DIM}rm -rf ~/.config/omegon${RESET}                        ${DIM}│${RESET}\n"
 printf "${DIM}  └─────────────────────────────────────────────────┘${RESET}\n"
 echo ""
+# Rebuilt 2026-03-25T22:34:14Z
