@@ -4,7 +4,7 @@
 //! `conv_widget::ConversationWidget`.
 
 use super::image::ImageCache;
-use super::segments::{Segment, SegmentContent};
+use super::segments::{Segment, SegmentContent, SegmentMeta};
 use super::conv_widget::ConvState;
 
 /// Conversation view state — segment list + scroll.
@@ -31,6 +31,11 @@ impl ConversationView {
     /// Access segments for rendering.
     pub fn segments(&self) -> &[Segment] {
         &self.segments
+    }
+
+    /// Whether we're currently receiving streaming text.
+    pub fn is_streaming(&self) -> bool {
+        self.streaming
     }
 
     /// Split borrow — immutable segments + mutable state.
@@ -156,6 +161,14 @@ impl ConversationView {
         self.conv_state.invalidate();
         self.conv_state.user_scrolled = false;
         self.conv_state.scroll_offset = 0;
+    }
+
+    /// Stamp metadata on the most recent segment (call after segment creation
+    /// when model/provider info is available from the harness).
+    pub fn stamp_meta(&mut self, meta: SegmentMeta) {
+        if let Some(seg) = self.segments.last_mut() {
+            seg.meta = meta;
+        }
     }
 
     // ─── Scroll ─────────────────────────────────────────────────

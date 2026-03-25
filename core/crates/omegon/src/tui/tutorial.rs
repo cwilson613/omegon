@@ -1102,6 +1102,19 @@ mod tests {
     }
 
     #[test]
+    fn web_dashboard_step_exists_in_both_modes() {
+        // The tutorial auto-opens the dashboard when advancing to the
+        // "Web Dashboard" step. Verify the step title exists.
+        let tut = Tutorial::new();
+        let has_dash = tut.steps().iter().any(|s| s.title == "Web Dashboard");
+        assert!(has_dash, "hands-on mode must have a Web Dashboard step");
+
+        let demo = Tutorial::new_demo(true);
+        let has_dash = demo.steps().iter().any(|s| s.title == "Web Dashboard");
+        assert!(has_dash, "demo mode must have a Web Dashboard step");
+    }
+
+    #[test]
     fn inactive_tutorial_does_not_consume_input() {
         let mut tut = Tutorial::new();
         tut.dismiss();

@@ -3,6 +3,31 @@
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.15.1-rc.70] - 2026-03-25
+
+### Added
+
+- **SegmentMeta** — every conversation segment now carries rich metadata: timestamp, provider, model_id, tier, thinking_level, turn number, est_tokens, context_percent, persona, branch, duration_ms. Populated from harness state on segment creation.
+- **Glyph+label tool names** in instrument panel — 48 tools mapped to compact domain-grouped glyphs (e.g. `▲ d.tree↑` instead of `design_tree_update`).
+- **Signal-density bar characters** — tool bars degrade `≋ ≈ ∿ ·` as recency fades (three visual channels: length × color × density).
+- **Tutorial auto-opens web dashboard** — the "Web Dashboard" step now fires `StartWebDashboard` on advance instead of telling the operator to type `/dash` (input is locked during tutorial).
+- 6 missing providers restored to `auth::PROVIDERS`: openai-codex, groq, xai, mistral, cerebras, ollama.
+
+### Changed
+
+- **Segment refactored** from flat enum to `Segment { meta: SegmentMeta, content: SegmentContent }`. All construction sites migrated to use convenience constructors.
+- `intensity_color` replaced CIE L* ramp (green/olive mid-range) with sqrt-perceptual teal ramp matching alpharius primary (#2ab4c8).
+- Glitch fills both context bar rows during thinking with row-offset hash for visual variance.
+- Tutorial text: all 13 "AI" references replaced with "Omegon" or "the agent".
+- Rounded borders on instrument panels and dashboard sidebar (matches tool cards and footer).
+- `just link` picks newest binary (release vs dev-release).
+
+### Fixed
+
+- **Provider model mismatch** — `routing.rs` mapped 10 providers but `auth.rs` only listed 9 and `resolve_provider` only handled 3. Restored missing provider entries; `resolve_provider` now explicitly documents unimplemented providers.
+- **`provider_inventory` restored on App** — was dropped during branch restore; now populated after splash probes.
+- **Lost Justfile recipes** — `rc`, `release`, `sign`, `setup-signing` restored from git history.
+
 ## [0.15.1-rc.62] - 2026-03-25
 
 ### Added

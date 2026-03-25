@@ -103,6 +103,12 @@ fn resolve_api_key(provider: &str) -> Option<String> {
 }
 
 /// Resolve a single provider by ID.
+/// Resolve a single provider by ID. Returns a bridge if the provider
+/// has credentials and a native client implementation.
+///
+/// Providers without native clients (groq, xai, mistral, cerebras)
+/// return None here — they need an OpenAI-compatible client layer
+/// which is tracked for re-implementation.
 pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
     match provider_id {
         "anthropic" => {
@@ -113,6 +119,12 @@ pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
         }
         "openai" => OpenAIClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
         "openrouter" => OpenRouterClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
+        // Providers with credentials in auth.rs but no native client yet.
+        // These will be handled by the OpenAI-compatible client when restored.
+        "openai-codex" | "groq" | "xai" | "mistral" | "cerebras" | "huggingface" | "ollama" => {
+            tracing::debug!(provider = provider_id, "provider registered but no native client — needs OpenAI-compat layer");
+            None
+        }
         _ => None,
     }
 }

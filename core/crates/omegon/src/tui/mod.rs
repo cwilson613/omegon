@@ -149,6 +149,8 @@ pub struct App {
     /// Tutorial overlay — game-style first-play advisor.
     /// Renders on top of the UI and guides the operator through steps.
     tutorial_overlay: Option<tutorial::Tutorial>,
+    /// Provider inventory for routing — populated after splash probes.
+    provider_inventory: Option<std::sync::Arc<tokio::sync::RwLock<crate::routing::ProviderInventory>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -174,6 +176,24 @@ enum SlashResult {
 }
 
 impl App {
+    /// Snapshot current model/provider state into a SegmentMeta.
+    fn current_meta(&self) -> segments::SegmentMeta {
+        segments::SegmentMeta {
+            timestamp: Some(std::time::Instant::now()),
+            provider: Some(self.footer_data.model_provider.clone()),
+            model_id: Some(self.footer_data.model_id.clone()),
+            tier: Some(self.footer_data.model_tier.clone()),
+            thinking_level: Some(self.footer_data.thinking_level.clone()),
+            turn: Some(self.turn),
+            est_tokens: Some(self.footer_data.estimated_tokens as u32),
+            context_percent: Some(self.footer_data.context_percent),
+            persona: self.plugin_registry.as_ref()
+                .and_then(|r| r.active_persona().map(|p| p.id.clone())),
+            branch: None, // populated lazily if needed
+            duration_ms: None, // set on completion
+        }
+    }
+
     pub fn new(settings: crate::settings::SharedSettings) -> Self {
         let (model_id, model_provider) = {
             let s = settings.lock().unwrap();
@@ -226,6 +246,7 @@ impl App {
             capability_tier: None,
             tutorial: None,
             tutorial_overlay: None,
+            provider_inventory: None,
         }
     }
 
@@ -2225,10 +2246,19 @@ impl App {
                 }
             }
             AgentEvent::MessageChunk { text } => {
+                let was_streaming = self.conversation.is_streaming();
                 self.conversation.append_streaming(&text);
+                if !was_streaming {
+                    // First chunk of a new response — stamp model metadata
+                    self.conversation.stamp_meta(self.current_meta());
+                }
             }
             AgentEvent::ThinkingChunk { text } => {
+                let was_streaming = self.conversation.is_streaming();
                 self.conversation.append_thinking(&text);
+                if !was_streaming {
+                    self.conversation.stamp_meta(self.current_meta());
+                }
             }
             AgentEvent::ToolStart { id, name, args } => {
                 self.working_verb = spinner::next_verb();
@@ -2240,6 +2270,7 @@ impl App {
                     _ => Some(serde_json::to_string_pretty(&args).unwrap_or_default()),
                 };
                 self.conversation.push_tool_start(&id, &name, args_summary.as_deref(), detail_args.as_deref());
+                self.conversation.stamp_meta(self.current_meta());
                 self.tool_calls += 1;
                 self.last_tool_name = Some(name);
             }
@@ -2929,6 +2960,11 @@ pub async fn run_tui(
             app.capability_tier = Some(crate::startup::classify_tier(&collected_probes));
         }
     }
+
+    // Build provider inventory from credential checks (fast — env var probing only)
+    app.provider_inventory = Some(std::sync::Arc::new(
+        tokio::sync::RwLock::new(crate::routing::ProviderInventory::probe()),
+    ));
 
     // Queue startup reveal effects (footer sweep-in, conversation fade)
     {

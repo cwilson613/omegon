@@ -65,12 +65,56 @@ pub static PROVIDERS: &[ProviderCredential] = &[
         description: "OAuth — ChatGPT Plus/Pro subscription",
     },
     ProviderCredential {
+        id: "openai-codex", auth_key: "openai-codex",
+        display_name: "OpenAI Codex (ChatGPT)",
+        env_vars: &["CHATGPT_OAUTH_TOKEN"],
+        auth_method: AuthMethod::OAuth,
+        description: "ChatGPT Pro/Plus OAuth — free models available",
+    },
+    // ── OpenAI-compatible inference providers ───────────────────────
+    ProviderCredential {
         id: "openrouter", auth_key: "openrouter",
         display_name: "OpenRouter",
         env_vars: &["OPENROUTER_API_KEY"],
         auth_method: AuthMethod::ApiKey,
-        description: "API key — free tier, 27+ models",
+        description: "API key — 200+ models, free tier",
     },
+    ProviderCredential {
+        id: "groq", auth_key: "groq",
+        display_name: "Groq",
+        env_vars: &["GROQ_API_KEY"],
+        auth_method: AuthMethod::ApiKey,
+        description: "API key — ultra-fast inference",
+    },
+    ProviderCredential {
+        id: "xai", auth_key: "xai",
+        display_name: "xAI (Grok)",
+        env_vars: &["XAI_API_KEY"],
+        auth_method: AuthMethod::ApiKey,
+        description: "API key — Grok models",
+    },
+    ProviderCredential {
+        id: "mistral", auth_key: "mistral",
+        display_name: "Mistral AI",
+        env_vars: &["MISTRAL_API_KEY"],
+        auth_method: AuthMethod::ApiKey,
+        description: "API key — Mistral/Codestral models",
+    },
+    ProviderCredential {
+        id: "cerebras", auth_key: "cerebras",
+        display_name: "Cerebras",
+        env_vars: &["CEREBRAS_API_KEY"],
+        auth_method: AuthMethod::ApiKey,
+        description: "API key — hardware-accelerated inference",
+    },
+    ProviderCredential {
+        id: "ollama", auth_key: "ollama",
+        display_name: "Ollama (Local)",
+        env_vars: &["OLLAMA_HOST"],
+        auth_method: AuthMethod::ApiKey,
+        description: "Local inference — your hardware, your models",
+    },
+    // ── Non-inference services ──────────────────────────────────────
     ProviderCredential {
         id: "brave", auth_key: "brave",
         display_name: "Brave Search",
