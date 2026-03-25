@@ -46,37 +46,108 @@ pub struct ProviderCredential {
     pub auth_method: AuthMethod,
     /// Short description for the login selector
     pub description: &'static str,
+    /// Base URL for OpenAI-compatible providers. None for providers with custom protocols.
+    pub openai_compat_url: Option<&'static str>,
 }
 
 /// All known providers. This is the ONLY place provider→key mappings should exist.
+///
+/// Providers with `openai_compat_url` use the OpenAI Chat Completions wire protocol.
+/// They share a single `OpenAICompatClient` implementation — only the base URL and
+/// API key differ. Adding a new OpenAI-compatible provider is one struct entry here.
 pub static PROVIDERS: &[ProviderCredential] = &[
+    // ── Proprietary protocol providers ──────────────────────────────
     ProviderCredential {
         id: "anthropic", auth_key: "anthropic",
         display_name: "Anthropic (Claude)",
         env_vars: &["ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
         auth_method: AuthMethod::ApiKey,
         description: "API key or OAuth (Claude Pro/Max)",
+        openai_compat_url: None,
     },
     ProviderCredential {
         id: "openai", auth_key: "openai-codex",
         display_name: "OpenAI",
         env_vars: &["OPENAI_API_KEY"],
         auth_method: AuthMethod::ApiKey,
-        description: "API key (sk-...) — ChatGPT OAuth not yet supported",
+        description: "API key (sk-...) for Chat Completions API",
+        openai_compat_url: Some("https://api.openai.com"),
     },
+    ProviderCredential {
+        id: "openai-codex", auth_key: "openai-codex",
+        display_name: "OpenAI Codex (ChatGPT)",
+        env_vars: &["CHATGPT_OAUTH_TOKEN"],
+        auth_method: AuthMethod::OAuth,
+        description: "ChatGPT Pro/Plus OAuth — free models available",
+        openai_compat_url: None, // Uses Responses API, not Chat Completions
+    },
+
+    // ── OpenAI-compatible inference providers ───────────────────────
     ProviderCredential {
         id: "openrouter", auth_key: "openrouter",
         display_name: "OpenRouter",
         env_vars: &["OPENROUTER_API_KEY"],
         auth_method: AuthMethod::ApiKey,
-        description: "API key — free tier, 27+ models",
+        description: "API key — 200+ models, free tier",
+        openai_compat_url: Some("https://openrouter.ai/api"),
     },
+    ProviderCredential {
+        id: "groq", auth_key: "groq",
+        display_name: "Groq",
+        env_vars: &["GROQ_API_KEY"],
+        auth_method: AuthMethod::ApiKey,
+        description: "API key — ultra-fast inference",
+        openai_compat_url: Some("https://api.groq.com/openai"),
+    },
+    ProviderCredential {
+        id: "xai", auth_key: "xai",
+        display_name: "xAI (Grok)",
+        env_vars: &["XAI_API_KEY"],
+        auth_method: AuthMethod::ApiKey,
+        description: "API key — Grok models",
+        openai_compat_url: Some("https://api.x.ai"),
+    },
+    ProviderCredential {
+        id: "mistral", auth_key: "mistral",
+        display_name: "Mistral AI",
+        env_vars: &["MISTRAL_API_KEY"],
+        auth_method: AuthMethod::ApiKey,
+        description: "API key — Mistral/Codestral models",
+        openai_compat_url: Some("https://api.mistral.ai"),
+    },
+    ProviderCredential {
+        id: "cerebras", auth_key: "cerebras",
+        display_name: "Cerebras",
+        env_vars: &["CEREBRAS_API_KEY"],
+        auth_method: AuthMethod::ApiKey,
+        description: "API key — hardware-accelerated inference",
+        openai_compat_url: Some("https://api.cerebras.ai"),
+    },
+    ProviderCredential {
+        id: "huggingface", auth_key: "huggingface",
+        display_name: "Hugging Face",
+        env_vars: &["HF_TOKEN", "HUGGING_FACE_TOKEN"],
+        auth_method: AuthMethod::ApiKey,
+        description: "HF token — OSS frontier models",
+        openai_compat_url: Some("https://router.huggingface.co"),
+    },
+    ProviderCredential {
+        id: "ollama", auth_key: "ollama",
+        display_name: "Ollama (Local)",
+        env_vars: &["OLLAMA_HOST"],
+        auth_method: AuthMethod::ApiKey, // No auth needed, just host
+        description: "Local inference — your hardware, your models",
+        openai_compat_url: Some("http://localhost:11434"),
+    },
+
+    // ── Non-inference services ──────────────────────────────────────
     ProviderCredential {
         id: "brave", auth_key: "brave",
         display_name: "Brave Search",
         env_vars: &["BRAVE_API_KEY"],
         auth_method: AuthMethod::ApiKey,
         description: "API key — web search",
+        openai_compat_url: None,
     },
     ProviderCredential {
         id: "tavily", auth_key: "tavily",
@@ -84,6 +155,7 @@ pub static PROVIDERS: &[ProviderCredential] = &[
         env_vars: &["TAVILY_API_KEY"],
         auth_method: AuthMethod::ApiKey,
         description: "API key — AI-optimized search",
+        openai_compat_url: None,
     },
     ProviderCredential {
         id: "serper", auth_key: "serper",
@@ -91,6 +163,7 @@ pub static PROVIDERS: &[ProviderCredential] = &[
         env_vars: &["SERPER_API_KEY"],
         auth_method: AuthMethod::ApiKey,
         description: "API key — Google results",
+        openai_compat_url: None,
     },
     ProviderCredential {
         id: "github", auth_key: "github",
@@ -98,6 +171,7 @@ pub static PROVIDERS: &[ProviderCredential] = &[
         env_vars: &["GITHUB_TOKEN", "GH_TOKEN"],
         auth_method: AuthMethod::Dynamic,
         description: "Dynamic — uses gh CLI",
+        openai_compat_url: None,
     },
     ProviderCredential {
         id: "gitlab", auth_key: "gitlab",
@@ -105,13 +179,7 @@ pub static PROVIDERS: &[ProviderCredential] = &[
         env_vars: &["GITLAB_TOKEN"],
         auth_method: AuthMethod::ApiKey,
         description: "Token — git operations, API",
-    },
-    ProviderCredential {
-        id: "huggingface", auth_key: "huggingface",
-        display_name: "Hugging Face",
-        env_vars: &["HF_TOKEN", "HUGGING_FACE_TOKEN"],
-        auth_method: AuthMethod::ApiKey,
-        description: "API key — models, datasets",
+        openai_compat_url: None,
     },
 ];
 
@@ -223,6 +291,15 @@ pub fn read_credentials(provider: &str) -> Option<OAuthCredentials> {
     let auth: Value = serde_json::from_str(&content).ok()?;
     let entry = auth.get(provider)?;
     serde_json::from_value(entry.clone()).ok()
+}
+
+/// Read extra fields stored alongside credentials in auth.json.
+/// Used for accountId on openai-codex entries.
+pub fn read_credential_extra(provider: &str, field: &str) -> Option<String> {
+    let path = auth_json_path()?;
+    let content = std::fs::read_to_string(&path).ok()?;
+    let auth: Value = serde_json::from_str(&content).ok()?;
+    auth.get(provider)?.get(field)?.as_str().map(String::from)
 }
 
 /// Write credentials for a provider to auth.json.
@@ -370,21 +447,26 @@ pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
     // Use canonical provider map for env vars
     let env_vars = provider_env_vars(provider);
 
+    // Known OAuth env vars — these carry OAuth tokens, not API keys.
+    const OAUTH_ENV_VARS: &[&str] = &["ANTHROPIC_OAUTH_TOKEN", "CHATGPT_OAUTH_TOKEN"];
+
     // 1. Env vars first (not OAuth)
     for key in env_vars {
-        if *key == "ANTHROPIC_OAUTH_TOKEN" { continue; } // handled separately
+        if OAUTH_ENV_VARS.contains(key) { continue; } // handled separately
         if let Ok(val) = std::env::var(key)
             && !val.is_empty() {
                 return Some((val, false));
             }
     }
 
-    // Check OAuth token env vars (e.g. ANTHROPIC_OAUTH_TOKEN)
-    if env_vars.contains(&"ANTHROPIC_OAUTH_TOKEN") {
-        if let Ok(val) = std::env::var("ANTHROPIC_OAUTH_TOKEN")
-            && !val.is_empty() {
-                return Some((val, true));
-            }
+    // Check OAuth token env vars
+    for oauth_var in OAUTH_ENV_VARS {
+        if env_vars.contains(oauth_var) {
+            if let Ok(val) = std::env::var(oauth_var)
+                && !val.is_empty() {
+                    return Some((val, true));
+                }
+        }
     }
 
     // 2. auth.json — with refresh if expired (canonical key mapping)
@@ -708,7 +790,7 @@ pub async fn refresh_openai_token(refresh: &str) -> anyhow::Result<OAuthCredenti
 }
 
 /// Extract a claim from a JWT payload (simple base64 decode, no verification).
-fn extract_jwt_claim(token: &str, claim_path: &str, field: &str) -> Option<String> {
+pub fn extract_jwt_claim(token: &str, claim_path: &str, field: &str) -> Option<String> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 { return None; }
     // Add padding for base64
