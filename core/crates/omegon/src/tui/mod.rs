@@ -723,6 +723,20 @@ impl App {
                 self.tutorial_overlay = Some(tutorial::Tutorial::new_demo(has_design));
                 SlashResult::Display("Tutorial demo started. Tab to advance, Esc to dismiss.".into())
             }
+            "lessons" => {
+                // Explicit opt-in to legacy lesson-based tutorial (if project has lesson files)
+                let tutorial_dir = self.cwd().join(".omegon").join("tutorial");
+                if tutorial_dir.is_dir() {
+                    if let Some(tut) = TutorialState::load(&tutorial_dir) {
+                        let lesson = tut.current_lesson().clone();
+                        let status = tut.status_line();
+                        self.tutorial = Some(tut);
+                        self.queue_prompt(lesson.content);
+                        return SlashResult::Display(format!("{status}\n\nLesson queued. The agent will begin when ready."));
+                    }
+                }
+                SlashResult::Display("No lesson files found in .omegon/tutorial/".into())
+            }
             _ => {
                 // Resume existing overlay if still active
                 if let Some(ref overlay) = self.tutorial_overlay {
@@ -733,33 +747,10 @@ impl App {
                         ));
                     }
                 }
-                // Check for lesson-based tutorial in this project
-                let tutorial_dir = self.cwd()
-                    .join(".omegon").join("tutorial");
-
-                if tutorial_dir.is_dir() {
-                    // Tutorial lessons exist in this project — run in-place
-                    match TutorialState::load(&tutorial_dir) {
-                        Some(tut) => {
-                            let lesson = tut.current_lesson().clone();
-                            let status = tut.status_line();
-                            self.tutorial = Some(tut);
-                            self.queue_prompt(lesson.content);
-                            SlashResult::Display(format!("{status}\n\nLesson queued. The agent will begin when ready."))
-                        }
-                        None => {
-                            // Fall through to overlay
-                            let has_design = self.dashboard.status_counts.total > 0;
-                            self.tutorial_overlay = Some(tutorial::Tutorial::with_context(has_design));
-                            SlashResult::Display("Tutorial started. Tab to advance, Esc to dismiss.".into())
-                        }
-                    }
-                } else {
-                    // No lesson files — start the overlay tutorial
-                    let has_design = self.dashboard.status_counts.total > 0;
-                    self.tutorial_overlay = Some(tutorial::Tutorial::with_context(has_design));
-                    SlashResult::Display("Tutorial started. Tab to advance, Esc to dismiss.".into())
-                }
+                // Always start the overlay tutorial — it works in any project
+                let has_design = self.dashboard.status_counts.total > 0;
+                self.tutorial_overlay = Some(tutorial::Tutorial::with_context(has_design));
+                SlashResult::Display("Tutorial started. Tab to advance, Esc to dismiss.".into())
             }
         }
     }
@@ -3226,8 +3217,10 @@ pub async fn run_tui(
                                     if let SlashResult::Display(msg) = result {
                                         app.conversation.push_system(&msg);
                                     }
+                                } else {
+                                    // MyProject: advance past the choice step to the welcome
+                                    overlay.advance();
                                 }
-                                // MyProject: overlay stays, step 0 renders as welcome
                                 continue;
                             }
                             _ => {
