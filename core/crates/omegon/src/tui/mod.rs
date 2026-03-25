@@ -846,6 +846,7 @@ impl App {
         {
             use std::os::unix::process::CommandExt;
             let err = std::process::Command::new(&exe)
+                .arg("--tutorial")
                 .arg("--no-splash")
                 .arg("--context-class")
                 .arg("squad")
@@ -856,6 +857,7 @@ impl App {
         #[cfg(not(unix))]
         {
             let _ = std::process::Command::new(&exe)
+                .arg("--tutorial")
                 .arg("--no-splash")
                 .arg("--context-class")
                 .arg("squad")
@@ -2407,6 +2409,8 @@ pub struct TuiConfig {
     pub dashboard_handles: dashboard::DashboardHandles,
     /// Initial prompt to queue after startup (sent automatically, TUI stays open).
     pub initial_prompt: Option<String>,
+    /// Start with tutorial overlay active (--tutorial flag).
+    pub start_tutorial: bool,
 }
 
 /// Initial state snapshot gathered during setup, before the TUI event loop starts.
@@ -2966,6 +2970,12 @@ pub async fn run_tui(
     // Queue initial prompt if provided (--initial-prompt / --initial-prompt-file)
     if let Some(prompt) = config.initial_prompt {
         app.queue_prompt(prompt);
+    }
+
+    // Start tutorial overlay if --tutorial flag was passed (e.g. from demo exec)
+    if config.start_tutorial {
+        let has_design = app.dashboard.status_counts.total > 0;
+        app.tutorial_overlay = Some(tutorial::Tutorial::new_demo(has_design));
     }
 
     loop {

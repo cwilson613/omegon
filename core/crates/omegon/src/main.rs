@@ -132,6 +132,10 @@ struct Cli {
     #[arg(long)]
     no_splash: bool,
 
+    /// Start with the tutorial overlay active (demo mode).
+    #[arg(long)]
+    tutorial: bool,
+
     /// Queue an initial prompt in the TUI (interactive mode, not headless).
     /// The prompt is sent automatically after startup. The TUI stays open.
     #[arg(long)]
@@ -667,6 +671,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         bus_commands,
         dashboard_handles: agent.dashboard_handles.clone(),
         initial_prompt,
+        start_tutorial: cli.tutorial,
     };
     let tui_cancel = shared_cancel.clone();
     let tui_settings = shared_settings.clone();
