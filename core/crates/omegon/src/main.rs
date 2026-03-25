@@ -910,10 +910,13 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                         if let Some(new_bridge) = providers::auto_detect_bridge(&detect_model).await {
                             let mut guard = bridge_clone.write().await;
                             *guard = new_bridge;
-                            if let Ok(mut s) = settings_clone.lock() { s.provider_connected = true; }
+                            if let Ok(mut s) = settings_clone.lock() {
+                                s.provider_connected = true;
+                                s.model = detect_model.clone();
+                            }
                             tracing::info!("bridge hot-swapped after API key stored for {}", provider_name);
                             let _ = events_tx_clone.send(AgentEvent::SystemNotification {
-                                message: "✓ Provider connected — you can send messages now.".to_string(),
+                                message: format!("✓ Connected to {}. You can send messages now.", provider_name),
                             });
                         }
                     });
@@ -932,18 +935,22 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                             
                             // OAuth is only supported for Anthropic right now.
                             // OpenAI OAuth gives Codex JWT tokens that the native client can't use.
-                            if wants_oauth && provider != "anthropic" {
+                            // Providers with working OAuth flows
+                            let has_oauth = matches!(provider, "anthropic" | "claude" | "openai-codex" | "openai");
+
+                            if wants_oauth && !has_oauth {
                                 let _ = events_tx.send(AgentEvent::SystemNotification {
-                                    message: format!("⚠ OAuth login not yet supported for {}. Use API key instead.", provider),
+                                    message: format!("⚠ OAuth login not supported for {}. Use /login (selector) to enter an API key.", provider),
                                 });
                                 continue;
                             }
 
-                            // Non-OAuth /login <provider> via the bus is only for OAuth flows.
+                            // Non-OAuth /login <provider> via the bus — only for OAuth-capable providers.
                             // API key entry goes through the TUI secret input mode, not here.
-                            if !wants_oauth && !matches!(provider, "anthropic" | "claude") {
+                            // For openai-codex, the non-OAuth path IS the OAuth flow (it's always OAuth).
+                            if !wants_oauth && !has_oauth {
                                 let _ = events_tx.send(AgentEvent::SystemNotification {
-                                    message: format!("Use the /login selector to enter an API key for {}.", provider),
+                                    message: format!("Use /login (selector) to enter an API key for {}.", provider),
                                 });
                                 continue;
                             }
@@ -952,7 +959,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                             let progress_tx = events_tx.clone();
                             let provider_clone = provider.to_string();
                             let bridge_clone = bridge.clone();
-                            let model_for_redetect = cli.model.clone();
                             let settings_for_login = shared_settings.clone();
                             tokio::spawn(async move {
                                 let progress: auth::LoginProgress = Box::new(move |msg| {
@@ -984,18 +990,26 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                     if let Some(new_bridge) = providers::auto_detect_bridge(&detect_model).await {
                                         let mut guard = bridge_clone.write().await;
                                         *guard = new_bridge;
-                                        if let Ok(mut s) = settings_for_login.lock() { s.provider_connected = true; }
+                                        // Update displayed model to match the new provider
+                                        if let Ok(mut s) = settings_for_login.lock() {
+                                            s.provider_connected = true;
+                                            // Update model to the new provider's default
+                                            let new_model = match provider_clone.as_str() {
+                                                "openai-codex" => "openai-codex:gpt-5.3-codex-spark",
+                                                "anthropic" | "claude" => "anthropic:claude-sonnet-4-6",
+                                                _ => &detect_model,
+                                            };
+                                            s.model = new_model.to_string();
+                                        }
                                         tracing::info!("bridge hot-swapped after successful login to {}", provider_clone);
                                         let _ = events_tx_clone.send(AgentEvent::SystemNotification {
-                                            message: "Provider connected — you can send messages now.".to_string(),
+                                            message: format!("✓ Connected to {}. You can send messages now.", provider_clone),
                                         });
                                     } else {
-                                        // Login succeeded but we can't use the token (e.g. Codex OAuth JWT)
                                         let _ = events_tx_clone.send(AgentEvent::SystemNotification {
                                             message: format!(
-                                                "⚠ {} login saved, but this token type isn't supported yet by the native client.\n\
-                                                 ChatGPT OAuth tokens use the Codex Responses API (not yet implemented).\n\
-                                                 Use /login anthropic or /login openrouter instead.",
+                                                "⚠ {} login saved, but couldn't create a client.\n\
+                                                 Try /login again or use a different provider.",
                                                 provider_clone
                                             ),
                                         });
