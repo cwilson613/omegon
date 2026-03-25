@@ -1560,33 +1560,20 @@ impl OpenAICompatClient {
     }
 
     /// Resolve Ollama specifically — no API key, just check if it's reachable.
-    /// This is a sync check that creates a client optimistically. The actual
-    /// connectivity is verified on first stream() call.
     fn from_env_ollama() -> Option<Self> {
-        let host = std::env::var("OLLAMA_HOST")
-            .unwrap_or_else(|_| "http://localhost:11434".into());
-
-        // Quick check: can we connect? Use std::net to avoid async overhead.
-        let url_str = host.trim_end_matches('/');
-        let addr = url_str
-            .strip_prefix("http://").or_else(|| url_str.strip_prefix("https://"))
-            .unwrap_or(url_str);
-        match std::net::TcpStream::connect_timeout(
-            &addr.parse().unwrap_or_else(|_| std::net::SocketAddr::from(([127, 0, 0, 1], 11434))),
-            std::time::Duration::from_millis(200),
-        ) {
-            Ok(_) => {
-                tracing::debug!(host = %host, "Ollama server detected");
-                Some(Self::new(
-                    String::new(), // no API key
-                    host,
-                    "ollama".into(),
-                ))
-            }
-            Err(_) => {
-                tracing::trace!("Ollama not reachable at {} — skipping", host);
-                None
-            }
+        let mgr = crate::ollama::OllamaManager::default();
+        if mgr.is_reachable() {
+            let host = std::env::var("OLLAMA_HOST")
+                .unwrap_or_else(|_| "http://localhost:11434".into());
+            tracing::debug!(host = %host, "Ollama server detected via OllamaManager");
+            Some(Self::new(
+                String::new(), // no API key
+                host,
+                "ollama".into(),
+            ))
+        } else {
+            tracing::trace!("Ollama not reachable — skipping");
+            None
         }
     }
 }

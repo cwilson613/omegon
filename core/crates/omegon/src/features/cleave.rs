@@ -220,6 +220,7 @@ impl CleaveFeature {
             timeout_secs: 900,
             idle_timeout_secs: 180,
             max_turns: 50,
+            inventory: None, // TODO: pass provider inventory from TUI context
         };
 
         let result = cleave::run_cleave(

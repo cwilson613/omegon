@@ -38,6 +38,8 @@ pub struct ChildState {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execute_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_secs: Option<f64>,
 }
 
@@ -89,6 +91,7 @@ impl CleaveState {
                 worktree_path: None,
                 backend: "native".to_string(),
                 execute_model: Some(model.to_string()),
+                provider_id: None,
                 duration_secs: None,
             })
             .collect();

@@ -27,8 +27,10 @@ mod switch;
 mod conversation;
 mod lifecycle;
 mod r#loop;
+mod ollama;
 mod prompt;
 mod providers;
+mod routing;
 mod session;
 pub mod settings;
 mod setup;
@@ -448,6 +450,11 @@ async fn run_cleave_command(
         .clone()
         .unwrap_or_else(SubprocessBridge::default_bridge_path);
 
+    // Probe provider inventory for per-child routing during cleave
+    let provider_inventory = std::sync::Arc::new(
+        tokio::sync::RwLock::new(routing::ProviderInventory::probe())
+    );
+
     let config = cleave::orchestrator::CleaveConfig {
         agent_binary,
         bridge_path,
@@ -457,6 +464,7 @@ async fn run_cleave_command(
         timeout_secs: timeout,
         idle_timeout_secs: idle_timeout,
         max_turns,
+        inventory: Some(provider_inventory),
     };
 
     let cancel = CancellationToken::new();
