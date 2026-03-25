@@ -42,13 +42,23 @@ echo ""
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
+# Map npm platform names to Rust target triples
+declare -A TARGET_MAP=(
+  [darwin-arm64]=aarch64-apple-darwin
+  [darwin-x64]=x86_64-apple-darwin
+  [linux-arm64]=aarch64-unknown-linux-gnu
+  [linux-x64]=x86_64-unknown-linux-gnu
+)
+
 PLATFORMS=(darwin-arm64 darwin-x64 linux-arm64 linux-x64)
+VERSION_NUM="${TAG#v}"  # v0.15.2 -> 0.15.2
 
 DOWNLOADED=0
 
 echo "Downloading release assets..."
 for platform in "${PLATFORMS[@]}"; do
-  asset="omegon-${platform}.tar.gz"
+  target="${TARGET_MAP[$platform]}"
+  asset="omegon-${VERSION_NUM}-${target}.tar.gz"
   echo "  ↓ ${asset}"
   gh release download "$TAG" -R "$REPO" -p "$asset" -D "$TMP" 2>/dev/null || {
     echo "  ✗ Failed to download ${asset} — skipping platform"
