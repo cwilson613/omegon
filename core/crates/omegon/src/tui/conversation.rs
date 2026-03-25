@@ -75,10 +75,19 @@ impl ConversationView {
     }
 
     pub fn append_streaming(&mut self, delta: &str) {
-        if !self.streaming {
+        // Push a new AssistantText segment if we aren't already writing into one.
+        // This handles both the initial case (!streaming) and the case where
+        // tool cards were interleaved — the last segment may be a ToolCard even
+        // though streaming=true, which previously caused the text to be silently
+        // dropped.
+        let needs_new_seg = !matches!(
+            self.segments.last(),
+            Some(Segment { content: SegmentContent::AssistantText { .. }, .. })
+        );
+        if needs_new_seg {
             self.segments.push(Segment::assistant_text());
-            self.streaming = true;
         }
+        self.streaming = true;
 
         if let Some(seg) = self.segments.last_mut() {
             if let SegmentContent::AssistantText { text, .. } = &mut seg.content {
@@ -90,10 +99,15 @@ impl ConversationView {
     }
 
     pub fn append_thinking(&mut self, delta: &str) {
-        if !self.streaming {
+        // Same guard as append_streaming — don't append into a ToolCard.
+        let needs_new_seg = !matches!(
+            self.segments.last(),
+            Some(Segment { content: SegmentContent::AssistantText { .. }, .. })
+        );
+        if needs_new_seg {
             self.segments.push(Segment::assistant_text());
-            self.streaming = true;
         }
+        self.streaming = true;
 
         if let Some(seg) = self.segments.last_mut() {
             if let SegmentContent::AssistantText { thinking, .. } = &mut seg.content {
@@ -400,6 +414,68 @@ mod tests {
         assert!(result.is_some(), "should find a tool card");
         let idx = result.unwrap();
         assert!(matches!(&cv.segments[idx].content, SegmentContent::ToolCard { .. }));
+    }
+
+    /// Regression test: text emitted after tool cards must appear in a new
+    /// AssistantText segment, not be silently dropped.
+    ///
+    /// Sequence: pre-tool text → tool card → post-tool text → finalize
+    /// Expected: 3 segments (AssistantText, ToolCard, AssistantText)
+    /// Bug was: post-tool text was lost because append_streaming saw
+    /// streaming=true and tried to append into the ToolCard segment,
+    /// found no AssistantText match, and discarded the delta.
+    #[test]
+    fn text_after_tool_cards_is_not_dropped() {
+        let mut cv = ConversationView::new();
+
+        // Pre-tool response text
+        cv.append_streaming("Let me check that for you.");
+
+        // Tool cards interleaved
+        cv.push_tool_start("t1", "bash", Some("ls"), Some("ls"));
+        cv.push_tool_end("t1", false, Some("file.txt"));
+
+        // Post-tool response text — this was silently dropped before the fix
+        cv.append_streaming("Here is where we sit.");
+        cv.finalize_message();
+
+        // Should be: AssistantText, ToolCard, AssistantText
+        let segment_types: Vec<&str> = cv.segments.iter().map(|s| match &s.content {
+            SegmentContent::AssistantText { .. } => "AssistantText",
+            SegmentContent::ToolCard { .. } => "ToolCard",
+            _ => "other",
+        }).collect();
+        assert_eq!(cv.segments.len(), 3, "expected 3 segments, got {}: {:?}",
+            cv.segments.len(), segment_types);
+
+        // Third segment must contain the post-tool text
+        if let SegmentContent::AssistantText { text, complete, .. } = &cv.segments[2].content {
+            assert_eq!(text, "Here is where we sit.", "post-tool text was dropped");
+            assert!(complete, "should be finalized");
+        } else {
+            panic!("segment[2] should be AssistantText");
+        }
+
+        // First segment should have the pre-tool text
+        if let SegmentContent::AssistantText { text, .. } = &cv.segments[0].content {
+            assert_eq!(text, "Let me check that for you.");
+        } else {
+            panic!("segment[0] should be AssistantText");
+        }
+    }
+
+    #[test]
+    fn text_only_response_still_works() {
+        // Sanity: no tools, text-only response is still one segment
+        let mut cv = ConversationView::new();
+        cv.append_streaming("Hello ");
+        cv.append_streaming("world");
+        cv.finalize_message();
+        assert_eq!(cv.segments.len(), 1);
+        if let SegmentContent::AssistantText { text, complete, .. } = &cv.segments[0].content {
+            assert_eq!(text, "Hello world");
+            assert!(complete);
+        }
     }
 
     #[test]
