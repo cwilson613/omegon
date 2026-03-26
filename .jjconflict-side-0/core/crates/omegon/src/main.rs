@@ -113,10 +113,14 @@ struct Cli {
     #[arg(long, default_value = "3")]
     max_retries: u32,
 
-    /// Resume a previous session. Without a value, resumes the most recent.
-    /// With a value, matches by session ID prefix.
+    /// Resume a specific session by ID prefix. Without a value, resumes the
+    /// most recent session (this is the default — omegon always resumes).
     #[arg(long)]
     resume: Option<Option<String>>,
+
+    /// Start a fresh session, ignoring any saved history for this directory.
+    #[arg(long)]
+    fresh: bool,
 
     /// Disable session auto-save on exit.
     #[arg(long)]
@@ -537,7 +541,14 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     let shared_settings = settings::shared(&cli.model);
 
     // ─── Shared setup ───────────────────────────────────────────────────
-    let resume = cli.resume.as_ref().map(|r| r.as_deref());
+    // Default: resume most recent session. --fresh overrides. --resume <id> pins a specific one.
+    let resume: Option<Option<&str>> = if cli.fresh {
+        None
+    } else if let Some(ref r) = cli.resume {
+        Some(r.as_deref())
+    } else {
+        Some(None) // try most recent
+    };
     let mut agent = setup::AgentSetup::new(&cli.cwd, resume, Some(shared_settings.clone())).await?;
 
     // ─── LLM provider ──────────────────────────────────────────────────
@@ -756,6 +767,17 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 // Send back to TUI as a system message
                 let _ = events_tx.send(AgentEvent::AgentEnd);
                 tracing::info!("{text}");
+            }
+
+            tui::TuiCommand::NewSession => {
+                // Save the current session before resetting
+                if !cli.no_session {
+                    let rid = agent.resume_info.as_ref().map(|r| r.session_id.as_str());
+                    let _ = session::save_session(&agent.conversation, &agent.cwd, rid);
+                }
+                agent.conversation = crate::conversation::ConversationState::new();
+                agent.resume_info = None;
+                let _ = events_tx.send(AgentEvent::SessionReset);
             }
 
             tui::TuiCommand::StartWebDashboard => {

@@ -75,6 +75,8 @@ pub enum TuiCommand {
     ListSessions,
     /// Start the web dashboard server.
     StartWebDashboard,
+    /// Discard the current session and start fresh (saves current first).
+    NewSession,
 }
 
 /// Shared cancel token — the TUI writes it on Escape/Ctrl+C,
@@ -1459,6 +1461,7 @@ impl App {
         ("stats",    "session telemetry",                    &[]),
         ("compact",  "trigger context compaction",           &[]),
         ("clear",    "clear conversation display",           &[]),
+        ("new",      "save current session and start fresh",  &[]),
         ("detail",   "toggle tool display (compact/detailed)", &["compact", "detailed"]),
         ("context",  "select context class (Squad/Maniple/Clan/Legion)",       &["squad", "maniple", "clan", "legion"]),
         ("sessions", "list saved sessions",                  &[]),
@@ -1716,6 +1719,11 @@ impl App {
             "clear" => {
                 self.conversation = ConversationView::new();
                 SlashResult::Display("Display cleared.".into())
+            }
+
+            "new" => {
+                let _ = tx.try_send(TuiCommand::NewSession);
+                SlashResult::Handled
             }
 
             "sessions" => {
@@ -2453,6 +2461,16 @@ impl App {
                     self.conversation.push_system(&message);
                 }
             }
+            AgentEvent::SessionReset => {
+                self.conversation = ConversationView::new();
+                self.turn = 0;
+                self.tool_calls = 0;
+                self.footer_data.turn = 0;
+                self.footer_data.tool_calls = 0;
+                self.footer_data.compactions = 0;
+                self.footer_data.update_available = None;
+                self.conversation.push_system("New session started. Previous session saved.");
+            }
             AgentEvent::HarnessStatusChanged { status_json } => {
                 // Deserialize and update the footer's harness status snapshot
                 if let Ok(status) = serde_json::from_value::<crate::status::HarnessStatus>(status_json) {
@@ -2945,8 +2963,8 @@ pub async fn run_tui(
         let sha = env!("OMEGON_GIT_SHA");
 
         if let Some(ref ri) = config.resume_info {
-            // ── Resumed session: orientate instead of greet ──────────────
-            let mut brief = format!("Ω Omegon {version} ({sha}) — {project} [resumed]");
+            // ── Resumed session: standard welcome + one-line brief ───────
+            let mut brief = format!("Ω Omegon {version} ({sha}) — {project}");
             if s.provider_connected {
                 let model_short = s.model_short();
                 let ctx = s.context_window / 1000;
@@ -2958,17 +2976,20 @@ pub async fn run_tui(
                 brief.push_str(&format!("  ·  {facts} facts loaded"));
             }
             brief.push('\n');
-            // Context brief — what the prior session was doing
-            brief.push_str(&format!(
-                "\n  Session {}  ·  {} turns",
-                &ri.session_id[..ri.session_id.len().min(12)],
+            brief.push_str("\n  /model  switch provider    /think  reasoning level");
+            brief.push_str("\n  /new    fresh session        /help   all commands");
+            brief.push_str("\n  Ctrl+R  search history      Ctrl+C  cancel/quit");
+            app.conversation.push_system(&brief);
+            // Orientation line: what the model was doing last
+            let snippet = if ri.last_prompt_snippet.is_empty() {
+                String::new()
+            } else {
+                format!(" · last: \"{}\"" , ri.last_prompt_snippet)
+            };
+            app.conversation.push_system(&format!(
+                "↺ Resumed — {} turns{snippet}. History loaded, you have full prior context.",
                 ri.turns,
             ));
-            if !ri.last_prompt_snippet.is_empty() {
-                brief.push_str(&format!("\n  Last prompt: {}", ri.last_prompt_snippet));
-            }
-            brief.push_str("\n\n  Session history is loaded. You have full context of prior work.");
-            app.conversation.push_system(&brief);
         } else {
             // ── Fresh session: standard welcome ───────────────────────────
             let mut welcome = format!("Ω Omegon {version} ({sha}) — {project}");

@@ -269,6 +269,9 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "type": "harness_status_changed",
             "status": status_json,
         }),
+        AgentEvent::SessionReset => json!({
+            "type": "session_reset",
+        }),
     }
 }
 

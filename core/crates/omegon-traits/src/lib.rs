@@ -347,6 +347,8 @@ pub enum AgentEvent {
     /// Harness status changed — persona switch, MCP connect, secret unlock, etc.
     /// Serialized HarnessStatus JSON. Web dashboard renders the snapshot.
     HarnessStatusChanged { status_json: Value },
+    /// Session was reset mid-session via /new. TUI clears its display.
+    SessionReset,
 }
 
 /// Session configuration for legacy SessionHook.
