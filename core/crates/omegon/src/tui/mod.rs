@@ -183,6 +183,14 @@ enum SlashResult {
     Quit,
 }
 
+/// Compute dynamic editor height from the editor's wrapped visual rows.
+fn editor_height_for(editor: &Editor, main_area: Rect) -> u16 {
+    let content_width = main_area.width.saturating_sub(2).max(1);
+    let editor_rows = editor.visual_line_count(content_width) as u16;
+    let max_editor = (main_area.height * 40 / 100).max(5).min(20);
+    (editor_rows + 2).clamp(3, max_editor) // +2 for border
+}
+
 impl App {
     /// Snapshot current model/provider state into a SegmentMeta.
     fn current_meta(&self) -> segments::SegmentMeta {
@@ -1302,13 +1310,10 @@ impl App {
         };
 
         // ── Vertical layout in the main area ────────────────────────
-        // Editor height: use logical lines when the widget owns rendering and
-        // cursor/viewport behavior. If we need paragraph-style soft wrapping,
-        // we should prove the widget cannot do it before reintroducing custom
-        // wrapped render math.
-        let editor_lines = self.editor.line_count();
-        let max_editor = (main_area.height * 40 / 100).max(5).min(20);
-        let editor_height = (editor_lines as u16 + 2).clamp(3, max_editor); // +2 for border
+        // Editor height tracks wrapped visual rows, not just logical newlines,
+        // so long prompts expand the input window instead of pretending to be
+        // a single infinitely wrapped line.
+        let editor_height = editor_height_for(&self.editor, main_area);
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)

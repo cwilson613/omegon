@@ -64,6 +64,18 @@ fn editor_visual_line_count_counts_newlines_and_wraps() {
 }
 
 #[test]
+fn editor_height_expands_for_wrapped_input() {
+    let mut editor = crate::tui::editor::Editor::new();
+    editor.set_text("1234567890abcdefghij");
+    let narrow = Rect { x: 0, y: 0, width: 8, height: 20 };
+    let wide = Rect { x: 0, y: 0, width: 40, height: 20 };
+    let narrow_height = super::editor_height_for(&editor, narrow);
+    let wide_height = super::editor_height_for(&editor, wide);
+    assert!(narrow_height > wide_height, "wrapped input should expand editor height");
+    assert!(narrow_height >= 5, "wrapped input should grow beyond the minimum height");
+}
+
+#[test]
 fn slash_update_channel_without_args_shows_helpful_usage() {
     let mut app = test_app();
     let tx = test_tx();
