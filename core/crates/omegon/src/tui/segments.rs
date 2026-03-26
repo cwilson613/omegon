@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Wrap};
 use tui_syntax_highlight::Highlighter;
+use unicode_width::UnicodeWidthStr;
 
 use super::theme::Theme;
 
@@ -246,16 +247,23 @@ impl Segment {
             _ => {}
         }
 
-        // Estimate max height for the temp buffer
+        // Estimate max height for the temp buffer using WRAPPED visual rows,
+        // not just logical newline counts. If we underestimate here, the temp
+        // buffer clips content and the cached height becomes permanently wrong.
         let estimate = match &self.content {
-            UserPrompt { text } => (text.len() / width.max(1) as usize) as u16 + 4,
+            UserPrompt { text } => wrapped_rows(text, width.saturating_sub(4)) + 4,
             AssistantText { text, thinking, .. } => {
                 let meta_line = if self.meta.model_id.is_some() || self.meta.provider.is_some() {
                     1u16
                 } else {
                     0
                 };
-                (text.lines().count() + thinking.lines().count()) as u16 + 6 + meta_line
+                let thinking_rows = if thinking.is_empty() {
+                    0
+                } else {
+                    wrapped_rows(thinking, width.saturating_sub(5)).min(8) + 2
+                };
+                wrapped_rows(text, width.saturating_sub(3)) + thinking_rows + 4 + meta_line
             }
             ToolCard {
                 detail_args,
@@ -263,21 +271,24 @@ impl Segment {
                 expanded,
                 ..
             } => {
-                let max_r = if *expanded { 200 } else { 12 };
-                let a = detail_args.as_ref().map(|a| a.lines().count()).unwrap_or(0);
-                let r = detail_result
+                let inner_width = width.saturating_sub(4).max(1);
+                let args_rows = detail_args
                     .as_ref()
-                    .map(|r| r.lines().count().min(max_r))
+                    .map(|a| wrapped_rows(a, inner_width).min(if *expanded { 80 } else { 6 }))
                     .unwrap_or(0);
-                // 3 = border top + title + border bottom. Compact cards.
-                (a + r + 3) as u16
+                let result_rows = detail_result
+                    .as_ref()
+                    .map(|r| wrapped_rows(r, inner_width).min(if *expanded { 220 } else { 14 }))
+                    .unwrap_or(0);
+                let separator_rows = u16::from(args_rows > 0 && result_rows > 0);
+                args_rows + result_rows + separator_rows + 4
             }
-            SystemNotification { text } => text.lines().count() as u16 + 3,
+            SystemNotification { text } => wrapped_rows(text, width.saturating_sub(4)) + 3,
             _ => 4,
         };
 
-        // Render into temp buffer — cap at 300 rows to avoid absurd allocations
-        let h = estimate.clamp(4, 300);
+        // Render into temp buffer — cap at 400 rows to avoid absurd allocations
+        let h = estimate.clamp(4, 400);
         let temp_area = Rect::new(0, 0, width, h);
         let mut temp_buf = Buffer::empty(temp_area);
         self.render(temp_area, &mut temp_buf, t);
@@ -318,34 +329,42 @@ impl Segment {
 // Per-type renderers
 // ═══════════════════════════════════════════════════════════════════════════
 
+fn wrapped_rows(text: &str, width: u16) -> u16 {
+    let width = width.max(1) as usize;
+    text.lines()
+        .map(|line| UnicodeWidthStr::width(line).max(1).div_ceil(width) as u16)
+        .sum::<u16>()
+        .max(1)
+}
+
 fn render_user_prompt(text: &str, area: Rect, buf: &mut Buffer, t: &dyn Theme) {
     if area.width < 3 || area.height == 0 {
         return;
     }
 
-    // Subtle tinted background for the user prompt region
+    // Stronger visual identity for operator prompts.
     let bg = t.user_msg_bg();
-    let block = Block::default().style(Style::default().bg(bg));
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(t.accent_muted()).bg(bg))
+        .padding(Padding::horizontal(1))
+        .style(Style::default().bg(bg));
+    let inner = block.inner(area);
     block.render(area, buf);
 
-    // Accent bar on the left edge
-    for y in area.top()..area.bottom() {
-        if let Some(cell) = buf.cell_mut((area.x, y)) {
-            cell.set_symbol("▎");
-            cell.set_style(Style::default().fg(t.accent()).bg(bg));
-        }
+    if inner.width == 0 || inner.height == 0 {
+        return;
     }
 
-    // Content area — offset by 2 for the accent bar + space
-    let inner = Rect {
-        x: area.x + 2,
-        y: area.y,
-        width: area.width.saturating_sub(3),
-        height: area.height,
-    };
-
-    let content = Line::from(vec![
-        Span::styled("▸ ", Style::default().fg(t.accent()).bg(bg)),
+    let content = vec![Line::from(vec![
+        Span::styled(
+            "YOU ",
+            Style::default()
+                .fg(t.accent())
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(
             text.to_string(),
             Style::default()
@@ -353,7 +372,7 @@ fn render_user_prompt(text: &str, area: Rect, buf: &mut Buffer, t: &dyn Theme) {
                 .bg(bg)
                 .add_modifier(Modifier::BOLD),
         ),
-    ]);
+    ])];
     Paragraph::new(content)
         .wrap(Wrap { trim: false })
         .style(Style::default().bg(bg))
@@ -1213,7 +1232,7 @@ mod tests {
 
         let user = Segment::user_prompt("short");
         let h = user.height(80, &t);
-        assert!(h >= 2 && h <= 5, "user prompt height: {h}");
+        assert!(h >= 3 && h <= 7, "user prompt height: {h}");
 
         let tool = Segment {
             meta: SegmentMeta::default(),
@@ -1231,6 +1250,30 @@ mod tests {
         };
         let h = tool.height(80, &t);
         assert!(h >= 4, "tool card height should be >= 4, got {h}");
+    }
+
+    #[test]
+    fn tool_card_height_accounts_for_wrapped_long_lines() {
+        let t = Alpharius;
+        let long_line = "x".repeat(400);
+        let tool = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::ToolCard {
+                id: "1".into(),
+                name: "bash".into(),
+                args_summary: None,
+                detail_args: Some("echo hello".into()),
+                result_summary: None,
+                detail_result: Some(long_line),
+                is_error: false,
+                complete: true,
+                expanded: false,
+            },
+        };
+        let h_narrow = tool.height(40, &t);
+        let h_wide = tool.height(120, &t);
+        assert!(h_narrow > h_wide, "narrow tool cards should get taller when output wraps");
+        assert!(h_narrow >= 8, "wrapped tool output should materially increase card height: {h_narrow}");
     }
 
     #[test]

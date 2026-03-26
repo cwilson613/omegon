@@ -1,15 +1,16 @@
 ---
 id: tui-hud-redesign
-title: TUI HUD redesign — game-inspired operator interface
+title: "TUI HUD redesign — game-inspired operator interface"
 status: implemented
 parent: rust-tui-bridge
 tags: [tui, ux, design]
 open_questions:
-  - What video game HUDs are good reference points? (EVE Online overview, Factorio, Rimworld colony stats, Dwarf Fortress, Diablo resource orbs?)
-  - How should focus switching work? Dedicated hotkeys per panel, or a tab-cycle through focusable regions?
+  - "What video game HUDs are good reference points? (EVE Online overview, Factorio, Rimworld colony stats, Dwarf Fortress, Diablo resource orbs?)"
+  - "How should focus switching work? Dedicated hotkeys per panel, or a tab-cycle through focusable regions?"
   - "What is the tri-axis display? Provider (Anthropic/OpenAI/Local) × Tier (retribution/victory/gloriana) × Thinking (off→high) — how to visualize three dimensions compactly?"
   - "Should the footer be a single dense status line (fighting game style) or keep the multi-card layout but merge/reorganize the cards?"
-jj_change_id: ulryuzrsrlwyxtyysnklyxxtuuqqyxzy
+dependencies: []
+related: []
 ---
 
 # TUI HUD redesign — game-inspired operator interface
