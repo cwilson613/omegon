@@ -11,6 +11,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  RELEASE_GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
   APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
   APPLE_SIGNING_CERT_B64: ${{ secrets.APPLE_SIGNING_CERT_B64 }}
   APPLE_SIGNING_CERT_PASSWORD: ${{ secrets.APPLE_SIGNING_CERT_PASSWORD }}
@@ -210,15 +211,35 @@ jobs:
           subject-path: artifacts/omegon-*.tar.gz
 
       # ─── GitHub Release ────────────────────────────────────────
-      - name: Create GitHub Release
+      - name: Create nightly GitHub Release
+        if: ${{ contains(github.ref_name, '-nightly.') }}
         uses: softprops/action-gh-release@v2
         with:
+          token: ${{ secrets.RELEASE_GITHUB_TOKEN || github.token }}
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           target_commitish: ${{ github.sha }}
           generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, '-rc.') || contains(github.ref_name, '-nightly.') }}
-          draft: ${{ contains(github.ref_name, '-nightly.') }}
+          prerelease: true
+          draft: true
+          files: |
+            artifacts/omegon-*.tar.gz
+            artifacts/omegon-*.tar.gz.sha256
+            artifacts/omegon-*.tar.gz.sig
+            artifacts/omegon-*.tar.gz.pem
+            artifacts/checksums.sha256
+
+      - name: Create stable/rc GitHub Release
+        if: ${{ !contains(github.ref_name, '-nightly.') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.RELEASE_GITHUB_TOKEN || github.token }}
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-rc.') }}
+          draft: false
           files: |
             artifacts/omegon-*.tar.gz
             artifacts/omegon-*.tar.gz.sha256
