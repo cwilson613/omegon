@@ -134,6 +134,8 @@ pub struct App {
     bus_commands: Vec<omegon_traits::CommandDefinition>,
     /// Shared handles for live dashboard updates.
     dashboard_handles: dashboard::DashboardHandles,
+    /// Last instrument telemetry update timestamp.
+    last_instrument_update: std::time::Instant,
     /// Turn counter for throttled dashboard refresh.
     dashboard_refresh_turn: u32,
     /// Web dashboard server address (if running).
@@ -253,6 +255,7 @@ impl App {
             effects: effects::Effects::new(),
             bus_commands: Vec::new(),
             dashboard_handles: dashboard::DashboardHandles::default(),
+            last_instrument_update: std::time::Instant::now(),
             dashboard_refresh_turn: u32::MAX, // force refresh on first frame
             web_server_addr: None,
             queued_prompt: None,
@@ -1417,6 +1420,12 @@ impl App {
                 self.footer_data.total_facts,
                 self.footer_data.working_memory,
             );
+            let now = std::time::Instant::now();
+            let dt = now
+                .duration_since(self.last_instrument_update)
+                .as_secs_f64()
+                .clamp(0.0, 0.050);
+            self.last_instrument_update = now;
             self.instrument_panel.update_telemetry(
                 self.footer_data.context_percent,
                 tool_name.as_deref(),
@@ -1424,7 +1433,7 @@ impl App {
                 thinking,
                 mem_op,
                 self.agent_active,
-                0.016,
+                dt,
             );
         }
 

@@ -34,17 +34,16 @@ fn dim_color(c: Color, factor: f64) -> Color {
 // ─── Color ramp (CIE L* perceptual) ────────────────────────────────────
 
 fn intensity_color(intensity: f64) -> Color {
-    if intensity < 0.005 {
-        return Color::Rgb(0, 1, 3);
+    if intensity < 0.10 {
+        return Color::Rgb(24, 56, 72);
     }
-    // Alpharius teal ramp — avoids the green/olive mid-range of the old CIE L* curve.
-    // sqrt for perceptual evenness: dim values get more color range.
-    let i = intensity.clamp(0.0, 1.0).sqrt();
-    Color::Rgb(
-        (1.0 + i * 41.0) as u8,  // 1 → 42
-        (2.0 + i * 178.0) as u8, // 2 → 180
-        (3.0 + i * 197.0) as u8, // 3 → 200
-    )
+    if intensity < 0.60 {
+        return Color::Rgb(42, 180, 200);
+    }
+    if intensity < 0.85 {
+        return Color::Rgb(220, 170, 70);
+    }
+    Color::Rgb(240, 110, 90)
 }
 
 fn bg_color() -> Color {
@@ -277,8 +276,8 @@ impl InstrumentPanel {
     ) {
         self.time += dt;
 
-        // Context: cap at 70%
-        self.context_fill = (context_pct as f64 / 70.0).min(1.0);
+        // Context: true 0–100% fill, clamped.
+        self.context_fill = (context_pct as f64 / 100.0).clamp(0.0, 1.0);
 
         // Thinking: only active during inference
         self.thinking_active = agent_active;
@@ -468,7 +467,7 @@ impl InstrumentPanel {
 
         // Row 1 label (only when not fully glitching)
         if rows > 1 {
-            let pct = (self.context_fill * 70.0) as u32;
+            let pct = (self.context_fill * 100.0).round() as u32;
             let label = format!(" {}%", pct);
             let color = intensity_color(self.context_fill);
             for (i, ch) in label.chars().enumerate() {
@@ -803,8 +802,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn intensity_color_floor_is_bg() {
-        assert!(matches!(intensity_color(0.0), Color::Rgb(0, 1, 3)));
+    fn intensity_color_floor_is_dim_teal() {
+        assert!(matches!(intensity_color(0.0), Color::Rgb(24, 56, 72)));
+    }
+
+    #[test]
+    fn context_fill_uses_full_percent_range() {
+        let mut panel = InstrumentPanel::default();
+        panel.update_telemetry(50.0, None, false, "off", None, false, 0.016);
+        assert!((panel.context_fill - 0.5).abs() < 0.001, "context fill should track 50%");
+        panel.update_telemetry(100.0, None, false, "off", None, false, 0.016);
+        assert!((panel.context_fill - 1.0).abs() < 0.001, "context fill should track 100%");
     }
 
     #[test]
