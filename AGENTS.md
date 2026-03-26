@@ -14,3 +14,4 @@ Key points for working on Omegon itself:
 - The `.gitattributes` in this repo declares `merge=union` for `ai/memory/facts.jsonl`
 - The `ai/.gitignore` excludes `memory/*.db` files — only `facts.jsonl` is tracked
 - **Type checking**: `npx tsc --noEmit` must pass before committing TypeScript changes. Run `npm run typecheck` or `npm run check` (typecheck + tests).
+- **Release flow**: `just rc` → `just link` → `just sign` → `just publish`. See `CONTRIBUTING.md` § Release Process for the full lifecycle. Milestones are tracked automatically in `.omegon/milestones.json`.

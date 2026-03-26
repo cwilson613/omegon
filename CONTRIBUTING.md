@@ -200,6 +200,70 @@ Both `pi update` and `bin/deploy` run `git clean -fdx` as part of their pull-and
 
 The only risk scenario: running `pi update` or `bin/deploy` in a separate terminal **while a pi session is active**. Any facts stored in the DB but not yet flushed to JSONL (which happens at session shutdown) would be lost. Normal usage — shutdown session, update, start new session — is completely safe.
 
+## Release Process
+
+Omegon uses a **release candidate** flow. All releases go through RC builds before stable.
+
+### Channels
+
+| Channel | Cadence | Version format | Example |
+|---|---|---|---|
+| **Stable** | When ready | `X.Y.Z` | `0.15.3` |
+| **RC** | Per-feature batch | `X.Y.Z-rc.N` | `0.15.3-rc.2` |
+| **Nightly** | Daily (planned) | `X.Y.Z-nightly.YYYYMMDD` | `0.15.3-nightly.20260326` |
+
+### Commands
+
+| Step | Command | What it does |
+|---|---|---|
+| **Cut RC** | `just rc` | Bump version → test → commit → tag → build → sign → update milestones |
+| **Install locally** | `just link` | Symlink built binary to `$PATH` |
+| **Sign (YubiKey)** | `just sign` | Developer ID + Apple notarization (optional, interactive) |
+| **Ship stable** | `just release` | Strip `-rc.N` → test → commit → tag → build → close milestone → open next cycle |
+| **Publish** | `just publish` | Push + tags → trigger CI → build docs → link → smoke test |
+| **Quick dev build** | `just update` | Pull → build dev-release profile → no version bump |
+
+### RC flow
+
+```
+just rc          # 0.15.2 → 0.15.3-rc.1 (or rc.1 → rc.2)
+just link        # install locally, verify
+# ... test, iterate, fix ...
+just rc          # 0.15.3-rc.2
+just link
+# ... satisfied ...
+just release     # 0.15.3-rc.2 → 0.15.3 (stable)
+just publish     # push to GitHub, trigger CI
+```
+
+### Milestone tracking
+
+`.omegon/milestones.json` is automatically maintained by `just rc` and `just release` via `scripts/milestone-update.sh`. Each milestone tracks:
+
+- **status**: `open` → `rc` → `released`
+- **channel**: `stable` or `nightly`
+- **rc_version / rc_count**: current RC and iteration count
+- **notes**: auto-collected feat/fix/refactor commit subjects
+- **timestamps**: `opened`, `last_rc`, `released`
+
+The `/milestone` TUI command also reads this file for operator-facing release scope management.
+
+### Version identity
+
+The binary's `--version` output includes the git SHA and build date:
+
+```
+omegon 0.15.3-rc.1 (660e1ef 2026-03-26)
+```
+
+The build.rs script computes `OMEGON_NEXT_VERSION` (displayed in the TUI footer):
+- RC build `0.15.3-rc.1` → next milestone is `0.15.3`
+- Stable `0.15.3` → next milestone is `0.15.4`
+
+### Pre-flight checks
+
+`just rc` and `just release` both refuse to run with uncommitted changes in `core/` or `.omegon/milestones.json`. The `just smoke` recipe verifies post-merge invariants (binary works, test count floor, provider count, tool count, key file line counts, no SubprocessBridge).
+
 ## Scaling Notes
 
 This policy is designed for a small team (1–3 contributors) working with agent-assisted development. If the contributor count grows:
