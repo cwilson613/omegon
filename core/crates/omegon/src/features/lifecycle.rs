@@ -19,7 +19,7 @@ use omegon_traits::{
 };
 
 use crate::lifecycle::context::LifecycleContextProvider;
-use crate::lifecycle::{design, spec, types::*};
+use crate::lifecycle::{design, doctor, spec, types::*};
 
 use opsx_core::{JsonFileStore, Lifecycle as OpsxLifecycle, NodeState as OpsxNodeState};
 
@@ -657,6 +657,57 @@ impl LifecycleFeature {
         }
     }
 
+    fn execute_lifecycle_doctor(&self, args: &Value) -> anyhow::Result<ToolResult> {
+        let kinds_filter: Option<std::collections::HashSet<&str>> = args["kinds"]
+            .as_array()
+            .map(|values| values.iter().filter_map(|v| v.as_str()).collect());
+        let node_filter = args["node_id"].as_str();
+
+        let findings = doctor::audit_repo(&self.repo_path);
+        let filtered: Vec<&doctor::AuditFinding> = findings
+            .iter()
+            .filter(|finding| {
+                node_filter.is_none_or(|node_id| finding.node_id == node_id)
+                    && kinds_filter
+                        .as_ref()
+                        .is_none_or(|kinds| kinds.contains(finding.kind.as_str()))
+            })
+            .collect();
+
+        let counts = filtered.iter().fold(serde_json::Map::new(), |mut acc, finding| {
+            let key = finding.kind.as_str().to_string();
+            let next = acc.get(&key).and_then(|v| v.as_u64()).unwrap_or(0) + 1;
+            acc.insert(key, json!(next));
+            acc
+        });
+
+        let details = json!({
+            "findings": filtered.iter().map(|f| json!({
+                "node_id": f.node_id,
+                "title": f.title,
+                "kind": f.kind.as_str(),
+                "detail": f.detail,
+            })).collect::<Vec<_>>(),
+            "counts": counts,
+            "total": filtered.len(),
+        });
+
+        let text = if filtered.is_empty() {
+            "✓ No suspicious lifecycle drift found.".to_string()
+        } else {
+            let mut out = format!("Lifecycle doctor: {} finding(s)\n\n", filtered.len());
+            for f in &filtered {
+                out.push_str(&format!("- {} [{}]\n  {}\n  {}\n", f.node_id, f.kind.as_str(), f.title, f.detail));
+            }
+            out.trim_end().to_string()
+        };
+
+        Ok(ToolResult {
+            content: vec![ContentBlock::Text { text }],
+            details,
+        })
+    }
+
     fn execute_openspec_manage(&self, args: &Value) -> anyhow::Result<ToolResult> {
         let action = args["action"].as_str().unwrap_or("");
 
@@ -851,6 +902,32 @@ impl Feature for LifecycleFeature {
                     "required": ["action"]
                 }),
             },
+            ToolDefinition {
+                name: crate::tool_registry::lifecycle::LIFECYCLE_DOCTOR.into(),
+                label: "lifecycle_doctor".into(),
+                description: "Audit design-tree state for suspicious lifecycle drift. Returns structured findings the harness can act on directly.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "node_id": { "type": "string", "description": "Optional node ID filter" },
+                        "kinds": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "implemented_has_open_questions",
+                                    "resolved_without_questions",
+                                    "seed_without_questions",
+                                    "exploring_without_questions",
+                                    "parent_implemented_with_active_children",
+                                    "question_appears_answered_by_decision"
+                                ]
+                            },
+                            "description": "Optional finding-kind filter"
+                        }
+                    }
+                }),
+            },
         ]
     }
 
@@ -867,6 +944,9 @@ impl Feature for LifecycleFeature {
                 self.execute_design_tree_update(&args)
             }
             crate::tool_registry::lifecycle::OPENSPEC_MANAGE => self.execute_openspec_manage(&args),
+            crate::tool_registry::lifecycle::LIFECYCLE_DOCTOR => {
+                self.execute_lifecycle_doctor(&args)
+            }
             _ => anyhow::bail!("Unknown tool: {tool_name}"),
         }
     }
@@ -1025,6 +1105,7 @@ fn text_result(text: &str) -> ToolResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bus::EventBus;
     use std::fs;
 
     fn setup_test_repo() -> (tempfile::TempDir, PathBuf) {
@@ -1049,10 +1130,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let feature = LifecycleFeature::new(dir.path());
         let tools = feature.tools();
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 4);
         assert!(tools.iter().any(|t| t.name == "design_tree"));
         assert!(tools.iter().any(|t| t.name == "design_tree_update"));
         assert!(tools.iter().any(|t| t.name == "openspec_manage"));
+        assert!(tools.iter().any(|t| t.name == "lifecycle_doctor"));
     }
 
     #[test]
@@ -1220,6 +1302,51 @@ mod tests {
         let result = feature.handle_command("design-unfocus", "");
         assert!(matches!(result, CommandResult::Display(ref s) if s.contains("cleared")));
         assert!(feature.provider.lock().unwrap().focused_node_id().is_none());
+    }
+
+    #[test]
+    fn lifecycle_doctor_returns_structured_findings() {
+        let (_dir, repo) = setup_test_repo();
+        fs::write(
+            repo.join("docs/stale-node.md"),
+            "---\nid: stale-node\ntitle: \"Stale Node\"\nstatus: resolved\ntags: [test]\nopen_questions: []\ndependencies: []\nrelated: []\n---\n\n# Stale Node\n\n## Overview\n\nStale overview.\n",
+        )
+        .unwrap();
+        let feature = LifecycleFeature::new(&repo);
+
+        let result = feature.execute_lifecycle_doctor(&json!({"node_id": "stale-node"})).unwrap();
+        let text = result.content[0].as_text().unwrap();
+        assert!(text.contains("Lifecycle doctor: 1 finding"), "{text}");
+        assert_eq!(result.details["total"].as_u64(), Some(1));
+        assert_eq!(result.details["findings"][0]["node_id"].as_str(), Some("stale-node"));
+        assert_eq!(result.details["findings"][0]["kind"].as_str(), Some("resolved_without_questions"));
+    }
+
+    #[tokio::test]
+    async fn lifecycle_doctor_is_dispatchable_through_event_bus() {
+        let (_dir, repo) = setup_test_repo();
+        fs::write(
+            repo.join("docs/stale-node.md"),
+            "---\nid: stale-node\ntitle: \"Stale Node\"\nstatus: resolved\ntags: [test]\nopen_questions: []\ndependencies: []\nrelated: []\n---\n\n# Stale Node\n\n## Overview\n\nStale overview.\n",
+        )
+        .unwrap();
+
+        let mut bus = EventBus::new();
+        bus.register(Box::new(LifecycleFeature::new(&repo)));
+        bus.finalize();
+
+        let result = bus
+            .execute_tool(
+                crate::tool_registry::lifecycle::LIFECYCLE_DOCTOR,
+                "tc1",
+                json!({"node_id": "stale-node"}),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.details["total"].as_u64(), Some(1));
+        assert_eq!(result.details["findings"][0]["node_id"].as_str(), Some("stale-node"));
     }
 
     #[test]

@@ -77,6 +77,7 @@ pub mod lifecycle {
     pub const DESIGN_TREE: &str = "design_tree";
     pub const DESIGN_TREE_UPDATE: &str = "design_tree_update";
     pub const OPENSPEC_MANAGE: &str = "openspec_manage";
+    pub const LIFECYCLE_DOCTOR: &str = "lifecycle_doctor";
 }
 
 /// Cleave (decomposition) — owned by `features::cleave`
@@ -131,7 +132,7 @@ pub mod persona {
 /// **Maintenance rule**: every `pub const` above MUST appear here.
 /// The `registry_count_is_current` test will catch omissions.
 /// Number of statically registered tools (for splash screen display).
-pub const TOOL_COUNT: usize = 49;
+pub const TOOL_COUNT: usize = 50;
 
 pub fn all_static_names() -> Vec<&'static str> {
     vec![
@@ -173,10 +174,11 @@ pub fn all_static_names() -> Vec<&'static str> {
         memory::MEMORY_COMPACT,
         memory::MEMORY_SEARCH_ARCHIVE,
         memory::MEMORY_INGEST_LIFECYCLE,
-        // lifecycle (3)
+        // lifecycle (4)
         lifecycle::DESIGN_TREE,
         lifecycle::DESIGN_TREE_UPDATE,
         lifecycle::OPENSPEC_MANAGE,
+        lifecycle::LIFECYCLE_DOCTOR,
         // cleave (2)
         cleave::CLEAVE_ASSESS,
         cleave::CLEAVE_RUN,
@@ -199,7 +201,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         persona::SWITCH_TONE,
         persona::LIST_PERSONAS,
     ]
-    // Total: 13+1+1+2+3+12+3+2+3+3+1+1+1+3 = 49
+    // Total: 13+1+1+2+3+12+4+2+3+3+1+1+1+3 = 50
 }
 
 #[cfg(test)]
