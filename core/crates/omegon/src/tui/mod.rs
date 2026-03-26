@@ -1546,11 +1546,25 @@ impl App {
                         .right_aligned(),
                 );
 
-            self.editor.textarea.set_block(editor_block);
             let editor_rect = chunks[1];
-            frame.render_widget(&self.editor.textarea, editor_rect);
+            let content = if self.editor.is_empty() {
+                Line::from(Span::styled(
+                    "Ask anything, or type / for commands",
+                    Style::default().fg(t.dim()),
+                ))
+            } else {
+                Line::from(Span::styled(
+                    self.editor.wrapped_text(),
+                    Style::default().fg(t.fg()),
+                ))
+            };
+            let editor_widget = Paragraph::new(content)
+                .style(Style::default().bg(t.surface_bg()))
+                .block(editor_block)
+                .wrap(ratatui::widgets::Wrap { trim: false });
+            frame.render_widget(editor_widget, editor_rect);
             if !self.agent_active {
-                let (cx, cy) = self.editor.raw_cursor_screen_position(editor_rect);
+                let (cx, cy) = self.editor.cursor_screen_position(editor_rect);
                 frame.set_cursor_position(ratatui::layout::Position { x: cx, y: cy });
             }
         }

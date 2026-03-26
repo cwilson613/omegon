@@ -1154,8 +1154,8 @@ mod tests {
         let (area, mut buf) = make_buf(40, 5);
         seg.render(area, &mut buf, &Alpharius);
         let text = buf_text(&buf, area);
-        assert!(text.contains("YOU"), "should have prompt label");
         assert!(text.contains("hello world"), "should have text");
+        assert!(text.contains("╭") || text.contains("╰") || text.contains("│"), "should render as a bordered card: {text}");
     }
 
     #[test]

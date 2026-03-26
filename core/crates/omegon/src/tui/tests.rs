@@ -75,6 +75,19 @@ fn editor_visual_line_count_counts_newlines_and_wraps() {
 }
 
 #[test]
+fn editor_cursor_screen_position_tracks_wrapped_backspace() {
+    let mut editor = crate::tui::editor::Editor::new();
+    editor.set_text("123456789");
+    let area = Rect { x: 0, y: 0, width: 6, height: 6 };
+    editor.move_end();
+    let before = editor.cursor_screen_position(area);
+    editor.backspace();
+    let after = editor.cursor_screen_position(area);
+    assert!(after.0 <= before.0, "backspace should not leave the caret stranded to the right");
+    assert!(after.1 <= before.1, "backspace should move within wrapped layout");
+}
+
+#[test]
 fn editor_height_expands_for_wrapped_input() {
     let mut editor = crate::tui::editor::Editor::new();
     editor.set_text("1234567890abcdefghij");
