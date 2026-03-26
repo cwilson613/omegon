@@ -271,6 +271,10 @@ enum Commands {
         #[arg(long)]
         latest_rc: bool,
     },
+
+    /// Audit design-tree state for suspicious lifecycle drift.
+    #[command(hide = true)]
+    Doctor,
 }
 
 #[derive(Subcommand)]
@@ -439,6 +443,7 @@ async fn main() -> anyhow::Result<()> {
                 switch::interactive_picker().await
             }
         }
+        Some(Commands::Doctor) => run_doctor_command(&cli).await,
         None => {
             // No subcommand: interactive if no --prompt, headless if --prompt given
             if cli.smoke {
@@ -574,6 +579,25 @@ async fn run_cleave_command(
     // Exit with error if any children failed
     if failed > 0 {
         std::process::exit(1);
+    }
+    Ok(())
+}
+
+async fn run_doctor_command(cli: &Cli) -> anyhow::Result<()> {
+    let cwd = std::fs::canonicalize(&cli.cwd)?;
+    let repo_root = setup::find_project_root(&cwd);
+    let findings = lifecycle::doctor::audit_repo(&repo_root);
+
+    if findings.is_empty() {
+        println!("✓ No suspicious lifecycle drift found.");
+        return Ok(());
+    }
+
+    println!("Lifecycle doctor: {} finding(s)\n", findings.len());
+    for f in findings {
+        println!("- {} [{}]", f.node_id, f.kind.as_str());
+        println!("  {}", f.title);
+        println!("  {}", f.detail);
     }
     Ok(())
 }

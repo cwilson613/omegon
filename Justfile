@@ -131,6 +131,11 @@ rc:
     # Update milestone tracking
     ./scripts/milestone-update.sh rc "$NEW_VERSION"
 
+    # Audit lifecycle drift before cutting the RC
+    echo "Lifecycle audit..."
+    cd core && cargo run --quiet -p omegon -- doctor
+    cd ..
+
     # Test first (faster than build, catches errors early)
     echo "Testing..."
     cd core && cargo test -p omegon 2>&1 | tail -3

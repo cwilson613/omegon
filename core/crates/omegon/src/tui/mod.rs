@@ -1018,7 +1018,7 @@ impl App {
             [] | [""] => {
                 let milestones = load_milestones(&milestone_file);
                 if milestones.is_empty() {
-                    return SlashResult::Display("No milestones defined.\n\nUsage:\n  /milestone v0.15.0 add <node-id>\n  /milestone v0.15.0 status\n  /milestone v0.15.0 freeze".into());
+                    return SlashResult::Display("No milestones defined.\n\nUsage:\n  /milestone doctor\n  /milestone v0.15.0 add <node-id>\n  /milestone v0.15.0 status\n  /milestone v0.15.0 freeze".into());
                 }
                 let mut out = String::new();
                 for (name, ms) in &milestones {
@@ -1029,6 +1029,20 @@ impl App {
                     }
                 }
                 SlashResult::Display(out.trim_end().to_string())
+            }
+            // /milestone doctor — lifecycle drift audit
+            ["doctor"] => {
+                let repo_root = crate::setup::find_project_root(self.cwd());
+                let findings = crate::lifecycle::doctor::audit_repo(&repo_root);
+                if findings.is_empty() {
+                    SlashResult::Display("✓ No suspicious lifecycle drift found.".into())
+                } else {
+                    let mut out = format!("Lifecycle doctor: {} finding(s)\n\n", findings.len());
+                    for f in findings {
+                        out.push_str(&format!("• {} [{}]\n  {}\n  {}\n\n", f.node_id, f.kind.as_str(), f.title, f.detail));
+                    }
+                    SlashResult::Display(out.trim_end().to_string())
+                }
             }
             // /milestone <version> — show specific milestone
             [version] => {
@@ -1131,7 +1145,7 @@ impl App {
                 }
             }
             _ => {
-                SlashResult::Display("Usage:\n  /milestone                        — list all\n  /milestone v0.15.0                — show scope\n  /milestone v0.15.0 add <node-id>  — add node\n  /milestone v0.15.0 remove <node>  — remove node\n  /milestone v0.15.0 freeze         — lock scope\n  /milestone v0.15.0 status         — readiness report".into())
+                SlashResult::Display("Usage:\n  /milestone                        — list all\n  /milestone doctor                 — lifecycle drift audit\n  /milestone v0.15.0                — show scope\n  /milestone v0.15.0 add <node-id>  — add node\n  /milestone v0.15.0 remove <node>  — remove node\n  /milestone v0.15.0 freeze         — lock scope\n  /milestone v0.15.0 status         — readiness report".into())
             }
         }
     }

@@ -10,6 +10,7 @@
 pub mod capture;
 pub mod context;
 pub mod design;
+pub mod doctor;
 pub mod spec;
 pub mod types;
 // pub mod decompose; // TODO: decomposition engine (assess, fork, harvest, merge)

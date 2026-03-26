@@ -1,0 +1,171 @@
+{
+  "version": 1,
+  "nodes": [
+    {
+      "id": "omegon-session",
+      "title": "Omegon Session — provider-agnostic session identity and resumption",
+      "state": "implemented",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-03-26T12:15:38Z",
+      "updated_at": "2026-03-26T12:16:18Z"
+    },
+    {
+      "id": "v0152-tui-fixes",
+      "title": "v0.15.2 TUI fixes — borders, expansion, tool formatting",
+      "state": "implemented",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-03-26T12:20:06Z",
+      "updated_at": "2026-03-26T12:20:24Z"
+    },
+    {
+      "id": "tool-card-interaction",
+      "title": "Tool card selection, hover, and expand — keyboard + mouse navigation",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-03-26T12:27:14Z",
+      "updated_at": "2026-03-26T12:27:14Z"
+    }
+  ],
+  "changes": [],
+  "milestones": [],
+  "audit_log": [
+    {
+      "timestamp": "2026-03-26T12:15:38Z",
+      "entity_type": "node",
+      "entity_id": "omegon-session",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-03-26T12:15:38Z",
+      "entity_type": "node",
+      "entity_id": "omegon-session",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "bootstrap sync from markdown",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-03-26T12:15:45Z",
+      "entity_type": "node",
+      "entity_id": "omegon-session",
+      "from_state": "exploring",
+      "to_state": "resolved",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-03-26T12:15:51Z",
+      "entity_type": "node",
+      "entity_id": "omegon-session",
+      "from_state": "resolved",
+      "to_state": "decided",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-03-26T12:16:12Z",
+      "entity_type": "node",
+      "entity_id": "omegon-session",
+      "from_state": "decided",
+      "to_state": "implementing",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-03-26T12:16:18Z",
+      "entity_type": "node",
+      "entity_id": "omegon-session",
+      "from_state": "implementing",
+      "to_state": "implemented",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-03-26T12:20:06Z",
+      "entity_type": "node",
+      "entity_id": "v0152-tui-fixes",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-03-26T12:20:06Z",
+      "entity_type": "node",
+      "entity_id": "v0152-tui-fixes",
+      "from_state": "seed",
+      "to_state": "resolved",
+      "reason": "bootstrap sync from markdown",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-03-26T12:20:06Z",
+      "entity_type": "node",
+      "entity_id": "v0152-tui-fixes",
+      "from_state": "resolved",
+      "to_state": "decided",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-03-26T12:20:14Z",
+      "entity_type": "node",
+      "entity_id": "v0152-tui-fixes",
+      "from_state": "decided",
+      "to_state": "implementing",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-03-26T12:20:24Z",
+      "entity_type": "node",
+      "entity_id": "v0152-tui-fixes",
+      "from_state": "implementing",
+      "to_state": "implemented",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-03-26T12:27:14Z",
+      "entity_type": "node",
+      "entity_id": "tool-card-interaction",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-03-26T12:27:14Z",
+      "entity_type": "node",
+      "entity_id": "tool-card-interaction",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": null,
+      "forced": false
+    }
+  ]
+}

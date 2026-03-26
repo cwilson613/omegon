@@ -1,11 +1,13 @@
 ---
 id: omegon-session
-title: Omegon Session — provider-agnostic session identity and resumption
-status: exploring
-related: [omega, model-degradation]
+title: "Omegon Session — provider-agnostic session identity and resumption"
+status: implemented
 tags: [architecture, orchestration, session, core]
-open_questions:
-  - Should session identity be tied to the git branch (natural boundary for work streams) or independent (operator can switch branches mid-session)?
+open_questions: []
+dependencies: []
+related:
+  - omega
+  - model-degradation
 issue_type: feature
 priority: 2
 ---
@@ -55,58 +57,65 @@ Git worktrees (`git worktree add`) create local filesystem directories that shar
 ### Decision: Manifest is an index over existing artifacts, not a copy
 
 **Status:** decided
+
 **Rationale:** The manifest points to state that lives in durable systems (memory facts by ID, design node by ID, openspec change by name, git branch by ref). It never duplicates their content — it says "the operator was focused on node X" not "here is the full node X document". This keeps the manifest small and avoids staleness.
 
 ### Decision: Token budget: minimal — plain summary facts, no formatting overhead
 
 **Status:** decided
+
 **Rationale:** The session resume context should be a tight plaintext block — goals, active work pointers, next steps. No markdown headers, no bullet hierarchies, no decorative structure. Target: under 1K tokens for the resume injection. The existing systems (memory, design tree focus, openspec) already inject their own context — the manifest only needs to bridge the gap between "what those systems know" and "what the operator was doing".
 
 ### Decision: Manifest lives in git as .pi/session.json — portable by default
 
 **Status:** decided
+
 **Rationale:** All other durable state that travels between machines already lives in git (facts.jsonl, design docs, openspec). The session manifest should follow the same pattern. A single .pi/session.json file committed at exit. No accumulation — episodic narratives handle history. Cross-machine resume works via git pull. Staleness is acceptable because the manifest is an accelerant, not the source of truth.
 
 ### Decision: Minimal manifest: ~400 bytes JSON, ~80 token resume injection
 
 **Status:** decided
+
 **Rationale:** The manifest captures: session ID, timestamp, cwd, branch, dirty count, episodic summary (1 line), focused design node ID, active work item IDs, this-session commit subjects, next steps, and fact counts. All references are IDs/names — no content duplication. The resume injection is a plain text block under 100 tokens that bridges temporal context. The heavy lifting is done by memory injection and design tree focus which already have their own budgets.
 
 ### Decision: Session is repo-scoped, not branch-scoped; cleave is one session with child executions
 
 **Status:** decided
+
 **Rationale:** A session is one operator sitting down to work in one repo. Switching branches mid-session doesn't start a new session — the operator is still pursuing the same goal. Cleave spawning 4 worktrees is one session with 4 child executions, not 5 sessions. The manifest records the branch at exit and the commits made, but the session identity is the (repo, timestamp, operator) tuple. This aligns with how episodic narratives already work — one narrative per pi invocation per cwd.
 
 ### Decision: Manifest supplements pi conversation — operates at a higher layer
 
 **Status:** decided
+
 **Rationale:** Pi's conversation history is the provider-facing message stream. The session manifest operates above it — it's injected into the conversation as context (like memory facts are) but is not part of the conversation itself. A resumed session starts a fresh pi conversation with the manifest injected as a system message. This means resume works even when switching providers between sessions.
 
 ### Decision: Automatic detection with opt-out — resume by default, /fresh to skip
 
 **Status:** exploring
+
 **Rationale:** If .pi/session.json exists and is recent (within some staleness window), inject it automatically on startup. The operator sees a brief "Resuming session from..." notification. If they want a clean start, /fresh clears the manifest. This mirrors how memory injection works — automatic, silent, helpful. No prompt asking "resume? y/n" — that adds friction to every startup. Open question: what's the staleness window? A 2-week-old manifest from a different branch is probably noise, not signal.
 
 ### Decision: Session manifest is the unit of handoff for omega orchestration
 
 **Status:** exploring
+
 **Rationale:** When omega coordinates multiple agents, one agent's exit manifest becomes another's resume context. The manifest is already provider-agnostic and git-portable — it's a natural message format for inter-agent handoff. Cleave child processes are a local prototype: they receive a prompt (analogous to a manifest) and produce results that get merged. The manifest schema should be designed to work both as a file (.pi/session.json) and as a message payload in an omega coordination protocol. Not blocking Level 1 on this — just ensuring the schema doesn't preclude it.
 
 ### Decision: Auto-resume with staleness: same branch = resume, different branch or >7d = skip
 
 **Status:** decided
+
 **Rationale:** If .pi/session.json exists, the current branch matches the manifest's branch, and the timestamp is within 7 days — inject automatically. Different branch suggests the operator moved on. Over 7 days suggests stale context that memory facts already cover better. /fresh command to explicitly skip. No interactive prompt — just a brief notification showing what was resumed.
 
 ### Decision: Worktree references in manifest are informational, not required for resume
 
 **Status:** decided
+
 **Rationale:** The manifest may note that cleave worktrees were active, but resume does not depend on them existing. Worktrees are local-only (symlinks into .git/worktrees/). Cross-machine resume gracefully degrades — if worktrees are gone, merged results are in git history. Distributed execution isolation is an omega concern, not a session concern.
 
 ### Decision: Manifest schema designed as both file and message — omega-ready without omega dependency
 
 **Status:** decided
+
 **Rationale:** The manifest is plain JSON with no filesystem assumptions (paths are context, not requirements). It works as .pi/session.json for local resume and as a payload in a future coordination protocol. Local-only state (worktrees, embedding vectors) is informational — resume never depends on it. This means Level 1 implementation doesn't need to anticipate omega's protocol, just avoid precluding it.
-
-## Open Questions
-
-- Should session identity be tied to the git branch (natural boundary for work streams) or independent (operator can switch branches mid-session)?
