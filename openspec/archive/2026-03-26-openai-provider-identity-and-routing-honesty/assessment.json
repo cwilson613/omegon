@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "changeName": "openai-provider-identity-and-routing-honesty",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-26T11:30:45.977Z",
+  "summary": "Manually verified implementation against providers/openai-family-routing after running cargo test -p omegon and cargo check -p omegon. OpenAI API auth is distinct from ChatGPT/Codex OAuth, GPT-family requests can resolve to openai-codex honestly when that is the viable OpenAI-family route, and operator-facing bootstrap/TUI/runtime surfaces now show concrete provider and auth method.",
+  "snapshot": {
+    "gitHead": "dc1f3aa97941b97b5de8db9c3a47781b1d6b4d23",
+    "fingerprint": "1338daf5d4fd2b457d37c05aa2c827d3a6890547467cb18b9d47bab094b5aa0b",
+    "dirty": true,
+    "scopedPaths": [
+      "core/crates/omegon/src/auth.rs",
+      "core/crates/omegon/src/features/model_budget.rs",
+      "core/crates/omegon/src/main.rs",
+      "core/crates/omegon/src/providers.rs",
+      "core/crates/omegon/src/routing.rs",
+      "core/crates/omegon/src/tui/mod.rs"
+    ],
+    "files": [
+      {
+        "path": "core/crates/omegon/src/auth.rs",
+        "exists": true,
+        "size": 42127,
+        "sha256": "6dc060ff26ff0d8734d5720b24117d87c60415fb580446fc563fa81390250610"
+      },
+      {
+        "path": "core/crates/omegon/src/features/model_budget.rs",
+        "exists": true,
+        "size": 17536,
+        "sha256": "b8d43f9e9716bfdc7af94b31c8523aae319d6592de9ce59f85c2a9b74c1d07b3"
+      },
+      {
+        "path": "core/crates/omegon/src/main.rs",
+        "exists": true,
+        "size": 76274,
+        "sha256": "ffa5eaea8f55ad5f179a53cb649b11da0d69d34e5a90105f0774da01950ec73a"
+      },
+      {
+        "path": "core/crates/omegon/src/providers.rs",
+        "exists": true,
+        "size": 86947,
+        "sha256": "e4877670ecd19d359065fb903bcc4b7fc4cf018cfa81f145a343fb2507e244fa"
+      },
+      {
+        "path": "core/crates/omegon/src/routing.rs",
+        "exists": true,
+        "size": 15752,
+        "sha256": "c917a117e881f6028b17fc95f3fc8ad95cfbfbe3991a5ad27a7308c65183f868"
+      },
+      {
+        "path": "core/crates/omegon/src/tui/mod.rs",
+        "exists": true,
+        "size": 189951,
+        "sha256": "e9049308a52b03750be4e35fa13ed84b509408c59443251e1c7ef24c7c648c37"
+      },
+      {
+        "path": "openspec/changes/openai-provider-identity-and-routing-honesty/design.md",
+        "exists": true,
+        "size": 5314,
+        "sha256": "5b0c357f725ceba932081042e9207cf787af113a8051770ddd6d6c9dc5122556"
+      },
+      {
+        "path": "openspec/changes/openai-provider-identity-and-routing-honesty/proposal.md",
+        "exists": true,
+        "size": 887,
+        "sha256": "fa43e501388c0c005eb30368fd0f51d88420ea4630770c422e9b3d0ba2176f4c"
+      },
+      {
+        "path": "openspec/changes/openai-provider-identity-and-routing-honesty/specs/providers/openai-family-routing.md",
+        "exists": true,
+        "size": 3407,
+        "sha256": "dc460c6a7d00279af8852719238312154174bfdaeda0469348ffa6b9073b1b1f"
+      },
+      {
+        "path": "openspec/changes/openai-provider-identity-and-routing-honesty/tasks.md",
+        "exists": true,
+        "size": 2341,
+        "sha256": "1c4f6e4454515745987723129e408dc6772ba772ac36c9bd063fa486a2e4b46c"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "core/crates/omegon/src/auth.rs",
+      "core/crates/omegon/src/providers.rs",
+      "core/crates/omegon/src/routing.rs",
+      "core/crates/omegon/src/features/model_budget.rs",
+      "core/crates/omegon/src/main.rs",
+      "core/crates/omegon/src/tui/mod.rs",
+      "core/crates/omegon/src/tui/footer.rs",
+      "core/crates/omegon/src/tui/tests.rs",
+      "core/crates/omegon/src/tui/snapshots/omegon__tui__snapshot_tests__snapshot_bootstrap_full.snap",
+      "core/crates/omegon/src/tui/snapshots/omegon__tui__snapshot_tests__snapshot_footer_default.snap",
+      "core/crates/omegon/src/tui/snapshots/omegon__tui__snapshot_tests__snapshot_footer_with_model_and_context.snap",
+      "core/crates/omegon/src/tui/snapshots/omegon__tui__snapshot_tests__snapshot_footer_with_persona_and_mcp.snap"
+    ],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}

@@ -60,19 +60,19 @@ pub static PROVIDERS: &[ProviderCredential] = &[
     },
     ProviderCredential {
         id: "openai",
-        auth_key: "openai-codex",
-        display_name: "OpenAI (ChatGPT)",
+        auth_key: "openai",
+        display_name: "OpenAI API",
         env_vars: &["OPENAI_API_KEY"],
-        auth_method: AuthMethod::OAuth,
-        description: "OAuth — ChatGPT Plus/Pro subscription",
+        auth_method: AuthMethod::ApiKey,
+        description: "API key — GPT models via api.openai.com",
     },
     ProviderCredential {
         id: "openai-codex",
         auth_key: "openai-codex",
-        display_name: "OpenAI Codex (ChatGPT)",
+        display_name: "ChatGPT/Codex",
         env_vars: &["CHATGPT_OAUTH_TOKEN"],
         auth_method: AuthMethod::OAuth,
-        description: "ChatGPT Pro/Plus OAuth — free models available",
+        description: "OAuth — ChatGPT Plus/Pro subscription",
     },
     // ── OpenAI-compatible inference providers ───────────────────────
     ProviderCredential {
@@ -325,13 +325,9 @@ pub fn write_credentials(provider: &str, creds: &OAuthCredentials) -> anyhow::Re
 pub async fn probe_all_providers() -> AuthStatus {
     let mut providers = Vec::new();
 
-    // Probe Anthropic
-    let anthropic_info = probe_provider("anthropic").await;
-    providers.push(anthropic_info);
-
-    // Probe OpenAI
-    let openai_info = probe_provider("openai").await;
-    providers.push(openai_info);
+    for provider in ["anthropic", "openai", "openai-codex"] {
+        providers.push(probe_provider(provider).await);
+    }
 
     // Probe OpenRouter (only show if configured — it's optional)
     let openrouter_info = probe_provider("openrouter").await;
@@ -359,24 +355,19 @@ pub async fn probe_all_providers() -> AuthStatus {
 /// Probe a single provider for authentication status.
 async fn probe_provider(provider: &str) -> ProviderInfo {
     // Check environment variables first
-    let env_keys: &[&str] = match provider {
-        "anthropic" => &["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"],
-        "openai" => &["OPENAI_API_KEY"],
-        "openrouter" => &["OPENROUTER_API_KEY"],
-        _ => &[],
-    };
+    let env_keys = provider_env_vars(provider);
 
     for key in env_keys {
-        if let Ok(val) = std::env::var(key) {
-            if !val.is_empty() {
-                let is_oauth = key.contains("OAUTH");
-                return ProviderInfo {
-                    name: provider.to_string(),
-                    status: ProviderAuthStatus::Authenticated,
-                    is_oauth,
-                    details: Some(format!("env:{}", key)),
-                };
-            }
+        if let Ok(val) = std::env::var(key)
+            && !val.is_empty()
+        {
+            let is_oauth = key.contains("OAUTH");
+            return ProviderInfo {
+                name: provider.to_string(),
+                status: ProviderAuthStatus::Authenticated,
+                is_oauth,
+                details: Some(format!("env:{}", key)),
+            };
         }
     }
 
@@ -441,10 +432,11 @@ pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
     let env_vars = provider_env_vars(provider);
 
     // 1. Env vars first (not OAuth)
-    for key in env_vars {
-        if *key == "ANTHROPIC_OAUTH_TOKEN" {
-            continue;
-        } // handled separately
+    for key in env_vars
+        .iter()
+        .copied()
+        .filter(|key| !key.contains("OAUTH"))
+    {
         if let Ok(val) = std::env::var(key)
             && !val.is_empty()
         {
@@ -452,9 +444,9 @@ pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
         }
     }
 
-    // Check OAuth token env vars (e.g. ANTHROPIC_OAUTH_TOKEN)
-    if env_vars.contains(&"ANTHROPIC_OAUTH_TOKEN") {
-        if let Ok(val) = std::env::var("ANTHROPIC_OAUTH_TOKEN")
+    // Check OAuth token env vars
+    for key in env_vars.iter().copied().filter(|key| key.contains("OAUTH")) {
+        if let Ok(val) = std::env::var(key)
             && !val.is_empty()
         {
             return Some((val, true));
@@ -1007,7 +999,14 @@ pub fn auth_status_to_provider_statuses(status: &AuthStatus) -> Vec<ProviderStat
         .map(|p| ProviderStatus {
             name: p.name.clone(),
             authenticated: p.status == ProviderAuthStatus::Authenticated,
-            auth_method: p.details.clone(),
+            auth_method: if matches!(
+                p.status,
+                ProviderAuthStatus::Authenticated | ProviderAuthStatus::Expired
+            ) {
+                Some(if p.is_oauth { "oauth" } else { "api-key" }.to_string())
+            } else {
+                None
+            },
             model: None,
         })
         .collect()
@@ -1067,10 +1066,19 @@ mod tests {
         assert_eq!(urlencoding_encode("a:b"), "a%3Ab");
     }
 
+    #[test]
+    fn openai_and_chatgpt_credentials_are_distinct() {
+        let openai = provider_by_id("openai").expect("openai provider");
+        let codex = provider_by_id("openai-codex").expect("openai-codex provider");
+        assert_eq!(openai.auth_key, "openai");
+        assert_eq!(openai.auth_method, AuthMethod::ApiKey);
+        assert_eq!(codex.auth_key, "openai-codex");
+        assert_eq!(codex.auth_method, AuthMethod::OAuth);
+    }
+
     #[tokio::test]
     async fn probe_all_providers_returns_auth_status() {
         let status = probe_all_providers().await;
-        // Should always have at least anthropic and openai entries
         assert!(!status.providers.is_empty(), "should have provider entries");
         assert!(
             status.providers.iter().any(|p| p.name == "anthropic"),
@@ -1078,7 +1086,11 @@ mod tests {
         );
         assert!(
             status.providers.iter().any(|p| p.name == "openai"),
-            "should probe openai"
+            "should probe openai api"
+        );
+        assert!(
+            status.providers.iter().any(|p| p.name == "openai-codex"),
+            "should probe chatgpt/codex"
         );
     }
 
@@ -1089,7 +1101,7 @@ mod tests {
                 name: "anthropic".into(),
                 status: ProviderAuthStatus::Authenticated,
                 is_oauth: true,
-                details: Some("oauth".into()),
+                details: Some("stored".into()),
             }],
             vault: vec![],
             secrets: vec![],
@@ -1099,6 +1111,7 @@ mod tests {
         assert_eq!(converted.len(), 1);
         assert_eq!(converted[0].name, "anthropic");
         assert!(converted[0].authenticated);
+        assert_eq!(converted[0].auth_method.as_deref(), Some("oauth"));
     }
 
     // ── Credential resolution edge cases ────────────────────────────────

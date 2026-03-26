@@ -169,9 +169,9 @@ struct Cli {
 enum AuthAction {
     /// Show authentication status for all providers.
     Status,
-    /// Log in to a provider via OAuth.
+    /// Log in to a provider (OAuth or API key depending on provider).
     Login {
-        /// Provider to log in to (anthropic or openai). Default: anthropic.
+        /// Provider to log in to (anthropic, openai, or openai-codex). Default: anthropic.
         #[arg(default_value = "anthropic")]
         provider: String,
     },
@@ -196,12 +196,12 @@ enum Commands {
         action: AuthAction,
     },
 
-    /// Log in to a provider via OAuth. Defaults to Anthropic.
-    /// Usage: omegon-agent login [anthropic|openai]
+    /// Log in to a provider. Defaults to Anthropic.
+    /// Usage: omegon-agent login [anthropic|openai|openai-codex]
     /// DEPRECATED: Use `omegon auth login` instead.
     #[command(hide = true)]
     Login {
-        /// Provider to log in to (anthropic or openai). Default: anthropic.
+        /// Provider to log in to (anthropic, openai, or openai-codex). Default: anthropic.
         #[arg(default_value = "anthropic")]
         provider: String,
     },
@@ -589,6 +589,21 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     // ─── Shared state (created early so features can reference it) ────
     let shared_settings = settings::shared(&cli.model);
 
+    // Load project profile → apply to settings (model, thinking, max_turns)
+    let profile = settings::Profile::load(&cli.cwd);
+    if let Ok(mut s) = shared_settings.lock() {
+        profile.apply_to(&mut s);
+        // CLI flags override profile
+        if cli.max_turns != 50 {
+            // 50 is the default — only override if explicitly set
+            s.max_turns = cli.max_turns;
+        }
+        tracing::info!(
+            model = %s.model, thinking = %s.thinking.as_str(),
+            max_turns = s.max_turns, "settings initialized from profile"
+        );
+    }
+
     // ─── Shared setup ───────────────────────────────────────────────────
     // Default: resume most recent session. --fresh overrides. --resume <id> pins a specific one.
     let resume: Option<Option<&str>> = if cli.fresh {
@@ -603,8 +618,24 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     // ─── LLM provider ──────────────────────────────────────────────────
     // Native Rust clients by default. --bridge flag forces the Node.js subprocess.
     // ─── LLM provider (native Rust clients only) ─────────────────────
+    let requested_start_model = shared_settings
+        .lock()
+        .ok()
+        .map(|s| s.model.clone())
+        .unwrap_or_else(|| cli.model.clone());
+    let resolved_cli_model = providers::resolve_execution_model_spec(&requested_start_model)
+        .await
+        .unwrap_or_else(|| requested_start_model.clone());
+    if resolved_cli_model != requested_start_model {
+        tracing::info!(requested = %requested_start_model, resolved = %resolved_cli_model, "resolved startup model to executable provider");
+        if let Ok(mut s) = shared_settings.lock() {
+            s.set_model(&resolved_cli_model);
+        }
+    }
+
     let mut provider_connected = true;
-    let bridge: Box<dyn LlmBridge> = match providers::auto_detect_bridge(&cli.model).await {
+    let bridge: Box<dyn LlmBridge> = match providers::auto_detect_bridge(&resolved_cli_model).await
+    {
         Some(native) => {
             tracing::info!("using native LLM provider");
             native
@@ -637,31 +668,21 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
 
     // ─── Shared state ─────────────────────────────────────────────────
     let shared_cancel: tui::SharedCancel = std::sync::Arc::new(std::sync::Mutex::new(None));
-    // Load project profile → apply to settings (model, thinking, max_turns)
-    let profile = settings::Profile::load(&agent.cwd);
-    if let Ok(mut s) = shared_settings.lock() {
-        profile.apply_to(&mut s);
-        // CLI flags override profile
-        if cli.max_turns != 50 {
-            // 50 is the default — only override if explicitly set
-            s.max_turns = cli.max_turns;
-        }
-        tracing::info!(
-            model = %s.model, thinking = %s.thinking.as_str(),
-            max_turns = s.max_turns, "settings initialized from profile"
-        );
-    }
 
     // ─── Probe provider for authoritative model limits ──────────────
     // The route matrix is a static fallback. The /v1/models endpoint
     // returns the real context window for the selected model.
     {
-        let model_id = cli
-            .model
+        let selected_model = shared_settings
+            .lock()
+            .ok()
+            .map(|s| s.model.clone())
+            .unwrap_or_else(|| resolved_cli_model.clone());
+        let model_id = selected_model
             .split_once(':')
             .map(|(_, model)| model)
-            .unwrap_or(&cli.model);
-        let provider = crate::providers::infer_provider_id(&cli.model);
+            .unwrap_or(&selected_model);
+        let provider = crate::providers::infer_provider_id(&selected_model);
         if provider == "anthropic" {
             if let Some(limits) = auth::probe_anthropic_model_limits(model_id).await {
                 if let Ok(mut s) = shared_settings.lock() {
@@ -680,9 +701,12 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         }
     }
 
-    let is_oauth =
-        providers::resolve_api_key_sync(&crate::providers::infer_provider_id(&cli.model))
-            .is_some_and(|(_, oauth)| oauth);
+    let is_oauth = shared_settings
+        .lock()
+        .ok()
+        .map(|s| crate::providers::infer_provider_id(&s.model))
+        .and_then(|provider| providers::resolve_api_key_sync(&provider))
+        .is_some_and(|(_, oauth)| oauth);
 
     // ─── Apply CLI overrides ──────────────────────────────────────────
     if let Some(ref class_str) = cli.context_class {
@@ -774,21 +798,41 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             tui::TuiCommand::SetModel(model) => {
                 tracing::info!(model = %model, "model switched via /model command");
 
+                let requested_model = model.clone();
+                let effective_model = providers::resolve_execution_model_spec(&requested_model)
+                    .await
+                    .unwrap_or_else(|| requested_model.clone());
+
                 // Detect provider change — swap bridge if needed
-                let old_provider = shared_settings
+                let (old_model, old_provider) = shared_settings
                     .lock()
                     .ok()
-                    .map(|s| crate::providers::infer_provider_id(&s.model))
-                    .unwrap_or_default();
-                let new_provider = crate::providers::infer_provider_id(&model);
+                    .map(|s| {
+                        (
+                            s.model.clone(),
+                            crate::providers::infer_provider_id(&s.model),
+                        )
+                    })
+                    .unwrap_or_else(|| (String::new(), String::new()));
+                let new_provider = crate::providers::infer_provider_id(&effective_model);
 
                 if let Ok(mut s) = shared_settings.lock() {
-                    s.model = model.clone();
-                    s.context_window = settings::Settings::new(&s.model).context_window;
+                    s.set_model(&effective_model);
                     // Persist to project profile
                     let mut profile = settings::Profile::load(&agent.cwd);
                     profile.capture_from(&s);
                     let _ = profile.save(&agent.cwd);
+                }
+
+                if effective_model != requested_model {
+                    let provider_label = crate::auth::provider_by_id(&new_provider)
+                        .map(|p| p.display_name)
+                        .unwrap_or(new_provider.as_str());
+                    let _ = events_tx.send(AgentEvent::SystemNotification {
+                        message: format!(
+                            "Requested {requested_model}; using executable route {effective_model} via {provider_label}."
+                        ),
+                    });
                 }
 
                 // If provider changed, re-detect and hot-swap the bridge
@@ -798,7 +842,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                         "provider changed — re-detecting bridge"
                     );
                     let bridge_clone = bridge.clone();
-                    let model_clone = model.clone();
+                    let model_clone = effective_model.clone();
                     let events_clone = events_tx.clone();
                     let settings_clone = shared_settings.clone();
                     tokio::spawn(async move {
@@ -810,21 +854,37 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                             if let Ok(mut s) = settings_clone.lock() {
                                 s.provider_connected = true;
                             }
+                            let provider_label = crate::auth::provider_by_id(&provider)
+                                .map(|p| p.display_name)
+                                .unwrap_or(provider.as_str());
                             tracing::info!("bridge hot-swapped for provider {}", provider);
                             let _ = events_clone.send(AgentEvent::SystemNotification {
-                                message: format!("Provider switched to {}.", provider),
+                                message: format!(
+                                    "Provider switched to {provider_label} ({model_clone})."
+                                ),
                             });
                         } else {
                             if let Ok(mut s) = settings_clone.lock() {
                                 s.provider_connected = false;
                             }
+                            let provider_label = crate::auth::provider_by_id(&provider)
+                                .map(|p| p.display_name)
+                                .unwrap_or(provider.as_str());
                             let _ = events_clone.send(AgentEvent::SystemNotification {
                                 message: format!(
-                                    "⚠ No credentials for {}. Use /login to authenticate.",
-                                    provider
+                                    "⚠ No credentials for {provider_label}. Use /login to authenticate."
                                 ),
                             });
                         }
+                    });
+                } else if old_model != effective_model {
+                    let provider_label = crate::auth::provider_by_id(&new_provider)
+                        .map(|p| p.display_name)
+                        .unwrap_or(new_provider.as_str());
+                    let _ = events_tx.send(AgentEvent::SystemNotification {
+                        message: format!(
+                            "Model switched to {effective_model} via {provider_label}."
+                        ),
                     });
                 }
             }
@@ -1030,7 +1090,11 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                             let progress_tx = events_tx.clone();
                             let provider_clone = provider.to_string();
                             let bridge_clone = bridge.clone();
-                            let model_for_redetect = cli.model.clone();
+                            let model_for_redetect = shared_settings
+                                .lock()
+                                .ok()
+                                .map(|s| s.model.clone())
+                                .unwrap_or_else(|| cli.model.clone());
                             let settings_for_login = shared_settings.clone();
                             tokio::spawn(async move {
                                 let progress: auth::LoginProgress = Box::new(move |msg| {
@@ -1042,40 +1106,54 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                     "anthropic" | "claude" => {
                                         auth::login_anthropic_with_progress(progress).await
                                     }
-                                    "openai" | "chatgpt" => {
+                                    "openai-codex" | "chatgpt" | "codex" => {
                                         auth::login_openai_with_progress(progress).await
                                     }
+                                    "openai" => Err(anyhow::anyhow!(
+                                        "OpenAI API login in the TUI uses hidden API-key entry. Run /login and choose OpenAI API, or set OPENAI_API_KEY."
+                                    )),
                                     _ => Err(anyhow::anyhow!(
-                                        "Unknown provider: {}. Use: anthropic, openai",
+                                        "Unknown provider: {}. Use: anthropic, openai, openai-codex",
                                         provider_clone
                                     )),
                                 };
+                                let provider_label = crate::auth::provider_by_id(&provider_clone)
+                                    .map(|p| p.display_name)
+                                    .unwrap_or(provider_clone.as_str())
+                                    .to_string();
                                 let message = match &result {
                                     Ok(_) => {
-                                        format!("✓ Successfully logged in to {}", provider_clone)
+                                        format!("✓ Successfully logged in to {provider_label}")
                                     }
                                     Err(e) => format!("❌ Login failed: {}", e),
                                 };
                                 let _ = events_tx_clone
                                     .send(AgentEvent::SystemNotification { message });
 
-                                // Hot-swap the bridge if login succeeded and current bridge is NullBridge
+                                // Hot-swap the bridge after login succeeds using the current model intent.
                                 if result.is_ok() {
+                                    let effective_model = providers::resolve_execution_model_spec(
+                                        &model_for_redetect,
+                                    )
+                                    .await
+                                    .unwrap_or(model_for_redetect.clone());
                                     if let Some(new_bridge) =
-                                        providers::auto_detect_bridge(&model_for_redetect).await
+                                        providers::auto_detect_bridge(&effective_model).await
                                     {
                                         let mut guard = bridge_clone.write().await;
                                         *guard = new_bridge;
                                         if let Ok(mut s) = settings_for_login.lock() {
+                                            s.set_model(&effective_model);
                                             s.provider_connected = true;
                                         }
                                         tracing::info!("bridge hot-swapped after successful login");
-                                        let _ = events_tx_clone
-                                            .send(AgentEvent::SystemNotification {
-                                            message:
-                                                "Provider connected — you can send messages now."
-                                                    .to_string(),
-                                        });
+                                        let _ =
+                                            events_tx_clone.send(AgentEvent::SystemNotification {
+                                                message: format!(
+                                                    "Provider connected — active route {}.",
+                                                    effective_model
+                                                ),
+                                            });
                                     }
                                 }
                             });
@@ -1588,7 +1666,15 @@ async fn login_api_key(
 async fn run_auth_login(provider: &str) -> anyhow::Result<()> {
     let result = match provider {
         "anthropic" | "claude" => auth::login_anthropic().await,
-        "openai" | "chatgpt" => auth::login_openai().await,
+        "openai-codex" | "chatgpt" | "codex" => auth::login_openai().await,
+        "openai" => {
+            login_api_key(
+                "openai",
+                "OPENAI_API_KEY",
+                "https://platform.openai.com/api-keys",
+            )
+            .await
+        }
         "openrouter" => {
             login_api_key(
                 "openrouter",
@@ -1598,7 +1684,9 @@ async fn run_auth_login(provider: &str) -> anyhow::Result<()> {
             .await
         }
         _ => {
-            eprintln!("Unknown provider: {provider}. Use: anthropic, openai, openrouter");
+            eprintln!(
+                "Unknown provider: {provider}. Use: anthropic, openai, openai-codex, openrouter"
+            );
             std::process::exit(1);
         }
     };
@@ -1627,7 +1715,10 @@ fn format_auth_status(status: &auth::AuthStatus) -> String {
         } else {
             "api-key"
         };
-        let mut line = format!("  {icon} {:<12} {auth_type}", provider.name);
+        let display_name = auth::provider_by_id(&provider.name)
+            .map(|p| p.display_name)
+            .unwrap_or(provider.name.as_str());
+        let mut line = format!("  {icon} {:<16} {auth_type}", display_name);
 
         if let Some(ref details) = provider.details {
             line.push_str(&format!(" ({details})"));
@@ -1739,12 +1830,12 @@ mod tests {
         }
 
         // Test auth logout
-        let cli = Cli::try_parse_from(vec!["omegon", "auth", "logout", "openai"])
+        let cli = Cli::try_parse_from(vec!["omegon", "auth", "logout", "openai-codex"])
             .expect("should parse auth logout");
         match cli.command.unwrap() {
             Commands::Auth { action } => match action {
                 AuthAction::Logout { provider } => {
-                    assert_eq!(provider, "openai");
+                    assert_eq!(provider, "openai-codex");
                 }
                 _ => panic!("Expected Logout action"),
             },

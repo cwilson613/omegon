@@ -30,11 +30,11 @@ pub fn resolve_api_key_sync(provider: &str) -> Option<(String, bool)> {
     let auth_key = crate::auth::auth_json_key(provider);
 
     // Env vars (not OAuth)
-    for key in env_keys {
-        // Skip OAuth token env vars — those are handled separately below
-        if *key == "ANTHROPIC_OAUTH_TOKEN" {
-            continue;
-        }
+    for key in env_keys
+        .iter()
+        .copied()
+        .filter(|key| !key.contains("OAUTH"))
+    {
         if let Ok(val) = std::env::var(key)
             && !val.is_empty()
         {
@@ -43,15 +43,12 @@ pub fn resolve_api_key_sync(provider: &str) -> Option<(String, bool)> {
         }
     }
 
-    // OAuth token from env (Anthropic only — ANTHROPIC_OAUTH_TOKEN)
-    if env_keys.contains(&"ANTHROPIC_OAUTH_TOKEN") {
-        if let Ok(val) = std::env::var("ANTHROPIC_OAUTH_TOKEN")
+    // OAuth token env vars
+    for key in env_keys.iter().copied().filter(|key| key.contains("OAUTH")) {
+        if let Ok(val) = std::env::var(key)
             && !val.is_empty()
         {
-            tracing::debug!(
-                provider,
-                "OAuth token resolved from ANTHROPIC_OAUTH_TOKEN env"
-            );
+            tracing::debug!(provider, source = key, "OAuth token resolved from env");
             return Some((val, true));
         }
     }
@@ -179,6 +176,66 @@ pub fn infer_provider_id(model_spec: &str) -> String {
     "anthropic".to_string()
 }
 
+fn model_id_from_spec(model_spec: &str) -> &str {
+    let trimmed = model_spec.trim();
+    if let Some((head, tail)) = trimmed.split_once(':')
+        && is_known_provider_id(head)
+    {
+        return tail;
+    }
+    trimmed
+}
+
+fn is_openai_family_model(model_spec: &str) -> bool {
+    let model_id = model_id_from_spec(model_spec).to_ascii_lowercase();
+    model_id.starts_with("gpt-")
+        || model_id == "o1"
+        || model_id == "o3"
+        || model_id == "o4"
+        || model_id.starts_with("o4-")
+}
+
+fn fallback_order_for_model(model_spec: &str) -> Vec<&'static str> {
+    let requested = infer_provider_id(model_spec);
+
+    match requested.as_str() {
+        "openai" if is_openai_family_model(model_spec) => {
+            vec!["openai", "openai-codex"]
+        }
+        "openai-codex" if is_openai_family_model(model_spec) => {
+            vec!["openai-codex", "openai"]
+        }
+        "openai-codex" => vec!["openai-codex"],
+        "anthropic" => vec!["anthropic"],
+        "openrouter" => vec!["openrouter"],
+        "groq" => vec!["groq"],
+        "xai" => vec!["xai"],
+        "mistral" => vec!["mistral"],
+        "cerebras" => vec!["cerebras"],
+        "huggingface" => vec!["huggingface"],
+        "ollama" => vec!["ollama"],
+        _ => vec!["anthropic"],
+    }
+}
+
+pub async fn resolve_execution_provider(model_spec: &str) -> Option<String> {
+    for provider in fallback_order_for_model(model_spec) {
+        if let Some(_bridge) = resolve_provider(provider).await {
+            return Some(provider.to_string());
+        }
+    }
+    None
+}
+
+pub async fn resolve_execution_model_spec(model_spec: &str) -> Option<String> {
+    let resolved_provider = resolve_execution_provider(model_spec).await?;
+    Some(format!(
+        "{}:{}",
+        resolved_provider,
+        model_id_from_spec(model_spec)
+    ))
+}
+
 /// Resolve a single provider by ID.
 /// Resolve a single provider by ID. Returns a bridge if the provider
 /// has credentials and a native client implementation.
@@ -218,40 +275,19 @@ pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
 /// Auto-detect the best available native provider from configured keys.
 /// Tries sync resolution first, then async (with token refresh) if needed.
 pub async fn auto_detect_bridge(model_spec: &str) -> Option<Box<dyn LlmBridge>> {
-    let provider = infer_provider_id(model_spec);
+    let requested = infer_provider_id(model_spec);
+    let attempts = fallback_order_for_model(model_spec);
 
-    // Try the requested/inferred provider first (handles bare model IDs too).
-    if let Some(bridge) = resolve_provider(&provider).await {
-        return Some(bridge);
-    }
-
-    // Primary provider not available — try the full fallback chain.
-    tracing::warn!(requested = %provider, model_spec, "requested provider not available — trying fallback chain");
-
-    // Priority: proprietary providers first (best quality), then compat providers
-    const FALLBACK_ORDER: &[&str] = &[
-        "anthropic",
-        "openai",
-        "openai-codex",
-        "groq",
-        "xai",
-        "mistral",
-        "huggingface",
-        "cerebras",
-        "openrouter",
-        "ollama",
-    ];
-
-    for &fallback in FALLBACK_ORDER {
-        if fallback == provider {
-            continue;
-        }
-        if let Some(bridge) = resolve_provider(fallback).await {
-            tracing::info!(provider = fallback, "falling back to {fallback}");
+    for provider in attempts {
+        if let Some(bridge) = resolve_provider(provider).await {
+            if provider != requested {
+                tracing::info!(requested = %requested, resolved = provider, model_spec, "falling back to alternate executable provider");
+            }
             return Some(bridge);
         }
     }
 
+    tracing::warn!(requested = %requested, model_spec, "no executable provider available");
     None
 }
 
@@ -2113,23 +2149,32 @@ mod tests {
     }
 
     #[test]
-    fn fallback_order_covers_all_inference_providers() {
-        let order = [
-            "anthropic",
-            "openai",
-            "openai-codex",
-            "groq",
-            "xai",
-            "mistral",
-            "huggingface",
-            "cerebras",
-            "openrouter",
-            "ollama",
-        ];
-        let mut seen = std::collections::HashSet::new();
-        for id in order {
-            assert!(seen.insert(id), "duplicate in fallback order: {id}");
-        }
+    fn fallback_order_keeps_non_openai_models_on_their_native_provider() {
+        assert_eq!(
+            fallback_order_for_model("anthropic:claude-sonnet-4-6"),
+            vec!["anthropic"]
+        );
+        assert_eq!(
+            fallback_order_for_model("openrouter:meta/llama"),
+            vec!["openrouter"]
+        );
+    }
+
+    #[test]
+    fn openai_family_fallback_prioritizes_codex_for_gpt_models() {
+        let order = fallback_order_for_model("openai:gpt-5.4");
+        assert_eq!(order, vec!["openai", "openai-codex"]);
+
+        let codex_order = fallback_order_for_model("openai-codex:gpt-5.4");
+        assert_eq!(codex_order, vec!["openai-codex", "openai"]);
+    }
+
+    #[test]
+    fn resolve_execution_model_spec_reprefixes_openai_family_models() {
+        assert_eq!(model_id_from_spec("openai:gpt-5.4"), "gpt-5.4");
+        assert!(is_openai_family_model("openai:gpt-5.4"));
+        assert!(is_openai_family_model("gpt-5.4"));
+        assert!(!is_openai_family_model("codex-mini-latest"));
     }
 
     // ── CodexClient tests ───────────────────────────────────────

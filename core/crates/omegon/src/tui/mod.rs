@@ -261,68 +261,20 @@ impl App {
 
     fn open_model_selector(&mut self) {
         let current = self.settings().model.clone();
-        let mut options: Vec<selector::SelectOption> = Vec::new();
-
-        // Only show providers the user is actually authenticated with
-        let anthropic_auth = crate::providers::resolve_api_key_sync("anthropic");
-        let openai_auth = crate::providers::resolve_api_key_sync("openai");
-
-        if let Some((_, is_oauth)) = anthropic_auth {
-            let auth = if is_oauth { "oauth" } else { "key" };
-            options.push(sel_opt(
-                "anthropic:claude-sonnet-4-6",
-                "Sonnet 4.6",
-                &format!("Anthropic · balanced · 200k · {auth}"),
-                &current,
-            ));
-            options.push(sel_opt(
-                "anthropic:claude-opus-4-6",
-                "Opus 4.6",
-                &format!("Anthropic · strongest · 200k · {auth}"),
-                &current,
-            ));
-            options.push(sel_opt(
-                "anthropic:claude-haiku-4-5-20251001",
-                "Haiku 4.5",
-                &format!("Anthropic · fast · cheap · 200k · {auth}"),
-                &current,
-            ));
-        }
-
-        if let Some((_, is_oauth)) = openai_auth {
-            let auth = if is_oauth { "oauth" } else { "key" };
-            options.push(sel_opt(
-                "openai:gpt-5.4",
-                "GPT-5.4",
-                &format!("OpenAI · frontier · 1M · {auth}"),
-                &current,
-            ));
-            options.push(sel_opt(
-                "openai:o3",
-                "o3",
-                &format!("OpenAI · reasoning · 200k · {auth}"),
-                &current,
-            ));
-            options.push(sel_opt(
-                "openai:o4-mini",
-                "o4-mini",
-                &format!("OpenAI · fast reasoning · 200k · {auth}"),
-                &current,
-            ));
-            options.push(sel_opt(
-                "openai:gpt-4.1",
-                "GPT-4.1",
-                &format!("OpenAI · coding · 1M · {auth}"),
-                &current,
-            ));
-        }
+        let options = build_model_selector_options(
+            &current,
+            crate::providers::resolve_api_key_sync("anthropic"),
+            crate::providers::resolve_api_key_sync("openai"),
+            crate::providers::resolve_api_key_sync("openai-codex"),
+        );
 
         if options.is_empty() {
             self.conversation.push_system(
                 "No providers authenticated.\n\
-                 Run: omegon-agent login anthropic  (Claude subscription)\n\
-                 Run: omegon-agent login openai     (ChatGPT subscription)\n\
-                 Or:  export ANTHROPIC_API_KEY=...   (API key)",
+                 Run: omegon auth login anthropic     (Claude subscription)\n\
+                 Run: omegon auth login openai-codex  (ChatGPT/Codex OAuth)\n\
+                 Run: omegon auth login openai        (OpenAI API key)\n\
+                 Or:  export ANTHROPIC_API_KEY=...",
             );
             return;
         }
@@ -621,16 +573,20 @@ impl App {
                 // OAuth providers go through the auth login flow (opens browser)
                 // API key providers go through secret input mode (hidden input)
                 match value.as_str() {
-                    "anthropic" | "openai" => {
+                    "anthropic" | "openai-codex" => {
                         let _ = tx.try_send(TuiCommand::BusCommand {
                             name: "auth_login".to_string(),
                             args: value.clone(),
                         });
-                        Some(format!("Opening browser for {} login…", value))
+                        let label = crate::auth::provider_by_id(&value)
+                            .map(|p| p.display_name)
+                            .unwrap_or(value.as_str());
+                        Some(format!("Opening browser for {label} login…"))
                     }
-                    "openrouter" | "brave" | "tavily" | "serper" | "huggingface" => {
+                    "openai" | "openrouter" | "brave" | "tavily" | "serper" | "huggingface" => {
                         // Map to the correct env var name for storage
                         let key_name = match value.as_str() {
+                            "openai" => "OPENAI_API_KEY",
                             "openrouter" => "OPENROUTER_API_KEY",
                             "brave" => "BRAVE_API_KEY",
                             "tavily" => "TAVILY_API_KEY",
@@ -1392,6 +1348,8 @@ impl App {
             self.footer_data.context_mode = s.context_mode;
             self.footer_data.thinking_level = s.thinking.as_str().to_string();
             self.footer_data.provider_connected = s.provider_connected;
+            self.footer_data.is_oauth = crate::providers::resolve_api_key_sync(s.provider())
+                .is_some_and(|(_, is_oauth)| is_oauth);
         }
         {
             self.footer_data.model_tier = self.footer_data.harness.capability_tier.clone();
@@ -2158,9 +2116,20 @@ impl App {
                             let provider = &args[6..];
                             if provider.is_empty() {
                                 SlashResult::Display(
-                                    "Usage: /auth login <provider>\nSupported: anthropic, openai"
+                                    "Usage: /auth login <provider>\nSupported: anthropic, openai, openai-codex"
                                         .into(),
                                 )
+                            } else if crate::auth::provider_by_id(provider).is_some_and(|p| {
+                                matches!(p.auth_method, crate::auth::AuthMethod::ApiKey)
+                                    && !p.env_vars.is_empty()
+                            }) {
+                                let key_name = crate::auth::provider_by_id(provider)
+                                    .and_then(|p| p.env_vars.first().copied())
+                                    .unwrap_or("OPENAI_API_KEY");
+                                self.editor.start_secret_input(key_name);
+                                SlashResult::Display(format!(
+                                    "🔒 Paste your {provider} API key into {key_name} (input is hidden):"
+                                ))
                             } else {
                                 let _ = tx.try_send(TuiCommand::BusCommand {
                                     name: "auth_login".to_string(),
@@ -2172,7 +2141,7 @@ impl App {
                             let provider = &args[7..];
                             if provider.is_empty() {
                                 SlashResult::Display(
-                                    "Usage: /auth logout <provider>\nSupported: anthropic, openai"
+                                    "Usage: /auth logout <provider>\nSupported: anthropic, openai, openai-codex"
                                         .into(),
                                 )
                             } else {
@@ -2184,7 +2153,7 @@ impl App {
                             }
                         } else {
                             SlashResult::Display(format!(
-                                "Unknown auth command: {args}\n\nUsage:\n  /auth status\n  /auth login <provider>\n  /auth logout <provider>\n  /auth unlock\n\nSupported providers: anthropic, openai"
+                                "Unknown auth command: {args}\n\nUsage:\n  /auth status\n  /auth login <provider>\n  /auth logout <provider>\n  /auth unlock\n\nSupported providers: anthropic, openai, openai-codex"
                             ))
                         }
                     }
@@ -2400,6 +2369,17 @@ impl App {
                 if args.is_empty() {
                     self.open_login_selector();
                     SlashResult::Handled
+                } else if crate::auth::provider_by_id(args).is_some_and(|p| {
+                    matches!(p.auth_method, crate::auth::AuthMethod::ApiKey)
+                        && !p.env_vars.is_empty()
+                }) {
+                    let key_name = crate::auth::provider_by_id(args)
+                        .and_then(|p| p.env_vars.first().copied())
+                        .unwrap_or("OPENAI_API_KEY");
+                    self.editor.start_secret_input(key_name);
+                    SlashResult::Display(format!(
+                        "🔒 Paste your {args} API key into {key_name} (input is hidden):"
+                    ))
                 } else {
                     let _ = tx.try_send(TuiCommand::BusCommand {
                         name: "auth_login".to_string(),
@@ -3180,6 +3160,83 @@ fn sel_opt(value: &str, label: &str, desc: &str, current: &str) -> selector::Sel
         description: desc.to_string(),
         active: value == current,
     }
+}
+
+fn build_model_selector_options(
+    current: &str,
+    anthropic_auth: Option<(String, bool)>,
+    openai_auth: Option<(String, bool)>,
+    openai_codex_auth: Option<(String, bool)>,
+) -> Vec<selector::SelectOption> {
+    let mut options: Vec<selector::SelectOption> = Vec::new();
+
+    if let Some((_, is_oauth)) = anthropic_auth {
+        let auth = if is_oauth { "oauth" } else { "api key" };
+        options.push(sel_opt(
+            "anthropic:claude-sonnet-4-6",
+            "Sonnet 4.6",
+            &format!("Anthropic · balanced · 200k · {auth}"),
+            current,
+        ));
+        options.push(sel_opt(
+            "anthropic:claude-opus-4-6",
+            "Opus 4.6",
+            &format!("Anthropic · strongest · 200k · {auth}"),
+            current,
+        ));
+        options.push(sel_opt(
+            "anthropic:claude-haiku-4-5-20251001",
+            "Haiku 4.5",
+            &format!("Anthropic · fast · cheap · 200k · {auth}"),
+            current,
+        ));
+    }
+
+    if let Some((_, is_oauth)) = openai_auth {
+        let auth = if is_oauth { "oauth" } else { "api key" };
+        options.push(sel_opt(
+            "openai:gpt-5.4",
+            "GPT-5.4",
+            &format!("OpenAI API · frontier · 1M · {auth}"),
+            current,
+        ));
+        options.push(sel_opt(
+            "openai:o3",
+            "o3",
+            &format!("OpenAI API · reasoning · 200k · {auth}"),
+            current,
+        ));
+        options.push(sel_opt(
+            "openai:o4-mini",
+            "o4-mini",
+            &format!("OpenAI API · fast reasoning · 200k · {auth}"),
+            current,
+        ));
+        options.push(sel_opt(
+            "openai:gpt-4.1",
+            "GPT-4.1",
+            &format!("OpenAI API · coding · 1M · {auth}"),
+            current,
+        ));
+    }
+
+    if let Some((_, is_oauth)) = openai_codex_auth {
+        let auth = if is_oauth { "oauth" } else { "api key" };
+        options.push(sel_opt(
+            "openai-codex:gpt-5.4",
+            "GPT-5.4",
+            &format!("ChatGPT/Codex · GPT route · 1M · {auth}"),
+            current,
+        ));
+        options.push(sel_opt(
+            "openai-codex:codex-mini-latest",
+            "Codex Mini",
+            &format!("ChatGPT/Codex · codex route · 200k · {auth}"),
+            current,
+        ));
+    }
+
+    options
 }
 
 // ─── Milestone system ───────────────────────────────────────────────────

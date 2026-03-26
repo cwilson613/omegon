@@ -1,7 +1,7 @@
 ---
 id: openai-provider-identity-and-routing-honesty
 title: "OpenAI provider identity and routing honesty — separate API vs ChatGPT/Codex auth, route GPT models correctly, and surface the active engine truthfully"
-status: implementing
+status: implemented
 parent: bridge-provider-routing
 tags: [providers, routing, auth, ux, bugfix, rust]
 open_questions: []
@@ -61,6 +61,12 @@ The Rust harness currently treats ChatGPT/Codex OAuth as if it authenticated the
 - `core/crates/omegon/src/features/model_budget.rs` (modified) — Align tier/model copy and provider selection with OpenAI API vs openai-codex distinction
 - `core/crates/omegon/src/providers.rs` (modified) — Add or expand Rust unit tests covering auth detection, provider inference, and GPT-family fallback behavior
 - `core/crates/omegon/src/tui/mod.rs` (modified) — Add tests for selector gating or visible engine/auth labeling where feasible
+- `core/crates/omegon/src/tui/footer.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `core/crates/omegon/src/tui/tests.rs` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `core/crates/omegon/src/tui/snapshots/omegon__tui__snapshot_tests__snapshot_bootstrap_full.snap` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `core/crates/omegon/src/tui/snapshots/omegon__tui__snapshot_tests__snapshot_footer_default.snap` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `core/crates/omegon/src/tui/snapshots/omegon__tui__snapshot_tests__snapshot_footer_with_model_and_context.snap` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `core/crates/omegon/src/tui/snapshots/omegon__tui__snapshot_tests__snapshot_footer_with_persona_and_mcp.snap` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
 
 ### Constraints
 

@@ -235,11 +235,37 @@ fn not_a_slash_command_passes_through() {
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
-fn model_selector_opens() {
-    let mut app = test_app();
-    app.open_model_selector();
-    assert!(app.selector.is_some());
-    assert!(matches!(app.selector_kind, Some(SelectorKind::Model)));
+fn model_selector_options_include_openai_only_when_openai_api_is_present() {
+    let options = build_model_selector_options(
+        "anthropic:claude-sonnet-4-6",
+        None,
+        None,
+        Some(("token".into(), true)),
+    );
+    assert!(
+        options.iter().all(|opt| !opt.value.starts_with("openai:")),
+        "OpenAI API options must not be shown from ChatGPT OAuth alone"
+    );
+    assert!(
+        options
+            .iter()
+            .any(|opt| opt.value == "openai-codex:gpt-5.4"),
+        "ChatGPT/Codex-backed GPT route should be advertised honestly"
+    );
+}
+
+#[test]
+fn model_selector_options_include_openai_api_choices_when_api_key_is_present() {
+    let options = build_model_selector_options(
+        "openai:gpt-5.4",
+        None,
+        Some(("sk-test".into(), false)),
+        None,
+    );
+    assert!(
+        options.iter().any(|opt| opt.value == "openai:gpt-5.4"),
+        "OpenAI API route should be selectable when API creds exist"
+    );
 }
 
 #[test]

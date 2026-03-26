@@ -74,6 +74,9 @@ impl ModelTier {
             (Self::Gloriana, "openai") => "o3",
             (Self::Victory, "openai") => "gpt-5",
             (Self::Retribution, "openai") => "gpt-4.1-mini",
+            (Self::Gloriana, "openai-codex") => "gpt-5",
+            (Self::Victory, "openai-codex") => "gpt-5",
+            (Self::Retribution, "openai-codex") => "codex-mini",
             (Self::Local, _) => "local",
             (Self::Gloriana, _) => "claude-opus",
             (Self::Victory, _) => "claude-sonnet",
@@ -102,6 +105,9 @@ impl ModelTier {
             (Self::Gloriana, "openai") => "o3",
             (Self::Victory, "openai") => "gpt-5.4",
             (Self::Retribution, "openai") => "gpt-4.1-mini",
+            (Self::Gloriana, "openai-codex") => "gpt-5.4",
+            (Self::Victory, "openai-codex") => "gpt-5.4",
+            (Self::Retribution, "openai-codex") => "codex-mini-latest",
             (Self::Local, _) => "local",
             _ => "claude-sonnet-4-6",
         }
@@ -376,6 +382,18 @@ mod tests {
             ModelTier::Victory
                 .resolve_model("openai", "")
                 .contains("gpt")
+        );
+    }
+
+    #[test]
+    fn tier_resolve_openai_codex() {
+        assert_eq!(
+            ModelTier::Victory.resolve_model("openai-codex", ""),
+            "gpt-5.4"
+        );
+        assert_eq!(
+            ModelTier::Retribution.resolve_model("openai-codex", ""),
+            "codex-mini-latest"
         );
     }
 

@@ -243,7 +243,10 @@ fn default_model_for_provider(provider_id: &str, tier: CapabilityTier) -> String
         ("openai", CapabilityTier::Frontier) => "gpt-4.1".to_string(),
         ("openai", CapabilityTier::Mid) => "gpt-4.1-mini".to_string(),
         ("openai", CapabilityTier::Leaf) => "gpt-4.1-nano".to_string(),
-        ("openai-codex", _) => "codex-mini-latest".to_string(),
+        ("openai-codex", CapabilityTier::Max | CapabilityTier::Frontier) => "gpt-5.4".to_string(),
+        ("openai-codex", CapabilityTier::Mid | CapabilityTier::Leaf) => {
+            "codex-mini-latest".to_string()
+        }
         ("groq", _) => "llama-3.3-70b-versatile".to_string(),
         ("xai", _) => "grok-3-mini-fast".to_string(),
         ("mistral", _) => "devstral-small-2505".to_string(),
@@ -402,6 +405,18 @@ mod tests {
         let candidates = route(&req, &inv);
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].provider_id, "openai");
+    }
+
+    #[test]
+    fn test_openai_codex_defaults_reflect_tier() {
+        assert_eq!(
+            default_model_for_provider("openai-codex", CapabilityTier::Frontier),
+            "gpt-5.4"
+        );
+        assert_eq!(
+            default_model_for_provider("openai-codex", CapabilityTier::Leaf),
+            "codex-mini-latest"
+        );
     }
 
     #[test]

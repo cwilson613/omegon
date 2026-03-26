@@ -164,7 +164,10 @@ impl FooterData {
             )]));
         } else {
             let model_short = short_model(&self.model_id);
-            let source_icon = if self.model_provider == "local" {
+            let provider_label = crate::auth::provider_by_id(&self.model_provider)
+                .map(|p| p.display_name)
+                .unwrap_or(self.model_provider.as_str());
+            let source_icon = if self.model_provider == "ollama" {
                 "⚡"
             } else {
                 "☁"
@@ -185,14 +188,14 @@ impl FooterData {
             lines.push(Line::from(vec![
                 Span::styled(
                     format!(" {source_icon} "),
-                    Style::default().fg(if self.model_provider == "local" {
+                    Style::default().fg(if self.model_provider == "ollama" {
                         t.accent()
                     } else {
                         t.dim()
                     }),
                 ),
                 Span::styled(
-                    model_short.to_string(),
+                    provider_label.to_string(),
                     Style::default().fg(t.fg()).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" · ", Style::default().fg(t.border_dim())),
@@ -202,8 +205,13 @@ impl FooterData {
                 ),
             ]));
 
-            // Line 3: auth + persona
+            // Line 3: model + auth + persona
             let mut auth_parts: Vec<Span<'static>> = vec![
+                Span::styled(
+                    format!(" {}", model_short),
+                    Style::default().fg(t.muted()).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" · ", Style::default().fg(t.border_dim())),
                 Span::styled(format!(" {auth_icon} "), Style::default().fg(auth_color)),
                 Span::styled(
                     if self.is_oauth {
@@ -485,12 +493,15 @@ impl FooterData {
         let mut lines: Vec<Line<'static>> = Vec::new();
 
         let model_short = short_model(&self.model_id);
-        let source_icon = if self.model_provider == "local" {
+        let provider_label = crate::auth::provider_by_id(&self.model_provider)
+            .map(|p| p.display_name)
+            .unwrap_or(self.model_provider.as_str());
+        let source_icon = if self.model_provider == "ollama" {
             "⚡"
         } else {
             "☁"
         };
-        let source_color = if self.model_provider == "local" {
+        let source_color = if self.model_provider == "ollama" {
             t.accent()
         } else {
             t.dim()
@@ -511,7 +522,7 @@ impl FooterData {
         lines.push(Line::from(vec![
             Span::styled(format!("{source_icon} "), Style::default().fg(source_color)),
             Span::styled(
-                model_short.to_string(),
+                provider_label.to_string(),
                 Style::default().fg(t.fg()).add_modifier(Modifier::BOLD),
             ),
             Span::styled(" · ", Style::default().fg(t.border_dim())),
@@ -521,8 +532,13 @@ impl FooterData {
             ),
         ]));
 
-        // Second line: auth + persona badge
+        // Second line: model + auth + persona badge
         let mut auth_parts: Vec<Span<'static>> = vec![
+            Span::styled(
+                model_short.to_string(),
+                Style::default().fg(t.muted()).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" · ", Style::default().fg(t.border_dim())),
             Span::styled(format!("{auth_icon} "), Style::default().fg(auth_color)),
             Span::styled(
                 if self.is_oauth {
