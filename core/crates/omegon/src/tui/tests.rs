@@ -45,6 +45,8 @@ fn slash_update_reports_available_version() {
         current: "0.15.2".into(),
         latest: "0.15.3-rc.7".into(),
         download_url: "https://example.invalid/omegon-0.15.3-rc.7-aarch64-apple-darwin.tar.gz".into(),
+        signature_url: "https://example.invalid/omegon-0.15.3-rc.7-aarch64-apple-darwin.tar.gz.sig".into(),
+        certificate_url: "https://example.invalid/omegon-0.15.3-rc.7-aarch64-apple-darwin.tar.gz.pem".into(),
         release_notes: "notes".into(),
         is_newer: true,
     }));

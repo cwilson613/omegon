@@ -14,6 +14,8 @@ pub struct UpdateInfo {
     pub current: String,
     pub latest: String,
     pub download_url: String,
+    pub signature_url: String,
+    pub certificate_url: String,
     pub release_notes: String,
     pub is_newer: bool,
 }
@@ -63,6 +65,14 @@ struct GitHubRelease {
 struct GitHubAsset {
     name: String,
     browser_download_url: String,
+}
+
+fn find_asset_url(assets: &[GitHubAsset], suffix: &str) -> String {
+    assets
+        .iter()
+        .find(|a| a.name.ends_with(suffix))
+        .map(|a| a.browser_download_url.clone())
+        .unwrap_or_default()
 }
 
 /// Spawn the background update check.
@@ -137,17 +147,30 @@ pub async fn check_latest_for_channel(
 
     let latest = resp.tag_name.trim_start_matches('v').to_string();
 
-    let download_url = resp
+    let archive_name = resp
         .assets
         .iter()
         .find(|a| a.name.contains(&target) && a.name.ends_with(".tar.gz"))
-        .map(|a| a.browser_download_url.clone())
+        .map(|a| a.name.clone())
         .unwrap_or_default();
+    let download_url = find_asset_url(&resp.assets, &archive_name);
+    let signature_url = if archive_name.is_empty() {
+        String::new()
+    } else {
+        find_asset_url(&resp.assets, &format!("{archive_name}.sig"))
+    };
+    let certificate_url = if archive_name.is_empty() {
+        String::new()
+    } else {
+        find_asset_url(&resp.assets, &format!("{archive_name}.pem"))
+    };
 
     Ok(Some(UpdateInfo {
         current: current.to_string(),
         latest,
         download_url,
+        signature_url,
+        certificate_url,
         release_notes: resp.body.unwrap_or_default(),
         is_newer: true,
     }))
@@ -187,16 +210,51 @@ fn platform_archive_target() -> String {
     }
 }
 
+async fn download_to_path(client: &reqwest::Client, url: &str, path: &Path) -> anyhow::Result<()> {
+    let bytes = client.get(url).send().await?.error_for_status()?.bytes().await?;
+    tokio::fs::write(path, &bytes).await?;
+    Ok(())
+}
+
+fn verify_archive_signature(archive_path: &Path, sig_path: &Path, cert_path: &Path) -> anyhow::Result<()> {
+    let output = std::process::Command::new("cosign")
+        .arg("verify-blob")
+        .arg("--signature")
+        .arg(sig_path)
+        .arg("--certificate")
+        .arg(cert_path)
+        .arg("--certificate-identity-regexp")
+        .arg("^https://github.com/styrene-lab/omegon/.*$")
+        .arg("--certificate-oidc-issuer")
+        .arg("https://token.actions.githubusercontent.com")
+        .arg(archive_path)
+        .output()
+        .map_err(|e| anyhow::anyhow!("cosign not available: {e}"))?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "cosign verification failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
 /// Download, verify, and replace the current binary, then exec() into it.
 /// Returns the path to the new binary on success (caller does the exec).
 pub async fn download_and_replace(info: &UpdateInfo) -> anyhow::Result<PathBuf> {
     if info.download_url.is_empty() {
         anyhow::bail!("No download URL for this platform");
     }
+    if info.signature_url.is_empty() || info.certificate_url.is_empty() {
+        anyhow::bail!("Release is missing signature sidecars; refusing unverified install");
+    }
 
     let current_exe = std::env::current_exe()?;
     let tmp_path = current_exe.with_extension("new");
     let archive_path = current_exe.with_extension("tar.gz");
+    let signature_path = current_exe.with_extension("tar.gz.sig");
+    let certificate_path = current_exe.with_extension("tar.gz.pem");
     let backup_path = current_exe.with_extension("bak");
 
     tracing::info!(url = %info.download_url, "downloading update archive");
@@ -206,15 +264,11 @@ pub async fn download_and_replace(info: &UpdateInfo) -> anyhow::Result<PathBuf> 
         .user_agent(format!("omegon/{}", info.current))
         .build()?;
 
-    let bytes = client
-        .get(&info.download_url)
-        .send()
-        .await?
-        .error_for_status()?
-        .bytes()
-        .await?;
+    download_to_path(&client, &info.download_url, &archive_path).await?;
+    download_to_path(&client, &info.signature_url, &signature_path).await?;
+    download_to_path(&client, &info.certificate_url, &certificate_path).await?;
 
-    tokio::fs::write(&archive_path, &bytes).await?;
+    verify_archive_signature(&archive_path, &signature_path, &certificate_path)?;
 
     let archive_path_clone = archive_path.clone();
     let tmp_path_clone = tmp_path.clone();
@@ -241,6 +295,8 @@ pub async fn download_and_replace(info: &UpdateInfo) -> anyhow::Result<PathBuf> 
     .await??;
 
     tokio::fs::remove_file(&archive_path).await.ok();
+    tokio::fs::remove_file(&signature_path).await.ok();
+    tokio::fs::remove_file(&certificate_path).await.ok();
 
     // Make executable
     #[cfg(unix)]
@@ -319,5 +375,23 @@ mod tests {
         let name = platform_archive_target();
         assert!(name.contains("darwin") || name.contains("linux"), "got: {name}");
         assert!(name.contains("aarch64") || name.contains("x86_64"), "got: {name}");
+    }
+
+    #[test]
+    fn find_asset_url_matches_exact_suffix() {
+        let assets = vec![
+            GitHubAsset {
+                name: "omegon-0.15.3-rc.7-aarch64-apple-darwin.tar.gz".into(),
+                browser_download_url: "https://example.invalid/archive".into(),
+            },
+            GitHubAsset {
+                name: "omegon-0.15.3-rc.7-aarch64-apple-darwin.tar.gz.sig".into(),
+                browser_download_url: "https://example.invalid/archive.sig".into(),
+            },
+        ];
+        assert_eq!(
+            find_asset_url(&assets, "omegon-0.15.3-rc.7-aarch64-apple-darwin.tar.gz.sig"),
+            "https://example.invalid/archive.sig"
+        );
     }
 }
