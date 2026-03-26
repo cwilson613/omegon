@@ -194,6 +194,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         // session_log (1)
         session_log::SESSION_LOG,
         // model_budget (3)
+        model_budget::SET_MODEL_TIER,
         model_budget::SWITCH_TO_OFFLINE_DRIVER,
         model_budget::SET_THINKING_LEVEL,
         // manage_tools (1)
