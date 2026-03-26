@@ -24,14 +24,14 @@ pub struct UpdateInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateChannel {
     Stable,
-    Rc,
+    Nightly,
 }
 
 impl UpdateChannel {
     pub fn parse(s: &str) -> Option<Self> {
         match s.trim().to_lowercase().as_str() {
             "stable" => Some(Self::Stable),
-            "rc" => Some(Self::Rc),
+            "nightly" | "rc" => Some(Self::Nightly),
             _ => None,
         }
     }
@@ -39,7 +39,7 @@ impl UpdateChannel {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Stable => "stable",
-            Self::Rc => "rc",
+            Self::Nightly => "nightly",
         }
     }
 }
@@ -137,7 +137,7 @@ pub async fn check_latest_for_channel(
         let latest = resp.tag_name.trim_start_matches('v');
         let channel_match = match channel {
             UpdateChannel::Stable => !resp.prerelease,
-            UpdateChannel::Rc => resp.prerelease,
+            UpdateChannel::Nightly => resp.prerelease,
         };
         channel_match && is_newer(latest, current)
     });

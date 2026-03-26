@@ -1,11 +1,12 @@
 ---
 id: release-candidate-system
-title: Release candidate system — identifiable pre-release builds with deployment verification
+title: "Release candidate system — identifiable pre-release builds with deployment verification"
 status: implemented
 parent: core-distribution
 tags: [release, distribution, versioning, ci, diagnostics]
 open_questions: []
-jj_change_id: ymrwmkxqnkwmptrqkkpnlovwvrnroktl
+dependencies: []
+related: []
 ---
 
 # Release candidate system — identifiable pre-release builds with deployment verification
@@ -77,28 +78,29 @@ The sha is the tie-breaker. Two machines showing the same sha are running the sa
 ### Decision: Bake git sha + dirty flag + build timestamp into every binary via build.rs
 
 **Status:** exploring
+
 **Rationale:** This is the lowest-cost, highest-value change. A `build.rs` that sets `GIT_SHA`, `GIT_DIRTY`, `BUILD_DATE` env vars at compile time, consumed by `--version` output. Every build becomes uniquely identifiable regardless of the version string. Produces output like `omegon 0.14.0 (3a4b5c6 2026-03-21)` or `omegon 0.14.0 (3a4b5c6-dirty 2026-03-21)`. Standard Rust pattern — rustc itself does this.
 
 ### Decision: Add --diagnostics flag for self-diagnosis
 
 **Status:** exploring
+
 **Rationale:** A `--diagnostics` or `--doctor` flag that dumps: build info (version + sha + date), registered tools with owning feature, registered commands, provider/auth status, plugin discovery results, bridge.js path and existence. Runs without starting the TUI or agent loop. Produces structured output (JSON or human-readable) that can be shared for remote debugging. Low implementation cost — all data already exists in `setup.rs`, just needs a pre-loop dump path.
 
 ### Decision: RC builds as pre-release GitHub Releases with semver pre-release tags
 
 **Status:** exploring
+
 **Rationale:** Use `v0.14.1-rc.1` tags that trigger the existing release workflow but create a pre-release GitHub Release (not latest). `install.sh` already supports `VERSION=` pinning, so deploying an RC is `VERSION=0.14.1-rc.1 install.sh`. The existing CI builds all 4 platform targets. No new workflow needed — just tag conventions and a `--pre-release` flag on the GitHub Release step. cargo-release already supports pre-release versions.
 
 ### Decision: Semver pre-release tags (0.14.1-rc.1) + build fingerprint (sha + date)
 
 **Status:** decided
+
 **Rationale:** Two orthogonal identity axes: the version string (semver, set in Cargo.toml, controls release channel semantics) and the build fingerprint (git sha + dirty + date, baked by build.rs, identifies the exact code). RC uses semver pre-release: `0.14.1-rc.1`. The fingerprint distinguishes builds within the same version. Together: `omegon 0.14.1-rc.1 (3a4b5c6 2026-03-21)`. Implemented via build.rs + clap version override.
 
 ### Decision: Bake git sha + dirty flag + build timestamp into every binary via build.rs
 
 **Status:** decided
+
 **Rationale:** Implemented in build.rs. --version shows sha and build date. Standard Rust pattern.
-
-## Open Questions
-
-*No open questions.*
