@@ -79,7 +79,7 @@ fn chrono_lite_timestamp() -> String {
 
 /// Convert days since Unix epoch to (year, month, day).
 /// Simplified civil calendar algorithm.
-fn days_to_ymd(days: u64) -> (u64, u64, u64) {
+pub fn days_to_ymd(days: u64) -> (u64, u64, u64) {
     // Algorithm from Howard Hinnant's chrono-compatible date library
     let z = days + 719468;
     let era = z / 146097;
