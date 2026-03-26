@@ -1,0 +1,29 @@
+---
+source: crates/omegon/src/tui/snapshot_tests.rs
+expression: render_to_string(&terminal)
+---
+│ Ω Dashboard
+│
+│ no active nodes
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│── openspec ───────────────────
+│ ⟳ tui-surface-pass 7/10
