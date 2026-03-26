@@ -54,6 +54,20 @@ fn editor_visual_line_count_counts_newlines_and_wraps() {
 }
 
 #[test]
+fn slash_update_channel_without_args_shows_helpful_usage() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let result = app.handle_slash_command("/update channel", &tx);
+    if let SlashResult::Display(text) = result {
+        assert!(text.contains("Update channel:"), "{text}");
+        assert!(text.contains("/update channel rc"), "{text}");
+        assert!(text.contains("/update install"), "{text}");
+    } else {
+        panic!("expected Display result");
+    }
+}
+
+#[test]
 fn slash_update_channel_changes_setting() {
     let mut app = test_app();
     let tx = test_tx();
@@ -82,7 +96,22 @@ fn slash_update_reports_available_version() {
     if let SlashResult::Display(text) = result {
         assert!(text.contains("0.15.3-rc.7"), "{text}");
         assert!(text.contains("/update install"), "{text}");
+        assert!(text.contains("/update channel [stable|rc]"), "{text}");
         assert!(text.contains("rc"), "{text}");
+    } else {
+        panic!("expected Display result");
+    }
+}
+
+#[test]
+fn slash_update_without_update_still_shows_channel_help() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let result = app.handle_slash_command("/update", &tx);
+    if let SlashResult::Display(text) = result {
+        assert!(text.contains("You're up to date"), "{text}");
+        assert!(text.contains("/update channel rc"), "{text}");
+        assert!(text.contains("/update channel stable"), "{text}");
     } else {
         panic!("expected Display result");
     }

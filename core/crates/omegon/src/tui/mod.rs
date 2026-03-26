@@ -2215,7 +2215,9 @@ impl App {
                     let channel_arg = channel_arg.trim();
                     if channel_arg.is_empty() {
                         let channel = self.settings().update_channel;
-                        SlashResult::Display(format!("Update channel: {channel}"))
+                        SlashResult::Display(format!(
+                            "Update channel: {channel}\n\nCommands:\n  /update              — check current channel for updates\n  /update install      — download and restart into the available update\n  /update channel rc   — opt into release candidates\n  /update channel stable — return to stable releases"
+                        ))
                     } else if let Some(channel) = crate::update::UpdateChannel::parse(channel_arg) {
                         self.update_settings(|s| s.update_channel = channel.as_str().to_string());
                         if let Some(tx) = self.update_tx.clone() {
@@ -2234,7 +2236,7 @@ impl App {
                     let channel = self.settings().update_channel;
                     match info {
                         Some(info) if info.is_newer => SlashResult::Display(format!(
-                            "🆕 Update available on {channel}: v{} → v{}\n\n{}\n\n{}",
+                            "🆕 Update available on {channel}: v{} → v{}\n\n{}\n\n{}\n\nCommands:\n  /update install\n  /update channel [stable|rc]",
                             info.current,
                             info.latest,
                             if info.release_notes.is_empty() {
@@ -2252,7 +2254,9 @@ impl App {
                                 String::from("Run `/update install` to download and restart")
                             },
                         )),
-                        _ => SlashResult::Display(format!("✓ You're up to date on the {channel} channel.")),
+                        _ => SlashResult::Display(format!(
+                            "✓ You're up to date on the {channel} channel.\n\nCommands:\n  /update channel rc     — opt into release candidates\n  /update channel stable — use stable releases only\n  /update channel        — show current channel"
+                        )),
                     }
                 }
             }

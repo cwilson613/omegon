@@ -60,6 +60,21 @@
       "bound_change": null,
       "created_at": "2026-03-26T13:53:26Z",
       "updated_at": "2026-03-26T13:53:26Z"
+    },
+    {
+      "id": "unified-command-structure",
+      "title": "Unified command structure",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-03-26T14:44:10Z",
+      "updated_at": "2026-03-26T14:44:10Z"
     }
   ],
   "changes": [],
@@ -195,6 +210,24 @@
       "timestamp": "2026-03-26T13:53:26Z",
       "entity_type": "node",
       "entity_id": "rust-native-sigstore-update-verification",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-03-26T14:44:10Z",
+      "entity_type": "node",
+      "entity_id": "unified-command-structure",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-03-26T14:44:10Z",
+      "entity_type": "node",
+      "entity_id": "unified-command-structure",
       "from_state": "seed",
       "to_state": "exploring",
       "reason": "initial status on create",
