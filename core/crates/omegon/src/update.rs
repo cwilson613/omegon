@@ -178,21 +178,42 @@ pub async fn check_latest_for_channel(
 }
 
 /// Semver comparison: is `latest` newer than `current`?
-/// A stable release (0.15.2) is newer than its own RC (0.15.2-rc.3).
+/// A stable release (0.15.2) is newer than its own prerelease variants.
 fn is_newer(latest: &str, current: &str) -> bool {
-    let parse = |s: &str| -> (Vec<u32>, bool) {
-        let is_rc = s.contains("-rc");
-        let base = s.split('-').next().unwrap_or(s);
-        let parts: Vec<u32> = base.split('.').filter_map(|p| p.parse().ok()).collect();
-        (parts, is_rc)
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum SuffixKind {
+        Rc,
+        Nightly,
+        Stable,
+    }
+
+    let parse = |s: &str| -> (Vec<u32>, SuffixKind, u32) {
+        let mut parts = s.splitn(2, '-');
+        let base = parts.next().unwrap_or(s);
+        let suffix = parts.next().unwrap_or("");
+        let version: Vec<u32> = base.split('.').filter_map(|p| p.parse().ok()).collect();
+        if let Some(num) = suffix.strip_prefix("rc.").and_then(|n| n.parse().ok()) {
+            (version, SuffixKind::Rc, num)
+        } else if let Some(num) = suffix
+            .strip_prefix("nightly.")
+            .and_then(|n| n.parse().ok())
+        {
+            (version, SuffixKind::Nightly, num)
+        } else {
+            (version, SuffixKind::Stable, 0)
+        }
     };
-    let (l, l_rc) = parse(latest);
-    let (c, c_rc) = parse(current);
-    match l.cmp(&c) {
+
+    let (l_ver, l_kind, l_num) = parse(latest);
+    let (c_ver, c_kind, c_num) = parse(current);
+    match l_ver.cmp(&c_ver) {
         std::cmp::Ordering::Greater => true,
         std::cmp::Ordering::Less => false,
-        // Same base version: stable > rc
-        std::cmp::Ordering::Equal => c_rc && !l_rc,
+        std::cmp::Ordering::Equal => match l_kind.cmp(&c_kind) {
+            std::cmp::Ordering::Greater => true,
+            std::cmp::Ordering::Less => false,
+            std::cmp::Ordering::Equal => l_num > c_num,
+        },
     }
 }
 
@@ -413,10 +434,12 @@ mod tests {
         assert!(is_newer("1.0.0", "0.15.2"));
         assert!(!is_newer("0.15.1", "0.15.2"));
         assert!(!is_newer("0.15.2", "0.15.2"));
-        // RC versions: strip suffix for comparison
         assert!(is_newer("0.15.2", "0.15.2-rc.3"));
         assert!(!is_newer("0.15.1", "0.15.2-rc.3"));
         assert!(is_newer("0.15.3-rc.7", "0.15.2"));
+        assert!(is_newer("0.15.3-nightly.20260326", "0.15.3-rc.7"));
+        assert!(is_newer("0.15.3-nightly.20260327", "0.15.3-nightly.20260326"));
+        assert!(is_newer("0.15.3", "0.15.3-nightly.20260327"));
     }
 
     #[test]

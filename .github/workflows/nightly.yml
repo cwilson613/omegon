@@ -1,0 +1,74 @@
+name: Nightly prerelease
+
+on:
+  schedule:
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cut-nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Compute nightly version
+        id: nightly
+        run: |
+          set -euo pipefail
+          CURRENT=$(grep '^version = ' core/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          BASE=$(echo "$CURRENT" | sed -E 's/-(rc\.[0-9]+|nightly\.[0-9]+)$//')
+          DATE=$(date -u +%Y%m%d)
+          VERSION="${BASE}-nightly.${DATE}"
+          TAG="v${VERSION}"
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if nightly tag already exists
+        id: exists
+        run: |
+          if git ls-remote --tags origin "${{ steps.nightly.outputs.tag }}" | grep -q .; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Nightly tag already exists: ${{ steps.nightly.outputs.tag }}"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stamp nightly version and metadata
+        if: steps.exists.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          CURRENT='${{ steps.nightly.outputs.current }}'
+          VERSION='${{ steps.nightly.outputs.version }}'
+          sed -i "s/^version = \"${CURRENT}\"/version = \"${VERSION}\"/" core/Cargo.toml
+          ./scripts/milestone-update.sh nightly "$VERSION"
+          cd core
+          cargo check -p omegon
+
+      - name: Create nightly release commit and tag
+        if: steps.exists.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          VERSION='${{ steps.nightly.outputs.version }}'
+          TAG='${{ steps.nightly.outputs.tag }}'
+          git add core/Cargo.toml core/Cargo.lock .omegon/milestones.json
+          git commit -m "chore(release): ${VERSION}"
+          git tag "$TAG"
+          git push origin "refs/tags/${TAG}"
