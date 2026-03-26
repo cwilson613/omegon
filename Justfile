@@ -98,9 +98,11 @@ rc:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    # Refuse to run with uncommitted changes
-    if [ -n "$(git status --porcelain -- core/)" ]; then
-        echo "✗ Uncommitted changes in core/. Commit or stash first."
+    # Refuse to run with uncommitted changes (core/ and milestones)
+    DIRTY=$(git status --porcelain -- core/ .omegon/milestones.json)
+    if [ -n "$DIRTY" ]; then
+        echo "✗ Uncommitted changes in core/ or milestones. Commit or stash first."
+        echo "$DIRTY"
         exit 1
     fi
 
@@ -126,13 +128,16 @@ rc:
     # Update Cargo.toml
     sed -i '' "s/^version = \"${CURRENT}\"/version = \"${NEW_VERSION}\"/" core/Cargo.toml
 
+    # Update milestone tracking
+    ./scripts/milestone-update.sh rc "$NEW_VERSION"
+
     # Test first (faster than build, catches errors early)
     echo "Testing..."
     cd core && cargo test -p omegon 2>&1 | tail -3
     cd ..
 
     # Commit and tag BEFORE final build so the binary has the right sha
-    git add core/Cargo.toml core/Cargo.lock
+    git add core/Cargo.toml core/Cargo.lock .omegon/milestones.json
     git commit -m "chore(release): ${NEW_VERSION}"
     git tag "v${NEW_VERSION}"
 
@@ -171,8 +176,10 @@ release:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if [ -n "$(git status --porcelain -- core/)" ]; then
-        echo "✗ Uncommitted changes in core/. Commit or stash first."
+    DIRTY=$(git status --porcelain -- core/ .omegon/milestones.json)
+    if [ -n "$DIRTY" ]; then
+        echo "✗ Uncommitted changes in core/ or milestones. Commit or stash first."
+        echo "$DIRTY"
         exit 1
     fi
 
@@ -188,11 +195,14 @@ release:
 
     sed -i '' "s/^version = \"${CURRENT}\"/version = \"${NEW_VERSION}\"/" core/Cargo.toml
 
+    # Mark milestone as released
+    ./scripts/milestone-update.sh release "$NEW_VERSION"
+
     echo "Testing..."
     cd core && cargo test -p omegon 2>&1 | tail -3
     cd ..
 
-    git add core/Cargo.toml core/Cargo.lock
+    git add core/Cargo.toml core/Cargo.lock .omegon/milestones.json
     git commit -m "chore(release): ${NEW_VERSION}"
     git tag "v${NEW_VERSION}"
 
@@ -207,12 +217,17 @@ release:
     # Open the next RC cycle immediately so dev builds aren't mislabelled as the
     # just-shipped stable release.  No rebuild needed — this is just a version bump.
     IFS='.' read -r MAJOR MINOR PATCH <<< "$NEW_VERSION"
-    NEXT_RC="${MAJOR}.${MINOR}.$((PATCH + 1))-rc.1"
+    NEXT_PATCH="${MAJOR}.${MINOR}.$((PATCH + 1))"
+    NEXT_RC="${NEXT_PATCH}-rc.1"
     echo ""
     echo "Opening next cycle: $NEXT_RC"
     sed -i '' "s/^version = \"${NEW_VERSION}\"/version = \"${NEXT_RC}\"/" core/Cargo.toml
+
+    # Open next milestone
+    ./scripts/milestone-update.sh open "$NEXT_PATCH"
+
     cd core && cargo check -p omegon -q 2>&1 | tail -1; cd ..
-    git add core/Cargo.toml core/Cargo.lock
+    git add core/Cargo.toml core/Cargo.lock .omegon/milestones.json
     git commit -m "chore(release): ${NEXT_RC}"
     echo "✓ Bumped to ${NEXT_RC} — branch is now open for the next cycle."
     echo "  Publish stable: git push origin main v${NEW_VERSION}"
