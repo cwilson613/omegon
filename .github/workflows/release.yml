@@ -11,6 +11,12 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
+  APPLE_SIGNING_CERT_B64: ${{ secrets.APPLE_SIGNING_CERT_B64 }}
+  APPLE_SIGNING_CERT_PASSWORD: ${{ secrets.APPLE_SIGNING_CERT_PASSWORD }}
+  APPLE_API_KEY_P8_B64: ${{ secrets.APPLE_API_KEY_P8_B64 }}
+  APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+  APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
 
 jobs:
   build:
@@ -62,6 +68,46 @@ jobs:
           elif command -v strip >/dev/null 2>&1; then
             strip "$BINARY" 2>/dev/null || true
           fi
+
+      - name: Import Apple signing certificate
+        if: runner.os == 'macOS' && env.APPLE_SIGNING_CERT_B64 != '' && env.APPLE_SIGNING_CERT_PASSWORD != '' && env.APPLE_CODESIGN_IDENTITY != ''
+        env:
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/omegon-signing.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/omegon-signing.p12"
+          echo "$APPLE_SIGNING_CERT_B64" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_SIGNING_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Sign macOS binary
+        if: runner.os == 'macOS' && env.APPLE_SIGNING_CERT_B64 != '' && env.APPLE_SIGNING_CERT_PASSWORD != '' && env.APPLE_CODESIGN_IDENTITY != ''
+        run: |
+          set -euo pipefail
+          BINARY="core/target/${{ matrix.target }}/release/omegon"
+          codesign --force --options runtime --timestamp --sign "$APPLE_CODESIGN_IDENTITY" "$BINARY"
+          codesign --verify --deep --strict --verbose=2 "$BINARY"
+
+      - name: Notarize macOS binary
+        if: runner.os == 'macOS' && env.APPLE_SIGNING_CERT_B64 != '' && env.APPLE_SIGNING_CERT_PASSWORD != '' && env.APPLE_CODESIGN_IDENTITY != '' && env.APPLE_API_KEY_P8_B64 != '' && env.APPLE_API_KEY_ID != '' && env.APPLE_API_ISSUER != ''
+        run: |
+          set -euo pipefail
+          BINARY="core/target/${{ matrix.target }}/release/omegon"
+          NOTARY_ZIP="$RUNNER_TEMP/omegon-${{ matrix.target }}-notary.zip"
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          echo "$APPLE_API_KEY_P8_B64" | base64 --decode > "$KEY_PATH"
+          ditto -c -k --keepParent "$BINARY" "$NOTARY_ZIP"
+          xcrun notarytool submit "$NOTARY_ZIP" \
+            --key "$KEY_PATH" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
 
       - name: Create archive
         run: |
