@@ -804,6 +804,22 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
+    fn render_text(data: &FooterData, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                data.render(frame.area(), frame, &super::super::theme::Alpharius);
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let a = buf.area;
+        (0..a.height)
+            .flat_map(|y| (0..a.width).map(move |x| buf[(x, y)].symbol().to_string()))
+            .collect()
+    }
+
     #[test]
     fn footer_renders_without_panic() {
         let data = FooterData {
@@ -844,21 +860,7 @@ mod tests {
             model_provider: "anthropic".into(),
             ..Default::default()
         };
-        let backend = TestBackend::new(120, 5);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal
-            .draw(|frame| {
-                data.render(frame.area(), frame, &super::super::theme::Alpharius);
-            })
-            .unwrap();
-
-        let text: String = {
-            let buf = terminal.backend().buffer();
-            let a = buf.area;
-            (0..a.height)
-                .flat_map(|y| (0..a.width).map(move |x| buf[(x, y)].symbol().to_string()))
-                .collect()
-        };
+        let text = render_text(&data, 120, 5);
         assert!(text.contains("opus"), "should show model: {text}");
     }
 
@@ -869,25 +871,51 @@ mod tests {
             context_window: 200_000,
             ..Default::default()
         };
-        let backend = TestBackend::new(120, 5);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal
-            .draw(|frame| {
-                data.render(frame.area(), frame, &super::super::theme::Alpharius);
-            })
-            .unwrap();
-
-        let text: String = {
-            let buf = terminal.backend().buffer();
-            let a = buf.area;
-            (0..a.height)
-                .flat_map(|y| (0..a.width).map(move |x| buf[(x, y)].symbol().to_string()))
-                .collect()
-        };
+        let text = render_text(&data, 120, 5);
         assert!(
             text.contains("75") || text.contains("200k"),
             "should show context info: {text}"
         );
+    }
+
+    #[test]
+    fn footer_engine_surface_shows_openai_api_honestly() {
+        let data = FooterData {
+            model_id: "openai:gpt-5.4".into(),
+            model_provider: "openai".into(),
+            provider_connected: true,
+            is_oauth: false,
+            context_class: ContextClass::Maniple,
+            context_percent: 12.0,
+            context_window: 1_000_000,
+            model_tier: "victory".into(),
+            thinking_level: "medium".into(),
+            ..Default::default()
+        };
+        let text = render_text(&data, 120, 5);
+        assert!(text.contains("OpenAI API"), "should show OpenAI API label: {text}");
+        assert!(text.contains("api key"), "should show api key auth: {text}");
+        assert!(!text.contains("ChatGPT/Codex"), "must not relabel OpenAI API as ChatGPT/Codex: {text}");
+    }
+
+    #[test]
+    fn footer_engine_surface_shows_chatgpt_codex_honestly() {
+        let data = FooterData {
+            model_id: "openai-codex:gpt-5.4".into(),
+            model_provider: "openai-codex".into(),
+            provider_connected: true,
+            is_oauth: true,
+            context_class: ContextClass::Maniple,
+            context_percent: 12.0,
+            context_window: 1_000_000,
+            model_tier: "victory".into(),
+            thinking_level: "medium".into(),
+            ..Default::default()
+        };
+        let text = render_text(&data, 120, 5);
+        assert!(text.contains("ChatGPT/Codex"), "should show ChatGPT/Codex label: {text}");
+        assert!(text.contains("subscription"), "should show subscription auth: {text}");
+        assert!(!text.contains("OpenAI API"), "must not relabel ChatGPT/Codex as OpenAI API: {text}");
     }
 
     #[test]
