@@ -1,0 +1,61 @@
+{
+  "runId": "clv-5qnn3qfs-agfl",
+  "directive": "Minimal internal cleave_run smoke test on real repo files; read-only only; no commits.",
+  "repoPath": "/Users/cwilson/workspace/black-meridian/omegon/core",
+  "workspacePath": "/Users/cwilson/workspace/black-meridian/omegon/core/.omegon/cleave-workspace",
+  "children": [
+    {
+      "childId": 0,
+      "label": "inspect-contrib",
+      "description": "Read CONTRIBUTING.md and report one concise workflow rule. Do not modify files.",
+      "scope": [
+        "CONTRIBUTING.md"
+      ],
+      "dependsOn": [],
+      "status": "failed",
+      "error": "failed to open repo",
+      "branch": "cleave/0-inspect-contrib",
+      "backend": "native",
+      "executeModel": "anthropic:claude-sonnet-4-6"
+    },
+    {
+      "childId": 1,
+      "label": "inspect-main",
+      "description": "Read core/crates/omegon/src/main.rs and report one concise observation about startup model resolution. Do not modify files.",
+      "scope": [
+        "core/crates/omegon/src/main.rs"
+      ],
+      "dependsOn": [
+        "inspect-contrib"
+      ],
+      "status": "failed",
+      "error": "failed to open repo",
+      "branch": "cleave/1-inspect-main",
+      "backend": "native",
+      "executeModel": "anthropic:claude-sonnet-4-6"
+    }
+  ],
+  "plan": {
+    "children": [
+      {
+        "depends_on": [],
+        "description": "Read CONTRIBUTING.md and report one concise workflow rule. Do not modify files.",
+        "label": "inspect-contrib",
+        "scope": [
+          "CONTRIBUTING.md"
+        ]
+      },
+      {
+        "depends_on": [
+          "inspect-contrib"
+        ],
+        "description": "Read core/crates/omegon/src/main.rs and report one concise observation about startup model resolution. Do not modify files.",
+        "label": "inspect-main",
+        "scope": [
+          "core/crates/omegon/src/main.rs"
+        ]
+      }
+    ],
+    "rationale": ""
+  }
+}

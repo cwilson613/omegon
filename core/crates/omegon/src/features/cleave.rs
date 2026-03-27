@@ -619,7 +619,7 @@ impl Feature for CleaveFeature {
                         },
                         "plan_json": {
                             "type": "string",
-                            "description": "JSON string of the split plan: {\"children\": [{\"label\": \"...\", \"description\": \"...\", \"scope\": [...], \"depends_on\": [...]}]}"
+                            "description": "JSON string of the split plan: {\"children\": [{\"label\": \"...\", \"description\": \"...\", \"scope\": [...], \"depends_on\": [\"other-child-label\"]}]}. `depends_on` should use child labels; numeric indexes are accepted for backward compatibility and normalized to labels."
                         },
                         "max_parallel": {
                             "type": "number",
