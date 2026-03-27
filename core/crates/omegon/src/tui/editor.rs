@@ -424,6 +424,7 @@ impl Editor {
     pub fn cursor_screen_position(&mut self, editor_area: Rect) -> (u16, u16) {
         let (cursor_row, cursor_col) = self.textarea.cursor();
         let content_width = editor_area.width.max(1) as usize;
+        let inner_x = editor_area.x;
         let inner_y = editor_area.y + 1;
         let inner_height = editor_area.height.saturating_sub(1).max(1);
 
@@ -431,16 +432,21 @@ impl Editor {
         let mut visual_col: u16 = 0;
 
         for (row_idx, line) in self.textarea.lines().iter().enumerate() {
+            let row_prefix_width = if row_idx == cursor_row {
+                let prefix: String = line.chars().take(cursor_col).collect();
+                UnicodeWidthStr::width(prefix.as_str())
+            } else {
+                UnicodeWidthStr::width(line.as_str())
+            };
+
             if row_idx < cursor_row {
-                let display_width = UnicodeWidthStr::width(line.as_str());
-                visual_row = visual_row.saturating_add(display_width.max(1).div_ceil(content_width) as u16);
+                visual_row = visual_row
+                    .saturating_add(row_prefix_width.max(1).div_ceil(content_width) as u16);
                 continue;
             }
 
-            let prefix: String = line.chars().take(cursor_col).collect();
-            let prefix_width = UnicodeWidthStr::width(prefix.as_str());
-            visual_row = visual_row.saturating_add((prefix_width / content_width) as u16);
-            visual_col = (prefix_width % content_width) as u16;
+            visual_row = visual_row.saturating_add((row_prefix_width / content_width) as u16);
+            visual_col = (row_prefix_width % content_width) as u16;
             break;
         }
 
@@ -451,7 +457,7 @@ impl Editor {
         }
 
         let screen_y = inner_y + visual_row.saturating_sub(self.scroll_row);
-        let screen_x = editor_area.x + visual_col.min(editor_area.width.saturating_sub(1));
+        let screen_x = inner_x + visual_col.min(editor_area.width.saturating_sub(1));
         (screen_x, screen_y.min(editor_area.y + editor_area.height.saturating_sub(1)))
     }
 

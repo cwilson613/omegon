@@ -88,6 +88,17 @@ fn editor_cursor_screen_position_tracks_wrapped_backspace() {
 }
 
 #[test]
+fn editor_cursor_screen_position_wraps_at_expected_column() {
+    let mut editor = crate::tui::editor::Editor::new();
+    editor.set_text("123456789");
+    editor.move_end();
+    let area = Rect { x: 0, y: 0, width: 6, height: 6 };
+    let (x, y) = editor.cursor_screen_position(area);
+    assert_eq!(x, 3, "9 chars at width 6 should wrap to column 3");
+    assert_eq!(y, 2, "9 chars at width 6 should land on the second wrapped row beneath the border");
+}
+
+#[test]
 fn editor_height_expands_for_wrapped_input() {
     let mut editor = crate::tui::editor::Editor::new();
     editor.set_text("1234567890abcdefghij");

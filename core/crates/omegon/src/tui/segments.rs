@@ -693,6 +693,39 @@ fn render_tool_card(
     buf: &mut Buffer,
     t: &dyn Theme,
 ) {
+    let summarize_args = |tool_name: &str, args: Option<&str>| -> Option<String> {
+        let args = args?;
+        match tool_name {
+            "edit" | "change" => {
+                serde_json::from_str::<serde_json::Value>(args)
+                    .ok()
+                    .and_then(|v| {
+                        let path = v
+                            .get("file")
+                            .or(v.get("path"))
+                            .and_then(|f| f.as_str())
+                            .unwrap_or("(unknown file)");
+                        let old_len = v
+                            .get("oldText")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.lines().count())
+                            .unwrap_or(0);
+                        let new_len = v
+                            .get("newText")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.lines().count())
+                            .unwrap_or(0);
+                        Some(format!("{path} · {old_len}→{new_len} lines"))
+                    })
+                    .or_else(|| Some(crate::util::truncate(args, 80)))
+            }
+            "read" | "write" | "view" | "bash" => {
+                Some(args.lines().next().unwrap_or(args).to_string())
+            }
+            _ => None,
+        }
+    };
+
     let (icon, status_color) = if complete {
         if is_error {
             ("✗", t.error())
@@ -788,11 +821,18 @@ fn render_tool_card(
 
     let mut lines: Vec<Line<'_>> = Vec::new();
 
+    if let Some(summary) = summarize_args(name, detail_args) {
+        lines.push(Line::from(vec![
+            Span::styled("▸ ", Style::default().fg(t.accent_muted()).bg(bg)),
+            Span::styled(summary, Style::default().fg(t.fg()).bg(bg)),
+        ]));
+    }
+
     // ── Args section ────────────────────────────────────────────
     if let Some(args) = detail_args {
         match name {
             "bash" => {
-                for (i, line) in args.lines().take(4).enumerate() {
+                for (i, line) in args.lines().take(4).enumerate().skip(1) {
                     let prefix = if i == 0 { "$ " } else { "  " };
                     lines.push(Line::from(vec![
                         Span::styled(prefix, Style::default().fg(t.dim()).bg(bg)),
@@ -801,38 +841,10 @@ fn render_tool_card(
                 }
             }
             "edit" | "change" => {
-                // Try to extract just the file path from JSON args
-                let file_path = serde_json::from_str::<serde_json::Value>(args)
-                    .ok()
-                    .and_then(|v| {
-                        v.get("file")
-                            .or(v.get("path"))
-                            .and_then(|f| f.as_str().map(String::from))
-                    });
-                if let Some(path) = file_path {
-                    lines.push(Line::from(vec![
-                        Span::styled("▸ ", Style::default().fg(t.accent_muted()).bg(bg)),
-                        Span::styled(path, Style::default().fg(t.fg()).bg(bg)),
-                    ]));
-                } else {
-                    lines.push(Line::from(vec![
-                        Span::styled("▸ edit ", Style::default().fg(t.accent_muted()).bg(bg)),
-                        Span::styled(
-                            crate::util::truncate(args, 80),
-                            Style::default().fg(t.dim()).bg(bg),
-                        ),
-                    ]));
-                }
+                // Summary line already rendered above; don't dump raw JSON payloads.
             }
-            "read" | "write" => {
-                // File path — will be rendered as clickable link post-render
-                lines.push(Line::from(Span::styled(
-                    args.to_string(),
-                    Style::default()
-                        .fg(t.accent_muted())
-                        .bg(bg)
-                        .add_modifier(Modifier::UNDERLINED),
-                )));
+            "read" | "write" | "view" => {
+                // Summary line already rendered above; body/result carries the useful payload.
             }
             _ => {
                 // Pretty-print JSON args if applicable
@@ -972,10 +984,20 @@ fn render_tool_card(
         .render(card_inner, buf);
 
     // ── Post-render: OSC 8 hyperlinks for file paths ────────────
-    if matches!(name, "read" | "edit" | "write")
+    if matches!(name, "read" | "edit" | "write" | "change" | "view")
         && let Some(args) = detail_args
     {
-        let file_path = args.lines().next().unwrap_or(args).trim();
+        let file_path = match name {
+            "edit" | "change" => serde_json::from_str::<serde_json::Value>(args)
+                .ok()
+                .and_then(|v| {
+                    v.get("file")
+                        .or(v.get("path"))
+                        .and_then(|f| f.as_str().map(String::from))
+                })
+                .unwrap_or_else(|| args.lines().next().unwrap_or(args).trim().to_string()),
+            _ => args.lines().next().unwrap_or(args).trim().to_string(),
+        };
         if !file_path.is_empty() && card_inner.height > 0 {
             let url = format!("file://{file_path}");
             let link_area = Rect {
@@ -1351,6 +1373,30 @@ mod tests {
         assert!(text.contains("Ω"), "assistant header should include Ω sigil: {text}");
         assert!(text.contains("response"), "assistant header should describe the segment role: {text}");
         assert!(text.contains("╭") || text.contains("╰") || text.contains("│"), "assistant response should now render as a card: {text}");
+    }
+
+    #[test]
+    fn edit_tool_card_summarizes_args_instead_of_dumping_raw_json() {
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::ToolCard {
+                id: "1".into(),
+                name: "edit".into(),
+                args_summary: None,
+                detail_args: Some(r#"{"file":"src/main.rs","oldText":"a\nb","newText":"c\nd\ne"}"#.into()),
+                result_summary: None,
+                detail_result: Some("ok".into()),
+                is_error: false,
+                complete: true,
+                expanded: false,
+            },
+        };
+        let (area, mut buf) = make_buf(80, 8);
+        seg.render(area, &mut buf, &Alpharius);
+        let text = buf_text(&buf, area);
+        assert!(text.contains("src/main.rs"), "edit cards should summarize the file path: {text}");
+        assert!(text.contains("2→3 lines"), "edit cards should summarize line counts: {text}");
+        assert!(!text.contains("oldText"), "edit cards should not dump raw JSON keys into the card header: {text}");
     }
 
     #[test]
