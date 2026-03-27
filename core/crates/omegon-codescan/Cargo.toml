@@ -25,7 +25,14 @@ pulldown-cmark = "0.12"
 glob = "0.3"
 walkdir = "2"
 
-# Regex for code scanning
+# Tree-sitter AST parsing (code scanner)
+tree-sitter = "0.23"
+tree-sitter-rust = "0.24"
+tree-sitter-python = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-go = "0.25"
+
+# Regex fallback (used when tree-sitter parse fails)
 regex = "1"
 
 [dev-dependencies]

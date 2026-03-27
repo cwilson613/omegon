@@ -5,6 +5,7 @@
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::code::CodeChunk;
@@ -54,30 +55,53 @@ impl ScanCache {
         Ok(Self { conn })
     }
 
-    pub fn stale_paths(&self, paths: &[(PathBuf, String)]) -> Vec<PathBuf> {
-        let mut stale = Vec::new();
-        for (path, new_hash) in paths {
-            let path_str = path.to_string_lossy();
-            let cached: Option<String> = self
-                .conn
-                .query_row(
-                    "SELECT content_hash FROM code_chunks WHERE path = ?1 LIMIT 1",
-                    params![path_str],
-                    |row| row.get(0),
-                )
-                .or_else(|_| {
-                    self.conn.query_row(
-                        "SELECT content_hash FROM knowledge_chunks WHERE path = ?1 LIMIT 1",
-                        params![path_str],
-                        |row| row.get(0),
-                    )
-                })
-                .ok();
-            if cached.as_deref() != Some(new_hash.as_str()) {
-                stale.push(path.clone());
-            }
+    /// Return a (path → content_hash) map for ALL indexed files.
+    ///
+    /// Used by the indexer to batch-compare hashes without N individual queries.
+    pub fn all_hashes(&self) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        if let Ok(mut stmt) = self.conn.prepare(
+            "SELECT path, content_hash FROM code_chunks GROUP BY path HAVING MAX(rowid)",
+        ) {
+            let _ = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map(|rows| {
+                for row in rows.flatten() {
+                    map.insert(row.0, row.1);
+                }
+            });
         }
-        stale
+        if let Ok(mut stmt) = self.conn.prepare(
+            "SELECT path, content_hash FROM knowledge_chunks GROUP BY path HAVING MAX(rowid)",
+        ) {
+            let _ = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map(|rows| {
+                for row in rows.flatten() {
+                    map.entry(row.0).or_insert(row.1);
+                }
+            });
+        }
+        map
+    }
+
+    /// Return paths whose content_hash has changed (or are not yet indexed).
+    ///
+    /// Uses a single pair of batch DB queries instead of N individual queries.
+    pub fn stale_paths(&self, paths: &[(PathBuf, String)]) -> Vec<PathBuf> {
+        let cached = self.all_hashes();
+        paths
+            .iter()
+            .filter(|(p, new_hash)| {
+                cached
+                    .get(p.to_string_lossy().as_ref())
+                    .map(|h| h != new_hash)
+                    .unwrap_or(true) // not cached → stale
+            })
+            .map(|(p, _)| p.clone())
+            .collect()
     }
 
     pub fn upsert_code_chunks(&self, path: &Path, hash: &str, chunks: &[CodeChunk]) -> Result<()> {
@@ -165,6 +189,20 @@ impl ScanCache {
         self.conn.execute_batch("DELETE FROM code_chunks; DELETE FROM knowledge_chunks;")?;
         Ok(())
     }
+
+    /// Count of indexed code chunks.
+    pub fn code_chunk_count(&self) -> usize {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM code_chunks", [], |r| r.get(0))
+            .unwrap_or(0usize)
+    }
+
+    /// Count of indexed knowledge chunks.
+    pub fn knowledge_chunk_count(&self) -> usize {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM knowledge_chunks", [], |r| r.get(0))
+            .unwrap_or(0usize)
+    }
 }
 
 #[cfg(test)]
@@ -196,15 +234,29 @@ mod tests {
     }
 
     #[test]
-    fn stale_paths_works() {
+    fn stale_paths_uses_batch_query() {
         let dir = tempfile::tempdir().unwrap();
         let cache = ScanCache::open(&dir.path().join("t.db")).unwrap();
         let path_a = PathBuf::from("a.rs");
         let chunk = CodeChunk { path: path_a.clone(), start_line: 1, end_line: 1, item_name: "a".into(), item_kind: "fn".into(), text: "fn a(){}".into() };
         cache.upsert_code_chunks(&path_a, "hash_a", &[chunk]).unwrap();
-        let stale = cache.stale_paths(&[(path_a.clone(), "hash_a".into()), (path_a.clone(), "hash_new".into())]);
-        assert_eq!(stale.len(), 1);
-        assert_eq!(stale[0], path_a);
+
+        let stale = cache.stale_paths(&[
+            (path_a.clone(), "hash_a".into()),     // not stale
+            (path_a.clone(), "hash_new".into()),   // stale (changed)
+            (PathBuf::from("b.rs"), "any".into()), // stale (new)
+        ]);
+        assert_eq!(stale.len(), 2, "should detect changed + new: {:?}", stale);
+    }
+
+    #[test]
+    fn all_hashes_returns_correct_map() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = ScanCache::open(&dir.path().join("t.db")).unwrap();
+        let chunk = CodeChunk { path: PathBuf::from("x.rs"), start_line: 1, end_line: 1, item_name: "x".into(), item_kind: "fn".into(), text: "".into() };
+        cache.upsert_code_chunks(Path::new("x.rs"), "abc123", &[chunk]).unwrap();
+        let hashes = cache.all_hashes();
+        assert_eq!(hashes.get("x.rs"), Some(&"abc123".to_string()));
     }
 
     #[test]
