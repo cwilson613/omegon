@@ -267,6 +267,8 @@ impl AgentSetup {
                 memory_backend,
                 mind,
             )));
+        } else {
+            tracing::error!(db = %db_path.display(), "memory backend unavailable — memory_* tools disabled");
         }
 
         // ─── Lifecycle (design-tree + openspec) ──────────────────────────

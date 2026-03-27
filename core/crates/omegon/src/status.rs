@@ -44,6 +44,10 @@ pub struct HarnessStatus {
     // ── Cloud providers ──────────────────────────────────────
     pub providers: Vec<ProviderStatus>,
 
+    // ── Feature availability ───────────────────────────────
+    pub memory_available: bool,
+    pub cleave_available: bool,
+
     // ── Active delegates ─────────────────────────────────────
     /// Currently running delegate processes (cleave children).
     pub active_delegates: Vec<DelegateSummary>,
@@ -261,6 +265,9 @@ impl HarnessStatus {
         // Populate installed plugins from the bus's registered features
         // (Feature trait doesn't expose identity, so we use tool counts as signal)
         let tool_defs = bus.tool_definitions();
+        self.memory_available = tool_defs.iter().any(|t| t.name == crate::tool_registry::memory::MEMORY_QUERY);
+        self.cleave_available = tool_defs.iter().any(|t| t.name == crate::tool_registry::cleave::CLEAVE_ASSESS)
+            && tool_defs.iter().any(|t| t.name == crate::tool_registry::cleave::CLEAVE_RUN);
         let mcp_tools: Vec<_> = tool_defs
             .iter()
             .filter(|t| t.label.starts_with("mcp:"))
@@ -304,6 +311,7 @@ impl HarnessStatus {
     /// Update memory stats.
     pub fn update_memory(&mut self, stats: MemoryStatus) {
         self.memory = stats;
+        self.memory_available = true;
     }
 }
 
@@ -436,6 +444,8 @@ impl Default for HarnessStatus {
                 active_persona_mind: None,
             },
             providers: vec![],
+            memory_available: false,
+            cleave_available: false,
             active_delegates: vec![],
         }
     }
@@ -451,6 +461,20 @@ mod tests {
         assert!(status.active_persona.is_none());
         assert!(status.mcp_servers.is_empty());
         assert_eq!(status.context_class, "Squad");
+        assert!(!status.memory_available);
+        assert!(!status.cleave_available);
+    }
+
+    #[test]
+    fn footer_summary_includes_memory_and_cleave_availability_when_set() {
+        let mut status = HarnessStatus::default();
+        status.memory_available = true;
+        status.cleave_available = true;
+        let summary = status.footer_summary();
+        assert!(summary.contains("Squad"));
+        // footer_summary stays terse; availability lives in slash-stats and harness JSON
+        assert!(!summary.contains("Memory"));
+        assert!(!summary.contains("Cleave"));
     }
 
     #[test]

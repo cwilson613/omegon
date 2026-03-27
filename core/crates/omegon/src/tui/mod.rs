@@ -1763,6 +1763,7 @@ impl App {
         ),
         ("sessions", "list saved sessions", &[]),
         ("memory", "memory stats", &[]),
+        ("cleave", "show cleave status or trigger decomposition", &["status"]),
         (
             "login",
             "log in to a provider or service",
@@ -1932,7 +1933,8 @@ impl App {
                 };
                 SlashResult::Display(format!(
                     "Session:\n  Duration:    {time}\n  Turns:       {}\n  Tool calls:  {}\n  Compactions: {}\n\n\
-                     Context:\n  Usage:       {:.0}%\n  Window:      {} tokens\n  Model:       {}\n  Thinking:    {} {}",
+                     Context:\n  Usage:       {:.0}%\n  Window:      {} tokens\n  Model:       {}\n  Thinking:    {} {}\n\n\
+                     Features:\n  Memory:      {}\n  Cleave:      {}",
                     self.turn,
                     self.tool_calls,
                     self.dashboard.compactions,
@@ -1941,6 +1943,8 @@ impl App {
                     s.model_short(),
                     s.thinking.icon(),
                     s.thinking.as_str(),
+                    if self.footer_data.harness.memory_available { "available" } else { "UNAVAILABLE" },
+                    if self.footer_data.harness.cleave_available { "available" } else { "UNAVAILABLE" },
                 ))
             }
 
