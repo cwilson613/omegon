@@ -648,19 +648,18 @@ impl DashboardState {
         let tree_area = Rect {
             x: area.x,
             y: area.y,
-            width: area.width.saturating_sub(1).max(1),
+            width: area.width.saturating_sub(2).max(1),
+            height: area.height,
+        };
+        let scrollbar_area = Rect {
+            x: area.x + area.width.saturating_sub(1),
+            y: area.y,
+            width: 1,
             height: area.height,
         };
 
-        let scrollbar = Scrollbar::new(ratatui::widgets::ScrollbarOrientation::VerticalRight)
-            .thumb_symbol("▐")
-            .track_symbol(Some("░"))
-            .thumb_style(Style::default().fg(t.border_dim()))
-            .track_style(Style::default().fg(t.bg()));
-
         let tree = tree
             .style(Style::default().bg(t.bg()))
-            .experimental_scrollbar(Some(scrollbar))
             .highlight_style(hl)
             .highlight_symbol(if self.sidebar_active { "▸" } else { " " })
             .node_closed_symbol("▸ ")
@@ -668,6 +667,21 @@ impl DashboardState {
             .node_no_children_symbol("  ");
 
         frame.render_stateful_widget(tree, tree_area, &mut self.tree_state);
+
+        // Render a dedicated scrollbar gutter so tree text never paints under it.
+        let visible_rows = self
+            .tree_state
+            .flatten(&items)
+            .len()
+            .saturating_sub(tree_area.height as usize);
+        let mut scrollbar_state = tui_tree_widget::ScrollbarState::new(visible_rows)
+            .position(self.tree_state.get_offset());
+        let scrollbar = Scrollbar::new(ratatui::widgets::ScrollbarOrientation::VerticalRight)
+            .thumb_symbol("▐")
+            .track_symbol(Some("░"))
+            .thumb_style(Style::default().fg(t.border_dim()))
+            .track_style(Style::default().fg(t.bg()));
+        frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
     }
 }
 
