@@ -52,3 +52,9 @@ Cross-cutting release-planning umbrella for the 0.15.4 RC series. This node does
 **Status:** decided
 
 **Rationale:** To keep 0.15.4 shippable, the RC series should not absorb large strategic fronts whose value is real but whose scope is orthogonal to immediate runtime trust. Explicitly deferred from the 0.15.4 critical path are: Omega platform expansion beyond diagnostics directly needed for harness trust, composable tutorial/plugin ecosystem work, self-curated memory/autonomy layers, and A2A/external agent interoperability. These nodes remain valid and may continue as design work, but they do not block 0.15.4 and should not be allowed to expand the release thesis.
+
+### Decision: target 0.15.4-rc.1 for 2026-04-03 with an integrity-first scope
+
+**Status:** decided
+
+**Rationale:** Today is Friday, 2026-03-27. A realistic first RC target is Friday, 2026-04-03 — one working week to land and verify the integrity-first slice without inventing false certainty. RC1 should aim to ship the narrowest release-worthy checkpoint of the 0.15.4 program: close out orchestratable-provider-model verification, land OpenAI-family provider identity/routing honesty, and prove realistic orchestrated execution against repo-backed tasks. Session secret preflight, diagnostics v1, and broader merge/release hardening remain part of the 0.15.4 release thesis but should not be forced into rc.1 if that would turn the first RC into another moving target.
