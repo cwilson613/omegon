@@ -32,6 +32,12 @@ Release-checklist node for the second rc.1 acceptance criterion: OpenAI-family a
 
 **Rationale:** These four cases cover the real ambiguity boundary. Rc.1 should prove: (1) OpenAI API-only credentials present — `openai` executes honestly as API OpenAI, (2) ChatGPT/Codex OAuth-only credentials present — generic OpenAI API is not falsely shown as authenticated, but GPT-family intent can still resolve to `openai-codex` when appropriate, (3) both credential classes present — the chosen concrete provider is still reported honestly, and (4) a route that begins as `openai` intent but executes via `openai-codex` shows that fallthrough truthfully in the operator-visible surface.
 
+### Decision: rc.1 OpenAI-family proof surfaces are the bootstrap provider lines, model selector options, engine panel provider/model/auth line, and post-run report evidence
+
+**Status:** decided
+
+**Rationale:** The code already gives us four concrete surfaces that matter and are testable. The bootstrap panel renders provider/auth state from `HarnessStatus` (`tui/bootstrap.rs`). The model selector builds gated choices based on separate OpenAI API and OpenAI Codex auth inputs (`tui/mod.rs::build_model_selector_options`, with existing tests in `tui/tests.rs`). The engine panel in the footer shows provider label, model, and auth class (`tui/footer.rs`). And the rc.1 routed-run/report evidence should carry the final concrete provider/model route. These surfaces are enough to prove the split honestly without waiting for a full dashboard redesign.
+
 ## Open Questions
 
 - Which operator-visible surfaces are mandatory for rc.1 honesty — bootstrap/auth summary, model selector gating, active engine display, conversation footer, and diagnostics/report output?

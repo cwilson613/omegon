@@ -32,6 +32,12 @@ Release-checklist node for the third rc.1 acceptance criterion: at least one rea
 
 **Rationale:** The proof run passes only if all layers agree. Acceptance means: the child run reaches a coherent terminal state, the concrete provider/model reported to the operator matches the executed route, the repo outcome is explainable (expected file changes or a justified no-op), and worktree/merge bookkeeping does not downgrade the run into apparent failure after successful execution. This directly targets the false-negative failure mode seen in earlier cleave investigations.
 
+### Decision: rc.1 repo-backed orchestration proof should use a bounded documentation or test-surface change in the real repo
+
+**Status:** decided
+
+**Rationale:** For rc.1, the proof task should exercise real checkout/worktree/routing/reporting behavior without coupling success to a large product change. The safest proof shape is a small documentation or test-surface task inside the real repository — for example, updating a design/release doc or adding a narrowly scoped test/assertion — because it still uses the full orchestration path, produces observable repo artifacts, and minimizes merge-risk compared with feature-code changes. That keeps the proof focused on orchestration trust rather than feature implementation complexity.
+
 ## Open Questions
 
 - Which real repo-backed task should serve as the rc.1 proof case so it exercises routing, child execution, and final reporting without depending on an artificial scratch scenario?
