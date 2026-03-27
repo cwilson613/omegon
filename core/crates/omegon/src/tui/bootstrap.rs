@@ -221,6 +221,56 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_shows_openai_api_and_chatgpt_codex_as_distinct_lines() {
+        let mut status = HarnessStatus::default();
+        status.providers.push(ProviderStatus {
+            name: "openai".into(),
+            authenticated: true,
+            auth_method: Some("api-key".into()),
+            model: Some("gpt-5.4".into()),
+        });
+        status.providers.push(ProviderStatus {
+            name: "openai-codex".into(),
+            authenticated: true,
+            auth_method: Some("oauth".into()),
+            model: Some("gpt-5.4".into()),
+        });
+
+        let output = render_bootstrap(&status, false);
+        assert!(
+            output.contains("OpenAI API") && output.contains("(api-key)"),
+            "bootstrap should show OpenAI API as api-key auth: {output}"
+        );
+        assert!(
+            output.contains("ChatGPT/Codex") && output.contains("(oauth)"),
+            "bootstrap should show ChatGPT/Codex as oauth auth: {output}"
+        );
+    }
+
+    #[test]
+    fn bootstrap_does_not_collapse_openai_api_into_chatgpt_codex() {
+        let mut status = HarnessStatus::default();
+        status.providers.push(ProviderStatus {
+            name: "openai".into(),
+            authenticated: false,
+            auth_method: None,
+            model: None,
+        });
+        status.providers.push(ProviderStatus {
+            name: "openai-codex".into(),
+            authenticated: true,
+            auth_method: Some("oauth".into()),
+            model: Some("gpt-5.4".into()),
+        });
+
+        let output = render_bootstrap(&status, false);
+        assert!(
+            output.contains("OpenAI API") && output.contains("ChatGPT/Codex"),
+            "bootstrap should render both distinct OpenAI-family identities: {output}"
+        );
+    }
+
+    #[test]
     fn bootstrap_no_color_has_no_escape_codes() {
         let status = HarnessStatus::default();
         let output = render_bootstrap(&status, false);
