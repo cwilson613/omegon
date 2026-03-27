@@ -18,6 +18,20 @@ related:
 
 Release-checklist node for the second rc.1 acceptance criterion: OpenAI-family auth and routing honesty must be landed in a way the operator can actually trust. This includes distinguishing OpenAI API from ChatGPT/Codex OAuth in visible surfaces and ensuring that the concrete runtime provider/model shown to the operator matches the executable path used by the harness.
 
+## Decisions
+
+### Decision: rc.1 honesty requires bootstrap/auth summary, model selector gating, active engine display, and final reporting surfaces to distinguish OpenAI API from ChatGPT/Codex OAuth
+
+**Status:** decided
+
+**Rationale:** The operator does not trust a split that exists only internally. Rc.1 should require the minimum surface set that affects operator decisions and post-run understanding: the startup/bootstrap auth summary, model selector availability/gating, the active engine display during runtime, and final run/reporting surfaces. Footer and diagnostics can be included if already touched, but these four are the non-negotiable honesty surfaces for rc.1.
+
+### Decision: rc.1 OpenAI-family proof cases are API-only, OAuth-only, both-present, and fallback from openai intent to openai-codex execution
+
+**Status:** decided
+
+**Rationale:** These four cases cover the real ambiguity boundary. Rc.1 should prove: (1) OpenAI API-only credentials present — `openai` executes honestly as API OpenAI, (2) ChatGPT/Codex OAuth-only credentials present — generic OpenAI API is not falsely shown as authenticated, but GPT-family intent can still resolve to `openai-codex` when appropriate, (3) both credential classes present — the chosen concrete provider is still reported honestly, and (4) a route that begins as `openai` intent but executes via `openai-codex` shows that fallthrough truthfully in the operator-visible surface.
+
 ## Open Questions
 
 - Which operator-visible surfaces are mandatory for rc.1 honesty — bootstrap/auth summary, model selector gating, active engine display, conversation footer, and diagnostics/report output?
