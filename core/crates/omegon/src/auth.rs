@@ -194,6 +194,18 @@ pub fn provider_env_vars(provider_id: &str) -> &[&str] {
         .unwrap_or(&[])
 }
 
+/// Choose the canonical environment variable to export for a resolved provider credential.
+/// API-key resolutions map to the first non-OAUTH env var; OAuth resolutions map to the
+/// first OAUTH env var. Returns None if no matching env slot exists.
+pub fn export_env_var_for_provider(provider_id: &str, is_oauth: bool) -> Option<String> {
+    for name in provider_env_vars(provider_id) {
+        if name.contains("OAUTH") == is_oauth {
+            return Some((*name).to_string());
+        }
+    }
+    None
+}
+
 /// Authentication status for all providers and backends.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthStatus {
@@ -1015,6 +1027,26 @@ pub fn auth_status_to_provider_statuses(status: &AuthStatus) -> Vec<ProviderStat
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_env_var_for_provider_picks_api_and_oauth_slots() {
+        assert_eq!(
+            export_env_var_for_provider("openai", false).as_deref(),
+            Some("OPENAI_API_KEY")
+        );
+        assert_eq!(
+            export_env_var_for_provider("openai-codex", true).as_deref(),
+            Some("CHATGPT_OAUTH_TOKEN")
+        );
+        assert_eq!(
+            export_env_var_for_provider("anthropic", true).as_deref(),
+            Some("ANTHROPIC_OAUTH_TOKEN")
+        );
+        assert_eq!(
+            export_env_var_for_provider("anthropic", false).as_deref(),
+            Some("ANTHROPIC_API_KEY")
+        );
+    }
 
     #[test]
     fn pkce_generation() {

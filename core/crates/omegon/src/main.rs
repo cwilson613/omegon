@@ -481,7 +481,8 @@ async fn run_cleave_command(
 
     // Resolve self binary path for spawning children
     let agent_binary = std::env::current_exe()?;
-    let agent_setup = setup::AgentSetup::new(&repo_path, None, None).await?;
+    let cleave_settings = settings::shared(&cli.model);
+    let agent_setup = setup::AgentSetup::new(&repo_path, None, Some(cleave_settings)).await?;
 
     let config = cleave::orchestrator::CleaveConfig {
         agent_binary,
@@ -546,9 +547,14 @@ async fn run_cleave_command(
             .unwrap_or_default();
         eprintln!("  {} **{}**{}: {:?}", icon, child.label, dur, child.status);
         if child.provider_id.is_some() || child.execute_model.is_some() {
-            let provider = child.provider_id.as_deref().unwrap_or("unknown-provider");
-            let model = child.execute_model.as_deref().unwrap_or("unknown-model");
-            eprintln!("    Route: {}:{}", provider, model);
+            let route = match (child.provider_id.as_deref(), child.execute_model.as_deref()) {
+                (_, Some(model)) if model.contains(':') => model.to_string(),
+                (Some(provider), Some(model)) => format!("{}:{}", provider, model),
+                (Some(provider), None) => provider.to_string(),
+                (None, Some(model)) => model.to_string(),
+                (None, None) => "unknown-route".to_string(),
+            };
+            eprintln!("    Route: {}", route);
         }
         if let Some(err) = &child.error {
             eprintln!("    Error: {}", err);

@@ -134,15 +134,29 @@ impl AgentSetup {
             }
         };
         let mut preflight = std::collections::BTreeSet::<String>::new();
+        let mut resolved_provider_env = Vec::<(String, String)>::new();
         if let Some(settings) = settings.as_ref()
             && let Ok(guard) = settings.lock()
         {
-            let provider = crate::providers::infer_provider_id(&guard.model);
-            preflight.extend(
-                crate::auth::provider_env_vars(&provider)
-                    .iter()
-                    .map(|s| (*s).to_string()),
-            );
+            let requested_provider = crate::providers::infer_provider_id(&guard.model);
+            let providers_to_export = match requested_provider.as_str() {
+                // OpenAI-family routes may legitimately fall through between API and Codex.
+                "openai" | "openai-codex" => vec!["openai", "openai-codex"],
+                other => vec![other],
+            };
+            for provider in providers_to_export {
+                preflight.extend(
+                    crate::auth::provider_env_vars(provider)
+                        .iter()
+                        .map(|s| (*s).to_string()),
+                );
+                if let Some((secret, is_oauth)) = crate::auth::resolve_with_refresh(provider).await
+                    && let Some(env_name) =
+                        crate::auth::export_env_var_for_provider(provider, is_oauth)
+                {
+                    resolved_provider_env.push((env_name.to_string(), secret));
+                }
+            }
         }
         tracing::info!(
             requested = preflight.len(),
@@ -151,7 +165,12 @@ impl AgentSetup {
             "startup secret preflight plan"
         );
         secrets.preflight_session_cache(preflight);
-        let session_secret_env = secrets.session_env();
+        let mut session_secret_env = secrets.session_env();
+        for (name, value) in resolved_provider_env {
+            if !session_secret_env.iter().any(|(existing, _)| existing == &name) {
+                session_secret_env.push((name, value));
+            }
+        }
         let session_secret_diag = secrets.session_diagnostics();
         tracing::info!(
             warmed = session_secret_diag.len(),

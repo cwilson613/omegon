@@ -328,6 +328,7 @@ pub async fn run_cleave(
                     tracing::info!(
                         child = %label,
                         duration = format!("{:.0}s", output.duration_secs),
+                        session_path = ?output.session_path,
                         "child completed"
                     );
 
@@ -351,7 +352,7 @@ pub async fn run_cleave(
                 Err(e) => {
                     state.children[child_idx].status = ChildStatus::Failed;
                     state.children[child_idx].error = Some(format!("{e}"));
-                    tracing::error!(child = %label, "child failed: {e}");
+                    tracing::error!(child = %label, error = %e, "child failed");
 
                     // Salvage whatever work the child produced before failing.
                     // A timed-out or errored child may have made real edits
@@ -534,8 +535,9 @@ pub async fn run_cleave(
 
 struct ChildOutput {
     duration_secs: f64,
-    #[allow(dead_code)]
     stdout: String,
+    stderr_tail: String,
+    session_path: Option<String>,
 }
 
 /// Configuration for dispatching a child agent process.
@@ -627,6 +629,7 @@ async fn dispatch_child(
 
     let stderr = child.stderr.take().unwrap();
     let mut reader = BufReader::new(stderr).lines();
+    let mut stderr_tail: std::collections::VecDeque<String> = std::collections::VecDeque::with_capacity(20);
 
     let wall_timeout = tokio::time::Duration::from_secs(config.timeout_secs);
     let idle_timeout = tokio::time::Duration::from_secs(config.idle_timeout_secs);
@@ -652,6 +655,10 @@ async fn dispatch_child(
                     Ok(Ok(Some(line))) => {
                         last_activity = Instant::now();
                         line_count += 1;
+                        if stderr_tail.len() == 20 {
+                            stderr_tail.pop_front();
+                        }
+                        stderr_tail.push_back(line.clone());
 
                         // Emit activity events (throttled to 1/sec)
                         if last_activity.duration_since(last_activity_event).as_secs() >= 1
@@ -699,6 +706,9 @@ async fn dispatch_child(
         use tokio::io::AsyncReadExt;
         let _ = stdout.read_to_string(&mut stdout_buf).await;
     }
+    let stderr_tail_text = stderr_tail.into_iter().collect::<Vec<_>>().join("\n");
+    let session_path = cwd.join(".cleave-session.json");
+    let session_path = session_path.exists().then(|| session_path.display().to_string());
 
     let duration_secs = started.elapsed().as_secs_f64();
 
@@ -706,12 +716,19 @@ async fn dispatch_child(
         Ok(()) if exit.success() => Ok(ChildOutput {
             duration_secs,
             stdout: stdout_buf,
+            stderr_tail: stderr_tail_text,
+            session_path,
         }),
         Ok(()) => Err(anyhow::anyhow!(
-            "Child exited with code {}",
-            exit.code().unwrap_or(-1)
+            "Child exited with code {}\n{}",
+            exit.code().unwrap_or(-1),
+            crate::util::truncate(&stderr_tail_text, 1200)
         )),
-        Err(e) => Err(e),
+        Err(e) => Err(anyhow::anyhow!(
+            "{}\n{}",
+            e,
+            crate::util::truncate(&stderr_tail_text, 1200)
+        )),
     }
 }
 
