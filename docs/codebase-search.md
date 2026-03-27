@@ -1,15 +1,13 @@
 ---
 id: codebase-search
 title: codebase_search — AST-aware code retrieval with memory seeding
-status: exploring
+status: decided
 related: [lsp-integration]
 tags: [architecture, tools, code-intelligence, memory, lsp, retrieval]
-open_questions:
-  - Do code-structure facts live in the main memory tier with a different invalidation strategy,
-  - "Should indexing be triggered lazily (first query) or eagerly (session start / HEAD change)?"
-  - Does the retrieval result format match what the context window needs, or does it need a
+open_questions: []
 issue_type: feature
 priority: 1
+jj_change_id: zqrzwywqzvyrlvuullywnmztrvupvopo
 ---
 
 # codebase_search — AST-aware code retrieval with memory seeding
@@ -102,11 +100,16 @@ Tool: codebase_search(query: str, strategy: "ast" | "bm25" | "hybrid") -> Vec<Co
 Tool: codebase_index(invalidate: bool) -> IndexStats
 ```
 
+## Decisions
+
+### Decision: Two-index SQLite cache (.omegon/codescan.db) with tree-sitter code scanner and markdown/JSON knowledge scanner
+
+**Status:** decided
+**Rationale:** Separate from facts.db (different invalidation: file content hash, not time decay). Code index uses tree-sitter AST for named declaration boundaries with regex fallback. Knowledge index uses pulldown-cmark heading-hierarchy for docs/, openspec/, .omegon/, and ai/memory/facts.jsonl. BM25 in-process. Lazy first-query indexing with HEAD-based fast-path (skip file walk when HEAD unchanged). Incremental reindex on HEAD change via rate-limited background tokio task (30s cooldown). Preview: 300 chars multi-line in table, 400 chars in JSON details.
+
 ## Open Questions
 
-- Do code-structure facts live in the main memory tier with a different invalidation strategy,
-- Should indexing be triggered lazily (first query) or eagerly (session start / HEAD change)?
-- Does the retrieval result format match what the context window needs, or does it need a
+*No open questions.*
 
 ## Relations
 
