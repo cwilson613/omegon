@@ -46,3 +46,9 @@ Cross-cutting release-planning umbrella for the 0.15.4 RC series. This node does
 **Status:** decided
 
 **Rationale:** Use the RC series to stage risk in a rational order. RC1 should validate provider/routing/auth integrity and realistic orchestrated execution. RC2 should harden startup determinism and merge/release safety, including session secret preflight and release guardrails. RC3 should add diagnostics v1 and any low-risk operator visibility improvements needed to inspect runtime truth. Additional RCs, if any, are for stabilization and bugfixes rather than new strategic scope.
+
+### Decision: 0.15.4 explicitly defers major platform expansion and ecosystem work beyond trust hardening
+
+**Status:** decided
+
+**Rationale:** To keep 0.15.4 shippable, the RC series should not absorb large strategic fronts whose value is real but whose scope is orthogonal to immediate runtime trust. Explicitly deferred from the 0.15.4 critical path are: Omega platform expansion beyond diagnostics directly needed for harness trust, composable tutorial/plugin ecosystem work, self-curated memory/autonomy layers, and A2A/external agent interoperability. These nodes remain valid and may continue as design work, but they do not block 0.15.4 and should not be allowed to expand the release thesis.
