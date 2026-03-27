@@ -93,6 +93,11 @@ pub mod delegate {
     pub const DELEGATE_STATUS: &str = "delegate_status";
 }
 
+/// Diagnostics — owned by `features::diagnostics`
+pub mod diagnostics {
+    pub const RUN_DIAGNOSTIC: &str = "run_diagnostic";
+}
+
 /// Session log — owned by `features::session_log`
 pub mod session_log {
     pub const SESSION_LOG: &str = "session_log";
@@ -137,7 +142,7 @@ pub mod persona {
 /// **Maintenance rule**: every `pub const` above MUST appear here.
 /// The `registry_count_is_current` test will catch omissions.
 /// Number of statically registered tools (for splash screen display).
-pub const TOOL_COUNT: usize = 51;
+pub const TOOL_COUNT: usize = 52;
 
 pub fn all_static_names() -> Vec<&'static str> {
     vec![
@@ -191,6 +196,8 @@ pub fn all_static_names() -> Vec<&'static str> {
         delegate::DELEGATE,
         delegate::DELEGATE_RESULT,
         delegate::DELEGATE_STATUS,
+        // diagnostics (1)
+        diagnostics::RUN_DIAGNOSTIC,
         // session_log (1)
         session_log::SESSION_LOG,
         // model_budget (3)

@@ -24,6 +24,7 @@ pub mod auth;
 pub mod auto_compact;
 pub mod cleave;
 pub mod delegate;
+pub mod diagnostics;
 pub mod harness_settings;
 pub mod lifecycle;
 pub mod manage_tools;

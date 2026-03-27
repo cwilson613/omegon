@@ -301,6 +301,12 @@ impl AgentSetup {
             &cwd, agents,
         )));
 
+        // ─── Diagnostics (behavioral self-tests) ────────────────────────
+        bus.register(Box::new(features::diagnostics::DiagnosticsFeature::new(
+            &cwd,
+            &project_root,
+        )));
+
         // ─── Session log (context injection) ────────────────────────────
         bus.register(Box::new(features::session_log::SessionLog::new(&cwd)));
 
