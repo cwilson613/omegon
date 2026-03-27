@@ -466,16 +466,18 @@ impl InstrumentPanel {
 
         for x in 0..w {
             let pos = x as f64 / w as f64;
+            let mem_end = mem_frac;
+            let think_end = mem_frac + think_frac;
 
             // Which segment?
-            let (mut amp, color): (usize, Color) = if pos < mem_frac {
+            let (mut amp, color): (usize, Color) = if pos < mem_end {
                 // Memory — navy, gentle ripple amplitude 2–4
                 let osc = (x as f64 * 0.7 + t).sin() * 0.9;
                 let a = (3.0 + osc).clamp(2.0, 4.0) as usize;
                 let r = (20.0 + 30.0 * (pos / mem_frac.max(0.001))) as u8;
                 (a, Color::Rgb(r, (r as f64 * 1.5) as u8, 140))
 
-            } else if pos < mem_frac + think_frac {
+            } else if pos < think_end {
                 // Thinking reservation — teal arch peaking in the middle
                 let rel = (pos - mem_frac) / think_frac.max(0.001);
                 let arch = (rel * std::f64::consts::PI).sin();
@@ -483,7 +485,7 @@ impl InstrumentPanel {
                 let a = (3.5 + arch * 2.5 + osc).clamp(3.0, 6.0) as usize;
                 (a, Color::Rgb(42, 180, 200))
 
-            } else if pos < mem_frac + think_frac + used_frac {
+            } else if pos < think_end + used_frac {
                 // Context used — gradient teal → orange
                 let rel = (pos - mem_frac - think_frac) / used_frac.max(0.001);
                 let osc = (x as f64 * 0.4 + t * 0.9).sin() * 0.6;
@@ -499,12 +501,22 @@ impl InstrumentPanel {
                 (0, Color::Rgb(12, 22, 32))
             };
 
-            // Glitch: visible but restrained.
-            // ±1 amplitude jitter on ~18% of cells during inference, plus an
-            // occasional subtle noise-char overlay on the thinking/context band.
+            // Thinking overlay: visible, not chaotic.
+            // During active inference, the thinking band gets a clear animated
+            // overlay and the rest of the used-context band gets a lighter shimmer.
             let mut overlay_noise = false;
+            let mut overlay_char: Option<char> = None;
             if active {
-                let jitter_threshold = self.thinking_intensity * 0.28;
+                let in_thinking_band = pos >= mem_end && pos < think_end;
+                let in_used_band = pos >= think_end && pos < think_end + used_frac;
+
+                let jitter_threshold = if in_thinking_band {
+                    self.thinking_intensity * 0.45
+                } else if in_used_band {
+                    self.thinking_intensity * 0.20
+                } else {
+                    self.thinking_intensity * 0.08
+                };
                 let hash = x.wrapping_mul(31)
                     .wrapping_add((t * 4.0) as usize)
                     .wrapping_mul(17)
@@ -512,7 +524,23 @@ impl InstrumentPanel {
                 if (hash as f64) < jitter_threshold * 100.0 {
                     let up = (x.wrapping_mul(7) + (t * 2.0) as usize) % 2 == 0;
                     amp = if up { (amp + 1).min(7) } else { amp.saturating_sub(1) };
-                    overlay_noise = (x + (t * 3.0) as usize).is_multiple_of(3);
+                    overlay_noise = true;
+                    overlay_char = if in_thinking_band {
+                        Some(match (x + (t * 3.0) as usize) % 4 {
+                            0 => '░',
+                            1 => '▒',
+                            2 => '▓',
+                            _ => '╎',
+                        })
+                    } else if in_used_band {
+                        Some(match (x + (t * 2.0) as usize) % 3 {
+                            0 => '░',
+                            1 => '▒',
+                            _ => '╎',
+                        })
+                    } else {
+                        None
+                    };
                 }
             }
 
@@ -528,32 +556,38 @@ impl InstrumentPanel {
             };
 
             for row in 0..area.height.min(2) {
-                let is_divider = row < 2
-                    && mem_frac > 0.0
-                    && (((mem_frac * w as f64).round() as isize - x as isize).abs() <= 0);
+                let is_memory_divider = row < 2
+                    && mem_end > 0.0
+                    && (((mem_end * w as f64).round() as isize - x as isize).abs() <= 0);
+                let is_thinking_divider = row < 2
+                    && think_frac > 0.0
+                    && (((think_end * w as f64).round() as isize - x as isize).abs() <= 0);
                 let (mut ch, mut fg) = if row == 0 {
                     if top_ch == '·' { ('·', dim_color) } else { (top_ch, color) }
                 } else {
                     if bot_ch == '·' { ('·', dim_color) } else { (bot_ch, color) }
                 };
 
-                // Divider between navy memory region and teal/orange context region.
-                // Two-row dashed pipe that drifts slowly so the bar reads as one
-                // continuous system with internal partitions, not separate widgets.
-                if is_divider {
+                if is_memory_divider || is_thinking_divider {
                     let phase = ((t * 2.0) as usize + row as usize) % 4;
                     ch = match phase {
                         0 | 2 => '╎',
                         _ => '┆',
                     };
-                    fg = Color::Rgb(42, 180, 200);
+                    fg = if is_thinking_divider {
+                        Color::Rgb(240, 140, 70)
+                    } else {
+                        Color::Rgb(42, 180, 200)
+                    };
                 } else if overlay_noise && ch != '·' {
-                    let idx = (x.wrapping_mul(11)
-                        .wrapping_add(row as usize * 5)
-                        .wrapping_add((t * 9.0) as usize))
-                        % NOISE_CHARS.len();
-                    ch = NOISE_CHARS[idx];
-                    fg = if row == 0 { Color::Rgb(90, 210, 220) } else { color };
+                    ch = overlay_char.unwrap_or(ch);
+                    fg = if pos >= mem_end && pos < think_end {
+                        Color::Rgb(255, 205, 110)
+                    } else if row == 0 {
+                        Color::Rgb(110, 220, 230)
+                    } else {
+                        color
+                    };
                 }
                 if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, area.y + row)) {
                     cell.set_char(ch);
