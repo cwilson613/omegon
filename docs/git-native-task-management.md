@@ -3,10 +3,7 @@ id: git-native-task-management
 title: "Git-native task management — extend design tree into a full in-repo issue/task system"
 status: exploring
 tags: [architecture, task-management, git, design-tree, workflow, strategic]
-open_questions:
-  - Should we add a GitHub Issues bridge (bidirectional sync like git-issue does), or is git-native-only sufficient? A bridge adds complexity but lets collaborators who prefer GitHub workflows participate. For a single-operator project, the bridge is unnecessary overhead.
-  - "Should the index.json be git-tracked (shared across clones/agents) or gitignored (local cache, rebuilt on startup)? Tracked: consistent state across sessions, no rebuild cost. Gitignored: no merge conflicts from concurrent mutations, simpler."
-  - "Do we want a `/board` TUI command that shows a kanban-style view, or is the dashboard sidebar tree sufficient? The sidebar groups by parent (hierarchy), not by status (workflow). Both views are useful for different questions — hierarchy answers 'what's the scope?', kanban answers 'what's in progress?'"
+open_questions: []
 jj_change_id: xvrlvxwxvttwnnmpmsxoqlosqqvulqrr
 issue_type: epic
 priority: 2
@@ -229,6 +226,195 @@ The filterable list + milestone binding + archive state are the highest-value, l
 
 All 8 frontmatter additions (milestone, assignee, estimate, actual, due, archived) can be done in a single pass — they're just new `Option<String>` fields on DesignNode with corresponding frontmatter parsing.
 
+### Crate extraction boundary and multi-consumer architecture
+
+
+
+### omegon-design crate API surface
+
+```rust
+// ─── Core types ────────────────────────────────────────────
+pub struct DesignNode { /* existing + new fields */ }
+pub enum NodeStatus { Seed, Exploring, Resolved, Decided, Implementing, Implemented, Blocked, Deferred }
+pub enum IssueType { Epic, Feature, Task, Bug, Chore }
+pub struct DocumentSections { /* research, decisions, questions, impl notes */ }
+pub struct DesignDecision { /* title, status, rationale */ }
+pub struct ResearchEntry { /* heading, content */ }
+
+// ─── Store ─────────────────────────────────────────────────
+pub struct DesignStore {
+    root: PathBuf,           // .omegon/design/ (or docs/ fallback)
+    nodes: HashMap<String, DesignNode>,
+    index: DesignIndex,
+}
+
+impl DesignStore {
+    pub fn open(project_root: &Path) -> Result<Self>;  // scan + index
+    pub fn refresh(&mut self) -> Result<()>;           // rescan
+    
+    // Queries
+    pub fn get(&self, id: &str) -> Option<&DesignNode>;
+    pub fn list(&self, filter: &NodeFilter) -> Vec<&DesignNode>;
+    pub fn children(&self, parent_id: &str) -> Vec<&DesignNode>;
+    pub fn ready(&self) -> Vec<&DesignNode>;    // decided + deps satisfied
+    pub fn blocked(&self) -> Vec<(&DesignNode, Vec<String>)>;  // + blocker IDs
+    pub fn frontier(&self) -> Vec<&DesignNode>; // nodes with open questions
+    pub fn sections(&self, id: &str) -> Option<DocumentSections>;
+    pub fn history(&self, id: &str) -> Result<Vec<ActivityEntry>>;  // git log
+    pub fn stats(&self) -> DesignStats;  // counts by status/type/milestone
+    
+    // Mutations
+    pub fn create(&mut self, node: NewNode) -> Result<DesignNode>;
+    pub fn set_status(&mut self, id: &str, status: NodeStatus) -> Result<()>;
+    pub fn set_priority(&mut self, id: &str, priority: u8) -> Result<()>;
+    pub fn set_milestone(&mut self, id: &str, milestone: &str) -> Result<()>;
+    pub fn set_assignee(&mut self, id: &str, assignee: &str) -> Result<()>;
+    pub fn add_question(&mut self, id: &str, question: &str) -> Result<()>;
+    pub fn remove_question(&mut self, id: &str, question: &str) -> Result<()>;
+    pub fn add_research(&mut self, id: &str, heading: &str, content: &str) -> Result<()>;
+    pub fn add_decision(&mut self, id: &str, decision: DesignDecision) -> Result<()>;
+    pub fn archive(&mut self, id: &str) -> Result<()>;
+    // ... remaining mutation methods
+}
+
+// ─── Filtering ─────────────────────────────────────────────
+pub struct NodeFilter {
+    pub status: Option<Vec<NodeStatus>>,
+    pub issue_type: Option<Vec<IssueType>>,
+    pub tags: Option<Vec<String>>,
+    pub priority: Option<(u8, u8)>,  // min, max
+    pub milestone: Option<String>,
+    pub assignee: Option<String>,
+    pub parent: Option<String>,
+    pub archived: bool,  // default: false (exclude archived)
+}
+
+// ─── Index ─────────────────────────────────────────────────
+pub struct DesignIndex { /* fast lookup cache, rebuilt from markdown */ }
+pub struct DesignStats {
+    pub total: usize,
+    pub by_status: HashMap<NodeStatus, usize>,
+    pub by_type: HashMap<IssueType, usize>,
+    pub by_milestone: HashMap<String, usize>,
+}
+
+// ─── Doctor ────────────────────────────────────────────────
+pub struct DoctorFinding { /* node_id, kind, message */ }
+pub fn audit(store: &DesignStore) -> Vec<DoctorFinding>;
+```
+
+### Three consumers
+
+**1. omegon binary (existing)**
+```
+features/lifecycle.rs wraps DesignStore:
+  - Registers design_tree/design_tree_update tools
+  - Injects focused node into system prompt (context.rs stays in omegon)
+  - Renders dashboard sidebar tree from store.list()
+  - Runs doctor on startup and reports findings
+```
+
+**2. Standalone project management app (future)**
+```
+omegon-pm (or whatever):
+  - Scans multiple git repos for .omegon/design/
+  - Serves web UI (axum + htmx or similar)
+  - Cross-project dependency tracking
+  - Milestone dashboard across repos
+  - Could run alongside Forgejo for sovereign git+tasks
+```
+
+**3. opsx-core integration**
+```
+opsx-core already has its own types.rs with NodeStatus duplication.
+After extraction, opsx-core depends on omegon-design::NodeStatus
+instead of maintaining its own copy. Single source of truth.
+```
+
+### What stays in omegon (NOT extracted)
+
+- `context.rs` — agent-specific context injection (depends on omegon_traits)
+- `capture.rs` — ambient tag parsing from LLM responses (agent-specific)
+- `features/lifecycle.rs` — tool registration, event handling (agent integration layer)
+- OpenSpec binding logic — crosses omegon-design + opsx-core boundary, orchestrated by the agent
+
+### File layout after extraction
+
+```
+core/crates/
+  omegon-design/
+    Cargo.toml
+    src/
+      lib.rs
+      types.rs      ← from lifecycle/types.rs
+      store.rs      ← from lifecycle/design.rs (renamed, expanded)
+      doctor.rs     ← from lifecycle/doctor.rs
+      spec.rs       ← from lifecycle/spec.rs (OpenSpec spec parsing)
+      index.rs      ← NEW: index build/query
+      filter.rs     ← NEW: NodeFilter logic
+      history.rs    ← NEW: git log integration
+  omegon/
+    src/
+      lifecycle/
+        mod.rs       ← re-exports from omegon-design, adds agent-specific bits
+        context.rs   ← stays (omegon_traits dependency)
+        capture.rs   ← stays (agent-specific)
+      features/
+        lifecycle.rs ← uses omegon_design::DesignStore
+```
+
+### Sovereign project management: Forgejo + omegon-design + multi-repo orchestration
+
+
+
+### The stack
+
+```
+┌─────────────────────────────────────────────────────┐
+│          omegon-pm (project management app)          │
+│  Multi-repo design tree aggregation + web dashboard  │
+│  Uses: omegon-design crate for each repo's tree      │
+├─────────────────────────────────────────────────────┤
+│              Forgejo (sovereign git hosting)          │
+│  Self-hosted, lightweight, Go binary                 │
+│  Repos contain .omegon/design/ directories           │
+│  No external GitHub/GitLab dependency                │
+├─────────────────────────────────────────────────────┤
+│          omegon (per-repo agent sessions)             │
+│  Uses omegon-design for in-session design work       │
+│  Commits design mutations to the repo                │
+│  Pushes to Forgejo (or any git remote)               │
+└─────────────────────────────────────────────────────┘
+```
+
+### How it works
+
+1. **Per-repo**: Each project has `.omegon/design/` with its design tree. Omegon agent sessions read/write to it. Commits are pushed to Forgejo.
+
+2. **Cross-repo**: omegon-pm scans all repos on the Forgejo instance (or any set of git remotes), clones/pulls `.omegon/design/` from each, and builds a unified view. Cross-project dependencies work because node IDs are `{repo}:{node-id}`.
+
+3. **Dashboard**: omegon-pm serves a web UI showing:
+   - All projects' design trees in one view
+   - Cross-project kanban (what's in progress across all repos)
+   - Milestone tracking (which repos are on track for a release)
+   - Agent session activity (which repos have active omegon sessions)
+
+### Why Forgejo, not GitHub
+
+- **Sovereign**: Your data, your server, your rules. No platform risk.
+- **Lightweight**: Single Go binary, runs on a $5 VPS or a Raspberry Pi.
+- **API-compatible**: Gitea/Forgejo API is close enough to GitHub's that tools work.
+- **Repo-local state**: The design tree lives IN the repo, not in a platform's database. Moving between Forgejo, GitHub, and bare git repos changes nothing — `.omegon/design/` travels with the code.
+
+### The bridge question is answered
+
+Q: "Should we add a GitHub Issues bridge?"
+A: **Not yet, but the architecture doesn't preclude it.** Since the design tree is markdown in a git repo, a bridge is just: "sync DesignNode ↔ GitHub Issue". The `omegon-design` crate exposes the data model; a `omegon-bridge-github` crate could implement bidirectional sync. But the sovereign path (Forgejo + omegon-pm) makes the bridge optional, not essential.
+
+### Why this matters
+
+Most project management tools are SaaS platforms that own your data. The design tree is the opposite: it's files in your repo. The "project management app" is just a viewer/aggregator — the source of truth is always the git repo. You can switch from omegon-pm to reading markdown files in vim and lose nothing.
+
 ## Decisions
 
 ### Decision: Design tree IS the task system — extend, don't replace or add a parallel tracker
@@ -242,11 +428,56 @@ The node's status lifecycle already covers the workflow: seed (backlog) → expl
 
 Adding 6 optional fields to DesignNode (milestone, assignee, estimate, actual, due, archived) and a filtered list query makes it a complete task system. No new data model, no new storage format, no new tools. Just wider frontmatter.
 
+### Decision: Extract design tree to omegon-design crate — zero external dependencies beyond serde, reusable across binaries
+
+**Status:** exploring
+**Rationale:** The extraction boundary is already clean. The core design tree code has ZERO agent/TUI/provider dependencies:
+
+```
+lifecycle/types.rs   — serde + std::path only
+lifecycle/design.rs  — std + types only  
+lifecycle/doctor.rs  — std + design + types only
+lifecycle/spec.rs    — std + types only
+lifecycle/capture.rs — std only
+```
+
+Only `context.rs` touches `omegon_traits` (for ContextProvider/ContextInjection). That stays in the omegon binary.
+
+The extracted crate:
+```toml
+[package]
+name = "omegon-design"
+description = "Git-backed design tree and task management — markdown nodes with structured lifecycle"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"  # frontmatter parsing (currently inline in design.rs)
+```
+
+Three consumers:
+1. **omegon binary** — `features/lifecycle.rs` uses `omegon-design` for per-project design tree. Agent tools, context injection, TUI dashboard all consume the crate's API.
+2. **Standalone task/project app** — uses `omegon-design` + own web UI for multi-project management. Scans multiple repos' `.omegon/design/` directories.
+3. **opsx-core** — could depend on `omegon-design::types` for shared type definitions (NodeStatus, IssueType), eliminating the current type duplication between the two crates.
+
+### Decision: No platform bridge in v1 — sovereign git (Forgejo) is the primary path, bridge is a future optional add-on
+
+**Status:** exploring
+**Rationale:** The design tree's value proposition is that it lives IN the repo, not in a platform's database. Building a GitHub Issues bridge first would optimize for platform dependence. The sovereign path (Forgejo + omegon-pm) keeps the data portable and platform-independent. A bridge crate (omegon-bridge-github) can come later for teams that want it, but the architecture shouldn't assume or require it.
+
+### Decision: Index is gitignored — local cache rebuilt on startup, no merge conflicts
+
+**Status:** exploring
+**Rationale:** The index is a derivative of the markdown files. Tracking it in git creates merge conflicts when multiple agents or sessions mutate nodes concurrently (which happens during cleave runs). Rebuilding from 255 markdown files on startup is sub-100ms in Rust — no perceptible cost. The markdown files are the source of truth; the index is a read optimization. .gitignore it.
+
+### Decision: Both tree and board views — hierarchy answers scope, kanban answers workflow
+
+**Status:** exploring
+**Rationale:** They answer different questions. The tree view (existing sidebar) shows what belongs to what — project structure. The board view shows what's in what state — operational status. Both are read views over the same DesignStore. The web dashboard gets both as tabs. The TUI gets `/board` as a command that replaces the sidebar with a status-grouped compact view. Since the data model is the same, this is a rendering decision, not a data model decision.
+
 ## Open Questions
 
-- Should we add a GitHub Issues bridge (bidirectional sync like git-issue does), or is git-native-only sufficient? A bridge adds complexity but lets collaborators who prefer GitHub workflows participate. For a single-operator project, the bridge is unnecessary overhead.
-- Should the index.json be git-tracked (shared across clones/agents) or gitignored (local cache, rebuilt on startup)? Tracked: consistent state across sessions, no rebuild cost. Gitignored: no merge conflicts from concurrent mutations, simpler.
-- Do we want a `/board` TUI command that shows a kanban-style view, or is the dashboard sidebar tree sufficient? The sidebar groups by parent (hierarchy), not by status (workflow). Both views are useful for different questions — hierarchy answers 'what's the scope?', kanban answers 'what's in progress?'
+*No open questions.*
 
 ## Implementation Notes
 
