@@ -63,10 +63,11 @@ import Docs from "../../layouts/Docs.astro";
     <li><strong>Project Memory</strong> — Persistent facts, episodes, semantic recall, and knowledge graphs across sessions. Not a markdown file — a real memory system.</li>
     <li><strong>Design Tree</strong> — knowledge graph tracking architecture decisions, dependencies, and implementation status.</li>
     <li><strong>OpenSpec Lifecycle</strong> — Spec-driven development: propose, spec, fast-forward, cleave, assess, archive.</li>
-    <li><strong>Live Dashboard</strong> — Terminal TUI with instrument panels, segment rendering with model tags, plus a web dashboard over WebSocket.</li>
+    <li><strong>Live Dashboard</strong> — Terminal TUI with a wrapped multiline editor, segment rendering with model tags, context and memory telemetry, plus a web dashboard over WebSocket.</li>
     <li><strong>Plugins</strong> — Personas with organic memory growth, tones, and memory layers. Not prompt templates — living cognitive profiles.</li>
-    <li><strong>Sessions</strong> — Auto-save and resume. Pick up exactly where you left off across sessions.</li>
-    <li><strong>Signed Releases</strong> — Cosign signatures, CycloneDX SBOM, GitHub Attestations. Supply chain integrity from source to binary.</li>
+    <li><strong>Sessions</strong> — Auto-save and resume, plus a session log tool and narrative history for orientation across runs.</li>
+    <li><strong>Codebase Search</strong> — Ranked concept search across code and project knowledge via <code>codebase_search</code> and <code>codebase_index</code>.</li>
+    <li><strong>Signed Releases</strong> — Cosign signatures, CycloneDX SBOM, GitHub Attestations, and installer verification before update.</li>
   </ul>
 
   <h2>Quick Start</h2>
@@ -89,7 +90,7 @@ omegon login</code></pre>
     <tbody>
       <tr><td>Runtime</td><td>Single ~19 MB Rust binary, 6 crates</td></tr>
       <tr><td>Providers</td><td>10 inference + 3 search, native Rust clients</td></tr>
-      <tr><td>Agent tools</td><td>49 structured tools (file ops, memory, design, search, inference control)</td></tr>
+      <tr><td>Agent tools</td><td>53 structured tools (file ops, memory, design, search, codebase retrieval, and inference control)</td></tr>
       <tr><td>License</td><td>BSL 1.1 (converts to MIT on 2031-03-19)</td></tr>
     </tbody>
   </table>

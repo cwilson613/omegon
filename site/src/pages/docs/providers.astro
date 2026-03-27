@@ -57,6 +57,7 @@ import Docs from "../../layouts/Docs.astro";
   <ul>
     <li>Providers are scored by capability match, latency history, and rate-limit state</li>
     <li>Rate-limited providers enter cooldown and are deprioritized until recovery</li>
+    <li>Routing tracks provider usage and rate-limit headers so retries and failover can respond to real runtime signals</li>
     <li>The agent can switch providers mid-session with <code>set_model_tier</code></li>
     <li>Local inference (Ollama) is always available as a zero-cost fallback</li>
   </ul>

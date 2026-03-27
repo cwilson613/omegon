@@ -70,7 +70,7 @@ import Docs from "../../layouts/Docs.astro";
     <li><strong>Context bar</strong> — two-row signal-density display (≋ ≈ ∿ · chars) showing context fill with perceptual teal ramp</li>
     <li><strong>Memory gauge</strong> — active facts, working memory pins, injected count</li>
     <li><strong>Tool history</strong> — recent tool calls with glyph labels and timing</li>
-    <li><strong>Thinking indicator</strong> — glitch-fill animation during extended reasoning</li>
+    <li><strong>Thinking/context telemetry</strong> — the panel emphasizes real context and memory state over ornamental effects</li>
   </ul>
   <p>Toggle focus mode with <code>/focus</code> to expand the instrument panel.</p>
 
@@ -107,6 +107,19 @@ import Docs from "../../layouts/Docs.astro";
     <li>Teal accent ramp for intensity-dependent elements</li>
     <li>IBM Plex Mono (or system monospace) for code</li>
     <li>Tomorrow (Google Fonts) for UI chrome</li>
+  </ul>
+
+  <h2>Editor</h2>
+  <p>
+    The operator input area is a wrapped multiline editor rather than an infinitely wrapping single line.
+    It supports cursor navigation, visible cursor placement, prompt history, and proportional height growth
+    as your prompt wraps.
+  </p>
+  <ul>
+    <li><strong>Enter</strong> sends the prompt</li>
+    <li><strong>Shift+Enter</strong> inserts a newline</li>
+    <li><strong>Arrow keys</strong> navigate within wrapped input and prompt history</li>
+    <li><strong>Visible cursor</strong> shows the real insertion point instead of guessing by wrap position</li>
   </ul>
 
   <h2>Web Dashboard</h2>

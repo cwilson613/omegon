@@ -4,7 +4,7 @@
 
 Single binary. Zero dependencies. Full autonomy.
 
-Omegon is a Rust-native AI coding agent that runs entirely in your terminal. It connects to Anthropic and OpenAI models, manages project memory across sessions, decomposes complex tasks into parallel workers, and tracks design decisions in a persistent knowledge graph — all from a ~19MB binary with no runtime dependencies.
+Omegon is a Rust-native AI coding agent that runs entirely in your terminal. It connects to 10 inference providers through native Rust clients, manages project memory across sessions, decomposes complex tasks into parallel workers, and tracks design decisions in a persistent knowledge graph — all from a ~19MB binary with no runtime dependencies.
 
 [![omegon.styrene.dev](https://img.shields.io/badge/docs-omegon.styrene.dev-2ab4c8)](https://omegon.styrene.dev)
 
@@ -63,7 +63,7 @@ Omegon routes every request through three independent axes:
 - **Thinking level** — `off` / `minimal` / `low` / `medium` / `high` (controls reasoning budget)
 - **Context class** — routes based on task type and provider availability
 
-The agent automatically adjusts tier and thinking level based on task complexity. You can also set them manually with `/set-tier` and `/set-thinking`.
+The agent automatically adjusts tier and thinking level based on task complexity. You can also set them manually with `/model` and `/think`, while the agent can self-adjust with `set_model_tier` and `set_thinking_level`.
 
 ### Project Memory
 
@@ -111,24 +111,23 @@ propose → spec → plan → implement → verify → archive
 
 Specs use **Given/When/Then** scenarios to define what must be true *before* code is written. After implementation, `/assess spec` validates the code against the scenarios.
 
-### Code Assessment
+### Codebase Search & Lifecycle Diagnostics
 
-```
-/assess cleave     # Adversarial review of recent commits with auto-fix
-/assess diff       # Review changes since last commit
-/assess spec       # Validate implementation against OpenSpec scenarios
-/assess design     # Evaluate design node readiness
-```
+The agent has native retrieval and audit tools for project-scale work:
+
+- `codebase_search` / `codebase_index` — ranked discovery across code and project knowledge
+- `lifecycle_doctor` — audit suspicious design/OpenSpec lifecycle drift before release or implementation
+- `session_log` — inspect recent session narratives for continuity across runs
 
 ### CIC Instrument Panel
 
 Submarine-inspired real-time system state visualization in the terminal footer:
 
 - **Split-panel layout** — Engine/memory state (left 40%) + system telemetry (right 60%)
-- **Four simultaneous fractal instruments** — Perlin sonar (context health), Lissajous radar (tool activity), Plasma thermal (thinking state), CA waterfall (memory operations with per-mind columns)
-- **Unified navy→teal→amber color ramp** — Perceptual CIE L* color progression from idle to maximum intensity
-- **Focus mode toggle** — Hide instruments for full-height conversation when needed
-- **Ambient awareness** — Pattern recognition across all four instruments provides situational awareness without text reading
+- **Live context + memory telemetry** — context fill, memory state, tool activity, and active model feedback in the terminal UI
+- **Wrapped multiline editor** — visible cursor, Shift+Enter newline insertion, and proportional growth with prompt length
+- **Focus mode toggle** — hide instruments for full-height conversation when needed
+- **Ambient awareness** — the panel favors actionable runtime state over decorative effects
 
 ### Skills
 
