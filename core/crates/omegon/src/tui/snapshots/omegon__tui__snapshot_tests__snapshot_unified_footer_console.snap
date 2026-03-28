@@ -10,7 +10,7 @@ expression: render_to_string(&terminal)
   ⌂ /Users/cwilson/workspace…/omegon  ├─ working ⌗8 ⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
   Victory · ◎ High · ◆ native         └─ episodes ⌗4⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
   T·8 · ⚙ 23 · ↻ 2                    │                                          ││                                    │
-  v0.15.4-rc.3 → v0.15.4              │                                          ││                                    │
+  v0.15.4-rc.4 → v0.15.4              │                                          ││                                    │
                                       │                                          ││                                    │
                                       │                                          ││                                    │
                                       │                                          ││  3/3 active                        │
