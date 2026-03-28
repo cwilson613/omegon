@@ -1138,6 +1138,9 @@ mod tests {
                 execute_model: None,
                 provider_id: None,
                 duration_secs: None,
+                stdout_log_path: None,
+                stderr_log_path: None,
+                session_path: None,
             },
             crate::cleave::state::ChildState {
                 child_id: 2,
@@ -1153,6 +1156,9 @@ mod tests {
                 execute_model: None,
                 provider_id: None,
                 duration_secs: None,
+                stdout_log_path: None,
+                stderr_log_path: None,
+                session_path: None,
             },
         ];
 
@@ -1188,6 +1194,9 @@ mod tests {
             execute_model: None,
             provider_id: None,
             duration_secs: None,
+            stdout_log_path: None,
+            stderr_log_path: None,
+            session_path: None,
         };
 
         let taken = child.worktree_path.take();
@@ -1213,6 +1222,9 @@ fn build_task_file_includes_all_sections() {
             execute_model: None,
             provider_id: None,
             duration_secs: None,
+            stdout_log_path: None,
+            stderr_log_path: None,
+            session_path: None,
         },
         crate::cleave::state::ChildState {
             child_id: 1,
@@ -1228,6 +1240,9 @@ fn build_task_file_includes_all_sections() {
             execute_model: None,
             provider_id: None,
             duration_secs: None,
+            stdout_log_path: None,
+            stderr_log_path: None,
+            session_path: None,
         },
     ];
     let guardrails = "## Project Guardrails\n\n1. **typecheck**: `tsc`\n";
@@ -1290,6 +1305,9 @@ fn build_task_file_rust_scope_gets_rust_test_convention() {
         execute_model: None,
         provider_id: None,
         duration_secs: None,
+        stdout_log_path: None,
+        stderr_log_path: None,
+        session_path: None,
     }];
     let task = build_task_file(
         0,
