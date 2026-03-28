@@ -145,13 +145,23 @@
     "notes": []
   },
   "0.15.4": {
-    "status": "open",
+    "status": "rc",
     "channel": "stable",
     "nodes": [],
     "frozen": false,
     "opened": "2026-03-27T17:03:52Z",
     "released": null,
-    "rc_count": 0,
-    "notes": []
+    "rc_count": 1,
+    "notes": [
+      "feat(tui): add dim segment header timestamps",
+      "fix(ci): remove ghost publish workflow and repair tests",
+      "fix(release): block detached-head linking and surface repo state",
+      "fix(site): source changelog from release changelog",
+      "fix(tui): preserve detached conversation viewport during streaming",
+      "fix(tui): restore terminal copy and normalize pasted input",
+      "fix(tui): truncate tool headers before timestamp collision"
+    ],
+    "rc_version": "0.15.4-rc.2",
+    "last_rc": "2026-03-28T02:37:12Z"
   }
 }

@@ -1,5 +1,6 @@
 ---
 source: crates/omegon/src/tui/snapshot_tests.rs
+assertion_line: 317
 expression: output
 ---
 
@@ -11,5 +12,5 @@ expression: output
   ✓ podman       5.3.1
   ✓ mcp          1/1 connected, 5 tools
 
-  Context: Maniple  Thinking: High  Tier: victory
+  Git: unknown  Context: Maniple  Thinking: High  Tier: victory
   ⚙ Systems Engineer

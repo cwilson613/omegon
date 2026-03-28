@@ -1,5 +1,6 @@
 ---
 source: crates/omegon/src/tui/snapshot_tests.rs
+assertion_line: 241
 expression: output
 ---
 
@@ -7,4 +8,4 @@ expression: output
 
   no providers — /login to configure
 
-  Context: Squad  Thinking: Medium  Tier: victory
+  Git: unknown  Context: Squad  Thinking: Medium  Tier: victory
