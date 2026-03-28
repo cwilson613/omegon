@@ -580,6 +580,39 @@ fn top_right_timestamp<'a>(meta: &SegmentMeta, t: &dyn Theme) -> Option<Line<'a>
     })
 }
 
+fn tool_title_line(
+    icon: &str,
+    status_color: Color,
+    display_name: &str,
+    area_width: u16,
+    timestamp: Option<&str>,
+) -> Line<'static> {
+    let timestamp_width = timestamp.map(|s| s.chars().count()).unwrap_or(0);
+    let reserved_right = if timestamp_width > 0 {
+        timestamp_width + 3
+    } else {
+        0
+    };
+    let left_budget = area_width
+        .saturating_sub(2)
+        .saturating_sub(reserved_right as u16)
+        .max(6) as usize;
+    let icon_prefix = format!(" {icon} ");
+    let icon_width = icon_prefix.chars().count();
+    let name_budget = left_budget.saturating_sub(icon_width).max(1);
+    let title_name = crate::util::truncate(display_name, name_budget);
+
+    Line::from(vec![
+        Span::styled(icon_prefix, Style::default().fg(status_color)),
+        Span::styled(
+            format!("{title_name} "),
+            Style::default()
+                .fg(status_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ])
+}
+
 fn render_assistant_text(
     text: &str,
     thinking: &str,
@@ -826,15 +859,8 @@ fn render_tool_card(
         name
     };
 
-    let title = Line::from(vec![
-        Span::styled(format!(" {icon} "), Style::default().fg(status_color)),
-        Span::styled(
-            format!("{display_name} "),
-            Style::default()
-                .fg(status_color)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]);
+    let timestamp = format_timestamp(meta.timestamp);
+    let title = tool_title_line(icon, status_color, display_name, area.width, timestamp.as_deref());
 
     // Border color matches status — makes the card visually distinct
     let border_color = if !complete {
@@ -858,7 +884,14 @@ fn render_tool_card(
         .border_style(Style::default().fg(border_color).bg(bg))
         .title_top(title)
         .title_top(
-            top_right_timestamp(meta, t)
+            timestamp
+                .as_deref()
+                .map(|stamp| {
+                    Line::from(Span::styled(
+                        stamp.to_string(),
+                        Style::default().fg(t.dim()).add_modifier(Modifier::DIM),
+                    ))
+                })
                 .unwrap_or_else(Line::default)
                 .right_aligned(),
         )
@@ -1525,6 +1558,35 @@ mod tests {
             "should have display name for ls: {text}"
         );
         assert!(text.contains("✓"), "should have checkmark: {text}");
+    }
+
+    #[test]
+    fn tool_title_truncates_before_timestamp_collision() {
+        let seg = Segment {
+            meta: SegmentMeta {
+                timestamp: Some(std::time::SystemTime::now()),
+                ..Default::default()
+            },
+            content: SegmentContent::ToolCard {
+                id: "1".into(),
+                name: "read".into(),
+                args_summary: None,
+                detail_args: Some("/very/long/path/to/some_extremely_verbose_filename_that_used_to_bleed.rs".into()),
+                result_summary: None,
+                detail_result: Some("fn main() {}".into()),
+                is_error: false,
+                complete: true,
+                expanded: false,
+            },
+        };
+        let (area, mut buf) = make_buf(28, 8);
+        seg.render(area, &mut buf, &Alpharius);
+        let top_row = (0..area.width)
+            .map(|x| buf[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(top_row.contains("✓"), "top row should retain tool icon: {top_row}");
+        assert!(top_row.contains("read") || top_row.contains("rea…"), "top row should retain truncated tool label: {top_row}");
+        assert!(!top_row.contains("filename_that_used_to_bleed"), "long header text should be truncated before colliding with the rest of the title row: {top_row}");
     }
 
     #[test]
