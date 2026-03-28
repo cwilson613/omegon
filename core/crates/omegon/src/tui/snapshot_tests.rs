@@ -245,6 +245,7 @@ fn snapshot_unified_footer_console() {
         tool_calls: 23,
         turn: 8,
         compactions: 2,
+        cwd: "/Users/cwilson/workspace/black-meridian/omegon".into(),
         thinking_level: "high".into(),
         model_tier: "victory".into(),
         provider_connected: true,
@@ -334,6 +335,9 @@ fn snapshot_tools_panel_with_runtime_and_error() {
     panel.tool_started("memory_recall");
     panel.update_telemetry(40.0, None, false, "off", None, false, 0.22);
     panel.tool_finished("memory_recall", false);
+    panel.tool_started("codebase_search");
+    panel.update_telemetry(40.0, None, false, "off", None, false, 0.35);
+    panel.tool_finished("codebase_search", false);
 
     let backend = TestBackend::new(42, 10);
     let mut terminal = Terminal::new(backend).unwrap();

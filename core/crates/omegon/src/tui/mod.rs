@@ -4475,11 +4475,11 @@ pub async fn run_tui(
                         (KeyCode::Up, _) => {
                             if app.agent_active {
                                 app.conversation.scroll_up(3);
+                            } else if app.history_idx.is_some() || app.editor.is_empty() {
+                                app.history_up();
                             } else if app.editor.line_count() > 1 && app.editor.cursor_row() > 0 {
                                 // Multiline: move cursor up within editor
                                 app.editor.move_up();
-                            } else if app.editor.is_empty() {
-                                app.history_up();
                             } else {
                                 app.conversation.scroll_up(3);
                             }
@@ -4487,13 +4487,13 @@ pub async fn run_tui(
                         (KeyCode::Down, _) => {
                             if app.agent_active {
                                 app.conversation.scroll_down(3);
+                            } else if app.history_idx.is_some() || app.editor.is_empty() {
+                                app.history_down();
                             } else if app.editor.line_count() > 1
                                 && app.editor.cursor_row() < app.editor.line_count() - 1
                             {
                                 // Multiline: move cursor down within editor
                                 app.editor.move_down();
-                            } else if app.editor.is_empty() {
-                                app.history_down();
                             } else {
                                 app.conversation.scroll_down(3);
                             }

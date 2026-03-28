@@ -235,6 +235,35 @@ fn mouse_wheel_scroll_up_matches_natural_scroll_direction() {
 }
 
 #[test]
+fn history_up_walks_back_multiple_entries_after_recall_starts() {
+    let mut app = test_app();
+    app.history = vec!["first".into(), "second".into(), "third".into()];
+
+    app.history_up();
+    assert_eq!(app.editor.render_text(), "third");
+    assert_eq!(app.history_idx, Some(2));
+
+    app.history_up();
+    assert_eq!(app.editor.render_text(), "second");
+    assert_eq!(app.history_idx, Some(1));
+
+    app.history_up();
+    assert_eq!(app.editor.render_text(), "first");
+    assert_eq!(app.history_idx, Some(0));
+}
+
+#[test]
+fn history_down_clears_editor_after_latest_entry() {
+    let mut app = test_app();
+    app.history = vec!["first".into(), "second".into()];
+
+    app.history_up();
+    app.history_down();
+    assert_eq!(app.editor.render_text(), "");
+    assert_eq!(app.history_idx, None);
+}
+
+#[test]
 fn slash_update_channel_without_args_shows_helpful_usage() {
     let mut app = test_app();
     let tx = test_tx();

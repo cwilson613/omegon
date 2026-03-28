@@ -91,6 +91,8 @@ fn tool_short_name(name: &str) -> String {
         "delegate_status" => ("⇉", "d.stat"),
         // ── Web / render ──
         "web_search" => ("⊕", "search"),
+        "codebase_search" => ("⌕", "cbase"),
+        "codebase_index" => ("⌕", "cidx"),
         "render_diagram" => ("⬡", "diag"),
         "generate_image_local" => ("⬡", "img"),
         // ── Local inference ──
@@ -1154,6 +1156,12 @@ mod tests {
         assert_eq!(panel.tools.len(), 1);
         assert_eq!(panel.tools[0].name, "bash");
         assert!(panel.tools[0].running);
+    }
+
+    #[test]
+    fn tool_short_name_compacts_codebase_search() {
+        assert_eq!(tool_short_name("codebase_search"), "⌕ cbase");
+        assert_eq!(tool_short_name("codebase_index"), "⌕ cidx");
     }
 
     #[test]

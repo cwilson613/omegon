@@ -269,6 +269,15 @@ impl FooterData {
             }
             lines.push(Line::from(ctx_parts));
 
+            // Line 5: working directory
+            if !self.cwd.is_empty() {
+                let cwd_display = shorten_cwd(&self.cwd, inner.width.saturating_sub(4) as usize);
+                lines.push(Line::from(vec![
+                    Span::styled(" ⌂ ", Style::default().fg(t.border_dim())),
+                    Span::styled(cwd_display, Style::default().fg(t.dim())),
+                ]));
+            }
+
             // Line 5: tier + thinking level
             let tier_color = match self.model_tier.as_str() {
                 "gloriana" => t.accent(),
@@ -788,6 +797,37 @@ fn capitalize(s: &str) -> String {
         None => String::new(),
         Some(f) => f.to_uppercase().to_string() + c.as_str(),
     }
+}
+
+fn shorten_cwd(cwd: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    if cwd.chars().count() <= max_chars {
+        return cwd.to_string();
+    }
+
+    let path = std::path::Path::new(cwd);
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(cwd);
+
+    if file_name.chars().count() + 2 >= max_chars {
+        let tail: String = file_name
+            .chars()
+            .rev()
+            .take(max_chars.saturating_sub(1))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        return format!("…{tail}");
+    }
+
+    let keep = max_chars.saturating_sub(file_name.chars().count() + 2);
+    let prefix: String = cwd.chars().take(keep).collect();
+    format!("{prefix}…/{file_name}")
 }
 
 fn short_model(model_id: &str) -> &str {
