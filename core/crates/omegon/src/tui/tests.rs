@@ -253,16 +253,16 @@ fn conversation_scroll_does_not_recall_input_history() {
 }
 
 #[test]
-fn empty_editor_does_not_implicitly_recall_history() {
+fn empty_editor_up_recalls_latest_history_entry() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into(), "third".into()];
 
     assert!(app.editor.is_empty());
     assert_eq!(app.history_idx, None);
 
-    // Plain Up/Down now stay inert until history recall is explicitly entered.
-    assert_eq!(app.editor.render_text(), "");
-    assert_eq!(app.history_idx, None);
+    app.history_up();
+    assert_eq!(app.editor.render_text(), "third");
+    assert_eq!(app.history_idx, Some(2));
 }
 
 #[test]
@@ -292,6 +292,18 @@ fn history_down_clears_editor_after_latest_entry() {
     app.history_down();
     assert_eq!(app.editor.render_text(), "");
     assert_eq!(app.history_idx, None);
+}
+
+#[test]
+fn multiline_up_uses_editor_navigation_before_history_recall() {
+    let mut app = test_app();
+    app.history = vec!["previous".into()];
+    app.editor.set_text("top\nbottom");
+    app.editor.move_end();
+
+    app.editor.move_up();
+    assert_eq!(app.history_idx, None, "moving within multiline text should not start history recall");
+    assert_eq!(app.editor.render_text(), "top\nbottom");
 }
 
 #[test]
