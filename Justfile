@@ -87,6 +87,63 @@ update:
     cd core && cargo build --profile dev-release -p omegon
     @echo "Updated to $(cd core && ./target/dev-release/omegon --version 2>/dev/null || echo 'build failed')"
 
+# Build and link a specific tagged RC/stable release into a durable local worktree.
+# This is the supported way to pin the installed CLI to a release tag.
+link-tag tag:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    TAG="{{tag}}"
+    if [ -z "$TAG" ]; then
+        echo "✗ Usage: just link-tag vX.Y.Z[-rc.N]"
+        exit 1
+    fi
+    case "$TAG" in
+        v*) ;;
+        *)
+            echo "✗ Tag must start with 'v' (got: $TAG)"
+            exit 1
+            ;;
+    esac
+
+    if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+        echo "✗ Tag $TAG does not exist locally. Fetch or create it first."
+        exit 1
+    fi
+
+    VERSION="${TAG#v}"
+    WT="$(pwd)/.omegon/release-worktrees/$TAG"
+
+    mkdir -p "$(pwd)/.omegon/release-worktrees"
+
+    if [ ! -d "$WT/.git" ] && [ ! -f "$WT/.git" ]; then
+        git worktree add --detach "$WT" "$TAG"
+    fi
+
+    MANIFEST_VERSION=$(grep '^version = ' "$WT/core/Cargo.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
+    if [ "$MANIFEST_VERSION" != "$VERSION" ]; then
+        echo "✗ Tag/version mismatch:"
+        echo "  tag:      $TAG"
+        echo "  manifest: $MANIFEST_VERSION"
+        exit 1
+    fi
+
+    echo "Building $TAG in durable worktree..."
+    (cd "$WT/core" && cargo build --release -p omegon)
+
+    echo "Linking installed omegon to $TAG..."
+    (cd "$WT" && OMEGON_ALLOW_DETACHED_LINK=1 just link)
+
+    BINARY="$WT/core/target/release/omegon"
+    BINARY_VERSION=$($BINARY --version | head -1)
+    if ! echo "$BINARY_VERSION" | grep -q "$VERSION"; then
+        echo "✗ Built binary version mismatch: $BINARY_VERSION"
+        exit 1
+    fi
+
+    echo "✓ Linked $TAG from $WT"
+    echo "  $BINARY_VERSION"
+
 # Full release build (fat LTO, single codegen unit — slow link, smallest binary)
 build-release:
     cd core && cargo build --release -p omegon
