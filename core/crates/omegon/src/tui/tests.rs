@@ -225,13 +225,31 @@ fn mouse_wheel_scroll_up_matches_natural_scroll_direction() {
 
     app.conversation.scroll_up(3);
     let after_scroll_up = app.conversation.conv_state.scroll_offset;
-    assert!(after_scroll_up > 0, "scroll up should move into history");
+    assert!(after_scroll_up > 0, "scroll up should move into conversation history");
 
     app.conversation.scroll_down(3);
     assert!(
         app.conversation.conv_state.scroll_offset < after_scroll_up,
         "scroll down should move back toward the live bottom"
     );
+}
+
+#[test]
+fn conversation_scroll_does_not_recall_input_history() {
+    let mut app = test_app();
+    app.history = vec!["first".into(), "second".into(), "third".into()];
+    app.editor.set_text("draft");
+
+    app.conversation.push_user("user");
+    app.conversation.append_streaming("line 1\nline 2\nline 3\nline 4\nline 5\nline 6");
+
+    app.conversation.scroll_up(3);
+    assert_eq!(app.editor.render_text(), "draft");
+    assert_eq!(app.history_idx, None);
+
+    app.conversation.scroll_down(3);
+    assert_eq!(app.editor.render_text(), "draft");
+    assert_eq!(app.history_idx, None);
 }
 
 #[test]
