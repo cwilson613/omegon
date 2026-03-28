@@ -19,6 +19,8 @@ pub struct ConversationView {
     /// Pinned segment index — when set, this segment stays expanded and visible
     /// at the bottom of the viewport until explicitly unpinned (Ctrl+O again or Esc).
     pub pinned_segment: Option<usize>,
+    /// Explicitly selected segment index from operator interaction.
+    pub selected_segment: Option<usize>,
 }
 
 impl ConversationView {
@@ -29,6 +31,7 @@ impl ConversationView {
             conv_state: ConvState::new(),
             image_cache: ImageCache::default(),
             pinned_segment: None,
+            selected_segment: None,
         }
     }
 
@@ -235,14 +238,23 @@ impl ConversationView {
         }
     }
 
-    /// Toggle pin on the nearest tool card. When pinned, the segment is expanded
-    /// and stays visible at the bottom of the conversation viewport. Pressing
-    /// Ctrl+O again (or Esc) unpins and collapses.
+    /// Toggle pin on the selected tool card if present, otherwise the nearest
+    /// visible tool card. When pinned, the segment is expanded and stays visible
+    /// at the bottom of the conversation viewport. Pressing Ctrl+O again (or Esc)
+    /// unpins and collapses.
     pub fn toggle_pin(&mut self) {
         if let Some(pinned) = self.pinned_segment.take() {
             // Unpin: collapse the segment
             self.toggle_expand(pinned);
-        } else if let Some(idx) = self.focused_tool_card() {
+            return;
+        }
+
+        let target = self
+            .selected_segment
+            .filter(|&idx| matches!(self.segments.get(idx).map(|s| &s.content), Some(SegmentContent::ToolCard { .. })))
+            .or_else(|| self.focused_tool_card());
+
+        if let Some(idx) = target {
             // Pin: expand and lock focus
             if let Some(seg) = self.segments.get_mut(idx) {
                 if let SegmentContent::ToolCard { expanded, .. } = &mut seg.content {
@@ -252,6 +264,7 @@ impl ConversationView {
                     }
                 }
             }
+            self.selected_segment = Some(idx);
             self.pinned_segment = Some(idx);
         }
     }
@@ -293,12 +306,47 @@ impl ConversationView {
             .rposition(|s| matches!(s.content, SegmentContent::ToolCard { .. }))
     }
 
+    pub fn select_segment(&mut self, idx: usize) {
+        if idx < self.segments.len() {
+            self.selected_segment = Some(idx);
+        }
+    }
+
+    pub fn segment_at(&self, viewport: ratatui::prelude::Rect, row: u16) -> Option<usize> {
+        let heights = &self.conv_state.heights;
+        if heights.len() != self.segments.len() || row < viewport.y || row >= viewport.bottom() {
+            return None;
+        }
+
+        let viewport_height = viewport.height;
+        let total_height: u16 = heights.iter().copied().sum();
+        let top_offset = if total_height <= viewport_height {
+            0
+        } else {
+            total_height - viewport_height - self.conv_state.scroll_offset.min(total_height.saturating_sub(viewport_height))
+        };
+
+        let target_y = top_offset + (row - viewport.y);
+        let mut y_cursor: u16 = 0;
+        for (idx, seg_height) in heights.iter().copied().enumerate() {
+            let seg_top = y_cursor;
+            let seg_bottom = y_cursor + seg_height;
+            if target_y >= seg_top && target_y < seg_bottom {
+                return Some(idx);
+            }
+            y_cursor = seg_bottom;
+        }
+        None
+    }
+
     /// Clear all segments (for /clear command).
     pub fn clear(&mut self) {
         self.segments.clear();
         self.conv_state = ConvState::new();
         self.streaming = false;
         self.image_cache.clear();
+        self.pinned_segment = None;
+        self.selected_segment = None;
     }
 }
 

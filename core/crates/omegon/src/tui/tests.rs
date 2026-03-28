@@ -307,6 +307,40 @@ fn multiline_up_uses_editor_navigation_before_history_recall() {
 }
 
 #[test]
+fn conversation_segment_at_returns_clicked_segment() {
+    let mut cv = ConversationView::new();
+    cv.push_user("first");
+    cv.push_tool_start("t1", "bash", Some("echo hi"), Some("echo hi"));
+    cv.push_tool_end("t1", false, Some("hi"));
+
+    let t = crate::tui::theme::Alpharius;
+    let area = Rect::new(0, 0, 80, 12);
+    let mut buf = Buffer::empty(area);
+    {
+        let (segments, state) = cv.segments_and_state();
+        let widget = crate::tui::conv_widget::ConversationWidget::new(segments, &t);
+        widget.render(area, &mut buf, state);
+    }
+
+    let idx = cv.segment_at(area, 3).expect("row should map to a segment");
+    assert!(idx < cv.segments().len());
+}
+
+#[test]
+fn toggle_pin_prefers_selected_tool_card() {
+    let mut cv = ConversationView::new();
+    cv.push_tool_start("t1", "bash", Some("echo one"), Some("echo one"));
+    cv.push_tool_end("t1", false, Some("one"));
+    cv.push_tool_start("t2", "bash", Some("echo two"), Some("echo two"));
+    cv.push_tool_end("t2", false, Some("two"));
+
+    cv.select_segment(0);
+    cv.toggle_pin();
+
+    assert_eq!(cv.pinned_segment, Some(0));
+}
+
+#[test]
 fn slash_update_channel_without_args_shows_helpful_usage() {
     let mut app = test_app();
     let tx = test_tx();

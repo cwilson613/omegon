@@ -36,7 +36,7 @@ use std::io;
 use std::time::Duration;
 
 use crossterm::ExecutableCommand;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton};
 use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, KeyboardEnhancementFlags, MouseEventKind,
     PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
@@ -85,6 +85,13 @@ pub enum TuiCommand {
 /// the agent loop checks it. Arc so both tasks can access it.
 pub type SharedCancel = std::sync::Arc<std::sync::Mutex<Option<CancellationToken>>>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PaneFocus {
+    Editor,
+    Conversation,
+    Dashboard,
+}
+
 struct OperatorEvent {
     message: String,
     color: Color,
@@ -109,6 +116,12 @@ pub struct App {
     dashboard: DashboardState,
     /// Last on-screen dashboard area for mouse hit-testing.
     dashboard_area: Option<Rect>,
+    /// Last on-screen conversation area for mouse hit-testing.
+    conversation_area: Option<Rect>,
+    /// Last on-screen editor area for mouse hit-testing.
+    editor_area: Option<Rect>,
+    /// Which pane currently owns pointer-driven interaction.
+    pane_focus: PaneFocus,
     footer_data: FooterData,
     /// CIC instrument panel for telemetry visualization
     instrument_panel: InstrumentPanel,
@@ -170,9 +183,10 @@ pub struct App {
     update_tx: Option<crate::update::UpdateSender>,
     /// Whether we enabled the Kitty keyboard protocol (must pop on cleanup).
     keyboard_enhancement: bool,
-    /// Whether crossterm mouse capture is enabled. Disable this to let the
-    /// terminal handle native text selection/copy in the conversation pane.
+    /// Whether crossterm mouse capture is enabled.
     mouse_capture_enabled: bool,
+    /// Last left-click press used to detect double-click expansion.
+    last_left_click: Option<(u16, u16, std::time::Instant)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -244,6 +258,9 @@ impl App {
             history_idx: None,
             dashboard: DashboardState::default(),
             dashboard_area: None,
+            conversation_area: None,
+            editor_area: None,
+            pane_focus: PaneFocus::Editor,
             footer_data: FooterData {
                 model_id,
                 model_provider,
@@ -282,6 +299,7 @@ impl App {
             update_tx: None,
             keyboard_enhancement: false,
             mouse_capture_enabled: false,
+            last_left_click: None,
         }
     }
 
@@ -1380,6 +1398,8 @@ impl App {
         let (segments, conv_state) = self.conversation.segments_and_state();
         let conv_widget = conv_widget::ConversationWidget::new(segments, t.as_ref());
         frame.render_stateful_widget(conv_widget, chunks[0], conv_state);
+        self.conversation_area = Some(chunks[0]);
+        self.editor_area = Some(chunks[1]);
 
         // Overlay images on top of placeholders (second pass — needs Frame for StatefulImage)
         {
@@ -3678,10 +3698,9 @@ pub async fn run_tui(
     io::stdout().execute(crossterm::terminal::Clear(
         crossterm::terminal::ClearType::All,
     ))?;
-    // Leave mouse capture disabled by default so terminal-native text
-    // selection/copy works in the conversation pane. Keyboard scrolling
-    // remains available.
-    io::stdout().execute(DisableMouseCapture)?;
+    // Capture mouse input during the TUI session so panes can support wheel
+    // scrolling, click-to-focus, and segment selection.
+    io::stdout().execute(EnableMouseCapture)?;
     io::stdout().execute(crossterm::event::EnableBracketedPaste)?;
 
     // Enable Kitty keyboard protocol when the terminal supports it.
@@ -3722,6 +3741,7 @@ pub async fn run_tui(
 
     let mut app = App::new(settings);
     app.keyboard_enhancement = has_keyboard_enhancement;
+    app.mouse_capture_enabled = true;
     app.history = App::load_history(&config.cwd);
     app.footer_data.cwd = config.cwd.clone();
     app.footer_data.is_oauth = config.is_oauth;
@@ -3961,6 +3981,43 @@ pub async fn run_tui(
             match event::read()? {
                 // ── Mouse scroll ────────────────────────────────────────
                 Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::Down(MouseButton::Left) if app.mouse_capture_enabled => {
+                        let point_in = |area: Option<Rect>| {
+                            area.is_some_and(|area| {
+                                mouse.column >= area.x
+                                    && mouse.column < area.x + area.width
+                                    && mouse.row >= area.y
+                                    && mouse.row < area.y + area.height
+                            })
+                        };
+
+                        if point_in(app.dashboard_area) {
+                            app.pane_focus = PaneFocus::Dashboard;
+                            app.dashboard.sidebar_active = true;
+                        } else if point_in(app.conversation_area) {
+                            app.pane_focus = PaneFocus::Conversation;
+                            app.dashboard.sidebar_active = false;
+                            if let Some(area) = app.conversation_area
+                                && let Some(idx) = app.conversation.segment_at(area, mouse.row)
+                            {
+                                let now = std::time::Instant::now();
+                                let is_double = app.last_left_click.is_some_and(|(col, row, t)| {
+                                    row == mouse.row
+                                        && col.abs_diff(mouse.column) <= 1
+                                        && row.abs_diff(mouse.row) <= 1
+                                        && now.duration_since(t) <= Duration::from_millis(400)
+                                });
+                                app.conversation.select_segment(idx);
+                                if is_double {
+                                    app.conversation.toggle_expand(idx);
+                                }
+                                app.last_left_click = Some((mouse.column, mouse.row, now));
+                            }
+                        } else if point_in(app.editor_area) {
+                            app.pane_focus = PaneFocus::Editor;
+                            app.dashboard.sidebar_active = false;
+                        }
+                    }
                     MouseEventKind::ScrollUp if app.mouse_capture_enabled => {
                         let over_dashboard = app.dashboard_area.is_some_and(|area| {
                             mouse.column >= area.x
@@ -3968,9 +4025,15 @@ pub async fn run_tui(
                                 && mouse.row >= area.y
                                 && mouse.row < area.y + area.height
                         });
-                        if over_dashboard {
+                        let over_conversation = app.conversation_area.is_some_and(|area| {
+                            mouse.column >= area.x
+                                && mouse.column < area.x + area.width
+                                && mouse.row >= area.y
+                                && mouse.row < area.y + area.height
+                        });
+                        if over_dashboard || matches!(app.pane_focus, PaneFocus::Dashboard) {
                             app.dashboard.scroll_up(3);
-                        } else {
+                        } else if over_conversation || matches!(app.pane_focus, PaneFocus::Conversation) {
                             app.conversation.scroll_up(3);
                         }
                     }
@@ -3981,9 +4044,15 @@ pub async fn run_tui(
                                 && mouse.row >= area.y
                                 && mouse.row < area.y + area.height
                         });
-                        if over_dashboard {
+                        let over_conversation = app.conversation_area.is_some_and(|area| {
+                            mouse.column >= area.x
+                                && mouse.column < area.x + area.width
+                                && mouse.row >= area.y
+                                && mouse.row < area.y + area.height
+                        });
+                        if over_dashboard || matches!(app.pane_focus, PaneFocus::Dashboard) {
                             app.dashboard.scroll_down(3);
-                        } else {
+                        } else if over_conversation || matches!(app.pane_focus, PaneFocus::Conversation) {
                             app.conversation.scroll_down(3);
                         }
                     }
