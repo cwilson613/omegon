@@ -4481,7 +4481,8 @@ pub async fn run_tui(
                                 // Multiline: move cursor up within editor
                                 app.editor.move_up();
                             } else {
-                                app.conversation.scroll_up(3);
+                                // Keep plain Up bound to the composer while focused.
+                                // Conversation scrolling stays on Shift+Up/PageUp.
                             }
                         }
                         (KeyCode::Down, _) => {
@@ -4495,7 +4496,8 @@ pub async fn run_tui(
                                 // Multiline: move cursor down within editor
                                 app.editor.move_down();
                             } else {
-                                app.conversation.scroll_down(3);
+                                // Keep plain Down bound to the composer while focused.
+                                // Conversation scrolling stays on Shift+Down/PageDown.
                             }
                         }
                         _ => {}

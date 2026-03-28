@@ -759,6 +759,30 @@ mod tests {
     }
 
     #[test]
+    fn wrapped_cursor_screen_position_moves_between_visual_rows() {
+        let mut e = Editor::new();
+        e.set_text("123456789");
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 6,
+            height: 6,
+        };
+
+        e.move_end();
+        let end = e.cursor_screen_position(area);
+        e.move_left();
+        e.move_left();
+        e.move_left();
+        let previous_visual_row = e.cursor_screen_position(area);
+
+        assert!(
+            previous_visual_row.1 < end.1 || previous_visual_row.0 < end.0,
+            "moving left across a wrap boundary should move the cursor to an earlier visual cell"
+        );
+    }
+
+    #[test]
     fn line_count_single_line() {
         let mut e = Editor::new();
         assert_eq!(e.line_count(), 1); // empty = at least 1
