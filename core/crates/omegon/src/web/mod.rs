@@ -1,7 +1,10 @@
-//! Embedded web server — localhost HTTP + WebSocket for the agent dashboard.
+//! Embedded web server — localhost HTTP + WebSocket control-plane.
 //!
-//! Started on demand by `/dash`. Serves:
+//! Serves:
 //! - `GET /` — embedded single-page dashboard
+//! - `GET /api/startup` — machine-readable startup/discovery metadata
+//! - `GET /api/healthz` — liveness probe for local supervisors
+//! - `GET /api/readyz` — readiness probe for local supervisors
 //! - `GET /api/state` — full agent state snapshot (JSON)
 //! - `WS /ws` — bidirectional agent protocol (JSON-over-WebSocket)
 //!
@@ -21,16 +24,29 @@ use tokio::sync::{broadcast, mpsc};
 use crate::tui::dashboard::DashboardHandles;
 pub use auth::{resolve_web_auth_state, WebAuthState};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ControlPlaneState {
+    Starting,
+    Ready,
+    Degraded,
+    Failed,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WebStartupInfo {
     pub schema_version: u32,
     pub addr: String,
     pub http_base: String,
     pub state_url: String,
+    pub startup_url: String,
+    pub health_url: String,
+    pub ready_url: String,
     pub ws_url: String,
     pub token: String,
     pub auth_mode: String,
     pub auth_source: String,
+    pub control_plane_state: ControlPlaneState,
 }
 
 /// Shared state accessible to all web handlers.
@@ -46,6 +62,8 @@ pub struct WebState {
     pub web_auth: Arc<WebAuthState>,
     /// Machine-readable startup/discovery payload once the server is bound.
     pub startup_info: Arc<Mutex<Option<WebStartupInfo>>>,
+    /// Control-plane lifecycle state for machine health/readiness probes.
+    pub control_plane_state: Arc<Mutex<ControlPlaneState>>,
 }
 
 impl WebState {
@@ -73,6 +91,7 @@ impl WebState {
             command_tx,
             web_auth: Arc::new(auth_state),
             startup_info: Arc::new(Mutex::new(None)),
+            control_plane_state: Arc::new(Mutex::new(ControlPlaneState::Starting)),
         }
     }
 }
@@ -91,6 +110,14 @@ pub async fn start_server(
     mut state: WebState,
     preferred_port: u16,
 ) -> anyhow::Result<(WebStartupInfo, mpsc::Receiver<WebCommand>)> {
+    start_server_with_options(state, preferred_port, false).await
+}
+
+pub async fn start_server_with_options(
+    state: WebState,
+    preferred_port: u16,
+    strict_port: bool,
+) -> anyhow::Result<(WebStartupInfo, mpsc::Receiver<WebCommand>)> {
     // Create the command channel — caller gets the receiver
     let (cmd_tx, cmd_rx) = mpsc::channel(32);
     state.command_tx = cmd_tx;
@@ -99,10 +126,13 @@ pub async fn start_server(
     let auth_mode = state.web_auth.mode_name();
     let auth_source = state.web_auth.source_name().to_string();
     let startup_info = state.startup_info.clone();
+    let control_plane_state = state.control_plane_state.clone();
 
     let app = Router::new()
         .route("/api/state", axum::routing::get(api::get_state))
         .route("/api/startup", axum::routing::get(api::get_startup))
+        .route("/api/healthz", axum::routing::get(api::get_health))
+        .route("/api/readyz", axum::routing::get(api::get_ready))
         .route("/api/graph", axum::routing::get(api::get_graph))
         .route("/ws", axum::routing::get(ws::ws_handler))
         .route("/", axum::routing::get(serve_dashboard))
@@ -119,21 +149,32 @@ pub async fn start_server(
         .with_state(state);
 
     // Bind directly — no TOCTOU race
-    let listener = bind_with_fallback(preferred_port).await?;
+    let listener = if strict_port {
+        bind_strict(preferred_port).await?
+    } else {
+        bind_with_fallback(preferred_port).await?
+    };
     let bound = listener.local_addr()?;
 
     let startup = WebStartupInfo {
-        schema_version: 1,
+        schema_version: 2,
         addr: bound.to_string(),
         http_base: format!("http://{bound}"),
         state_url: format!("http://{bound}/api/state"),
+        startup_url: format!("http://{bound}/api/startup"),
+        health_url: format!("http://{bound}/api/healthz"),
+        ready_url: format!("http://{bound}/api/readyz"),
         ws_url: format!("ws://{bound}/ws?token={token}"),
         token,
         auth_mode: auth_mode.to_string(),
         auth_source,
+        control_plane_state: ControlPlaneState::Ready,
     };
     if let Ok(mut slot) = startup_info.lock() {
         *slot = Some(startup.clone());
+    }
+    if let Ok(mut status) = control_plane_state.lock() {
+        *status = ControlPlaneState::Ready;
     }
 
     tracing::debug!(
@@ -160,6 +201,13 @@ async fn serve_dashboard() -> axum::response::Html<&'static str> {
 
 /// Bind to a port with auto-increment fallback. Returns the listener directly
 /// to avoid TOCTOU races.
+async fn bind_strict(port: u16) -> anyhow::Result<tokio::net::TcpListener> {
+    let addr: SocketAddr = ([127, 0, 0, 1], port).into();
+    tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to bind strict control port {port}: {e}"))
+}
+
 async fn bind_with_fallback(preferred: u16) -> anyhow::Result<tokio::net::TcpListener> {
     for offset in 0..10 {
         let port = preferred + offset;
@@ -221,21 +269,38 @@ mod tests {
             WebAuthState::ephemeral_generated("token-123".into()),
         );
         let startup = WebStartupInfo {
-            schema_version: 1,
+            schema_version: 2,
             addr: "127.0.0.1:7842".into(),
             http_base: "http://127.0.0.1:7842".into(),
             state_url: "http://127.0.0.1:7842/api/state".into(),
+            startup_url: "http://127.0.0.1:7842/api/startup".into(),
+            health_url: "http://127.0.0.1:7842/api/healthz".into(),
+            ready_url: "http://127.0.0.1:7842/api/readyz".into(),
             ws_url: "ws://127.0.0.1:7842/ws?token=token-123".into(),
             token: state.web_auth.issue_query_token(),
             auth_mode: state.web_auth.mode_name().into(),
             auth_source: state.web_auth.source_name().into(),
+            control_plane_state: ControlPlaneState::Ready,
         };
 
         assert_eq!(startup.token, "token-123");
         assert_eq!(startup.auth_mode, "ephemeral-bearer");
         assert_eq!(startup.auth_source, "generated");
         assert_eq!(startup.state_url, "http://127.0.0.1:7842/api/state");
+        assert_eq!(startup.startup_url, "http://127.0.0.1:7842/api/startup");
+        assert_eq!(startup.health_url, "http://127.0.0.1:7842/api/healthz");
+        assert_eq!(startup.ready_url, "http://127.0.0.1:7842/api/readyz");
         assert_eq!(startup.ws_url, "ws://127.0.0.1:7842/ws?token=token-123");
+        assert_eq!(startup.control_plane_state, ControlPlaneState::Ready);
+    }
+
+    #[tokio::test]
+    async fn bind_strict_fails_when_port_is_taken() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let err = bind_strict(port).await.unwrap_err();
+        assert!(err.to_string().contains("Failed to bind strict control port"));
     }
 
     #[test]

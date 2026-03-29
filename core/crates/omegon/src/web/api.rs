@@ -8,7 +8,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use serde::Serialize;
 
-use super::WebState;
+use super::{ControlPlaneState, WebState};
 use crate::lifecycle::types::*;
 
 /// Full agent state snapshot — the canonical shape for web consumers.
@@ -131,6 +131,12 @@ pub struct GraphLink {
     pub link_type: String, // "parent", "dependency", "related"
 }
 
+#[derive(Serialize)]
+pub struct ProbeResponse {
+    pub ok: bool,
+    pub state: ControlPlaneState,
+}
+
 /// GET /api/startup — machine-readable dashboard startup/discovery metadata.
 pub async fn get_startup(
     State(state): State<WebState>,
@@ -138,6 +144,53 @@ pub async fn get_startup(
     match state.startup_info.lock() {
         Ok(guard) => guard.clone().map(Json).ok_or(StatusCode::SERVICE_UNAVAILABLE),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+/// GET /api/healthz — control-plane liveness probe.
+pub async fn get_health(State(state): State<WebState>) -> (StatusCode, Json<ProbeResponse>) {
+    match state.control_plane_state.lock() {
+        Ok(guard) => (
+            StatusCode::OK,
+            Json(ProbeResponse {
+                ok: true,
+                state: *guard,
+            }),
+        ),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ProbeResponse {
+                ok: false,
+                state: ControlPlaneState::Failed,
+            }),
+        ),
+    }
+}
+
+/// GET /api/readyz — control-plane readiness probe.
+pub async fn get_ready(State(state): State<WebState>) -> (StatusCode, Json<ProbeResponse>) {
+    match state.control_plane_state.lock() {
+        Ok(guard) => {
+            let is_ready = matches!(*guard, ControlPlaneState::Ready);
+            (
+                if is_ready {
+                    StatusCode::OK
+                } else {
+                    StatusCode::SERVICE_UNAVAILABLE
+                },
+                Json(ProbeResponse {
+                    ok: is_ready,
+                    state: *guard,
+                }),
+            )
+        }
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ProbeResponse {
+                ok: false,
+                state: ControlPlaneState::Failed,
+            }),
+        ),
     }
 }
 
@@ -366,7 +419,7 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
 mod tests {
     use super::*;
     use crate::tui::dashboard::DashboardHandles;
-    use crate::web::{WebAuthState, WebStartupInfo};
+    use crate::web::{ControlPlaneState, WebAuthState, WebStartupInfo};
 
     fn test_state() -> WebState {
         WebState {
@@ -375,15 +428,22 @@ mod tests {
             command_tx: tokio::sync::mpsc::channel(16).0,
             web_auth: std::sync::Arc::new(WebAuthState::ephemeral_generated("test".into())),
             startup_info: std::sync::Arc::new(std::sync::Mutex::new(Some(WebStartupInfo {
-                schema_version: 1,
+                schema_version: 2,
                 addr: "127.0.0.1:7842".into(),
                 http_base: "http://127.0.0.1:7842".into(),
                 state_url: "http://127.0.0.1:7842/api/state".into(),
+                startup_url: "http://127.0.0.1:7842/api/startup".into(),
+                health_url: "http://127.0.0.1:7842/api/healthz".into(),
+                ready_url: "http://127.0.0.1:7842/api/readyz".into(),
                 ws_url: "ws://127.0.0.1:7842/ws?token=test".into(),
                 token: "test".into(),
                 auth_mode: "ephemeral-bearer".into(),
                 auth_source: "generated".into(),
+                control_plane_state: ControlPlaneState::Ready,
             }))),
+            control_plane_state: std::sync::Arc::new(std::sync::Mutex::new(
+                ControlPlaneState::Ready,
+            )),
         }
     }
 
@@ -400,9 +460,27 @@ mod tests {
     async fn startup_payload_is_available() {
         let payload = get_startup(axum::extract::State(test_state())).await.unwrap().0;
 
-        assert_eq!(payload.schema_version, 1);
+        assert_eq!(payload.schema_version, 2);
         assert_eq!(payload.state_url, "http://127.0.0.1:7842/api/state");
+        assert_eq!(payload.health_url, "http://127.0.0.1:7842/api/healthz");
+        assert_eq!(payload.ready_url, "http://127.0.0.1:7842/api/readyz");
         assert_eq!(payload.auth_mode, "ephemeral-bearer");
+    }
+
+    #[tokio::test]
+    async fn health_probe_reports_alive() {
+        let (status, Json(payload)) = get_health(axum::extract::State(test_state())).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(payload.ok);
+        assert_eq!(payload.state, ControlPlaneState::Ready);
+    }
+
+    #[tokio::test]
+    async fn ready_probe_reports_ready() {
+        let (status, Json(payload)) = get_ready(axum::extract::State(test_state())).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(payload.ok);
+        assert_eq!(payload.state, ControlPlaneState::Ready);
     }
 
     #[test]

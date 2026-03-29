@@ -189,6 +189,17 @@ enum Commands {
     /// Run interactive TUI session — ratatui-based terminal interface.
     Interactive,
 
+    /// Run an embedded localhost control-plane for external supervisors.
+    Embedded {
+        /// Preferred localhost control port.
+        #[arg(long, default_value = "7842")]
+        control_port: u16,
+
+        /// Require the exact control port instead of auto-falling back.
+        #[arg(long)]
+        strict_port: bool,
+    },
+
     /// Unified authentication management.
     /// Usage: omegon auth <status|login|logout|unlock> [provider]
     Auth {
@@ -392,6 +403,10 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(Commands::Interactive) => run_interactive_command(&cli).await,
+        Some(Commands::Embedded {
+            control_port,
+            strict_port,
+        }) => run_embedded_command(control_port, strict_port).await,
         Some(Commands::Migrate { ref source }) => {
             let cwd = std::fs::canonicalize(&cli.cwd)?;
             let report = migrate::run(source, &cwd);
@@ -455,6 +470,46 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
+}
+
+#[derive(serde::Serialize)]
+struct EmbeddedStartupEvent {
+    #[serde(rename = "type")]
+    event_type: &'static str,
+    schema_version: u32,
+    pid: u32,
+    http_base: String,
+    startup_url: String,
+    health_url: String,
+    ready_url: String,
+    ws_url: String,
+    auth_mode: String,
+    auth_source: String,
+}
+
+async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::Result<()> {
+    let state = web::WebState::new(
+        crate::tui::dashboard::DashboardHandles::default(),
+        tokio::sync::broadcast::channel::<AgentEvent>(32).0,
+    );
+
+    let (startup, _cmd_rx) = web::start_server_with_options(state, control_port, strict_port).await?;
+    let event = EmbeddedStartupEvent {
+        event_type: "omegon.startup",
+        schema_version: startup.schema_version,
+        pid: std::process::id(),
+        http_base: startup.http_base.clone(),
+        startup_url: startup.startup_url.clone(),
+        health_url: startup.health_url.clone(),
+        ready_url: startup.ready_url.clone(),
+        ws_url: startup.ws_url.clone(),
+        auth_mode: startup.auth_mode.clone(),
+        auth_source: startup.auth_source.clone(),
+    };
+    println!("{}", serde_json::to_string(&event)?);
+
+    tokio::signal::ctrl_c().await?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1949,6 +2004,29 @@ mod tests {
                 assert_eq!(provider, "anthropic");
             }
             _ => panic!("Expected Login command"),
+        }
+    }
+
+    #[test]
+    fn embedded_command_parses_control_plane_flags() {
+        let cli = Cli::try_parse_from(vec![
+            "omegon",
+            "embedded",
+            "--control-port",
+            "7842",
+            "--strict-port",
+        ])
+        .expect("should parse embedded command");
+
+        match cli.command.unwrap() {
+            Commands::Embedded {
+                control_port,
+                strict_port,
+            } => {
+                assert_eq!(control_port, 7842);
+                assert!(strict_port);
+            }
+            _ => panic!("Expected Embedded command"),
         }
     }
 }
