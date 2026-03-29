@@ -19,6 +19,7 @@ pub mod effects;
 pub mod footer;
 pub mod image;
 pub mod instruments;
+pub mod model_catalog;
 pub mod segments;
 pub mod selector;
 pub mod spinner;
