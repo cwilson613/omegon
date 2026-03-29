@@ -128,6 +128,7 @@ fn is_known_provider_id(provider_id: &str) -> bool {
             | "cerebras"
             | "huggingface"
             | "ollama"
+            | "mlx"
             | "local"
     )
 }
@@ -163,6 +164,9 @@ pub fn infer_provider_id(model_spec: &str) -> String {
     }
     if lower.contains('/') {
         return "openrouter".to_string();
+    }
+    if lower.starts_with("mlx-") {
+        return "mlx".to_string();
     }
     if lower.starts_with("qwen")
         || lower.starts_with("llama")
@@ -214,6 +218,7 @@ fn fallback_order_for_model(model_spec: &str) -> Vec<&'static str> {
         "cerebras" => vec!["cerebras"],
         "huggingface" => vec!["huggingface"],
         "ollama" => vec!["ollama"],
+        "mlx" => vec!["mlx"],
         _ => vec!["anthropic"],
     }
 }
@@ -256,7 +261,7 @@ pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
         "openai" => OpenAIClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
         "openrouter" => OpenRouterClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
         // OpenAI-compatible providers — all use the Chat Completions protocol
-        "groq" | "xai" | "mistral" | "cerebras" | "huggingface" | "ollama" => {
+        "groq" | "xai" | "mistral" | "cerebras" | "huggingface" | "ollama" | "mlx" => {
             OpenAICompatClient::from_env(provider_id).map(|c| Box::new(c) as Box<dyn LlmBridge>)
         }
         // Codex uses the Responses API (not Chat Completions) with OAuth JWT tokens
@@ -1723,6 +1728,7 @@ fn compat_base_url(provider_id: &str) -> Option<&'static str> {
         "cerebras" => Some("https://api.cerebras.ai"),
         "huggingface" => Some("https://router.huggingface.co"),
         "ollama" => Some("http://localhost:11434"),
+        "mlx" => Some("http://localhost:8000"),
         _ => None,
     }
 }
@@ -1736,6 +1742,7 @@ fn compat_default_model(provider_id: &str) -> Option<&'static str> {
         "cerebras" => Some("llama-3.3-70b"),
         "huggingface" => Some("Qwen/Qwen3-32B"),
         "ollama" => Some("qwen3:32b"),
+        "mlx" => Some("MLX-Qwen3.5-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-4bit"),
         _ => None,
     }
 }

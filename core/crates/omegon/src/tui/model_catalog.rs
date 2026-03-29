@@ -165,6 +165,21 @@ impl ModelCatalog {
             },
         ]);
 
+        // MLX local server (Apple Silicon optimized)
+        providers.insert("MLX".to_string(), vec![
+            ModelInfo {
+                id: "mlx:MLX-Qwen3.5-35B".to_string(),
+                name: "Qwen 3.5 35B (MLX)".to_string(),
+                provider: "MLX".to_string(),
+                context_input: 32768,
+                context_output: 8192,
+                cost_tier: CostTier::Local,
+                capabilities: vec![Capability::Reasoning, Capability::Coding],
+                description: "Qwen 3.5 35B 4-bit quantized for Apple Silicon — best local reasoning".to_string(),
+                available: false, // Will be marked available if MLX server is detected
+            },
+        ]);
+
         // ─── Cloud Providers ──────────────────────────────────────────
 
         // OpenRouter (largest catalog)
