@@ -151,7 +151,7 @@
     "frozen": false,
     "opened": "2026-03-27T17:03:52Z",
     "released": null,
-    "rc_count": 10,
+    "rc_count": 11,
     "notes": [
       "feat(release): add durable tag-link workflow",
       "feat(tui): add dim segment header timestamps",
@@ -171,9 +171,11 @@
       "fix(tui): restore terminal copy and normalize pasted input",
       "fix(tui): truncate tool headers before timestamp collision",
       "fix(tui): replace inference panel glyph palette",
-      "fix(tui): align wrapped editor cursor with top-border layout"
+      "fix(tui): align wrapped editor cursor with top-border layout",
+      "fix(tui): clarify assistant reasoning and answer labels",
+      "fix(tui): align tool cards with instrument status language"
     ],
-    "rc_version": "0.15.4-rc.11",
-    "last_rc": "2026-03-28T22:10:49Z"
+    "rc_version": "0.15.4-rc.12",
+    "last_rc": "2026-03-28T22:47:00Z"
   }
 }
