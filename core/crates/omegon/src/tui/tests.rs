@@ -292,6 +292,46 @@ fn conversation_scroll_does_not_recall_input_history() {
 }
 
 #[test]
+fn conversation_focus_blocks_history_recall_on_up_down() {
+    let mut app = test_app();
+    app.history = vec!["first".into(), "second".into(), "third".into()];
+    app.editor.set_text("");
+    app.pane_focus = PaneFocus::Conversation;
+
+    app.conversation.push_user("user");
+    app.conversation.append_streaming("line 1\nline 2\nline 3\nline 4\nline 5\nline 6");
+
+    let before_offset = app.conversation.conv_state.scroll_offset;
+
+    if matches!(app.pane_focus, PaneFocus::Conversation) {
+        app.conversation.scroll_up(3);
+    } else if app.editor.is_empty() || app.history_idx.is_some() {
+        app.history_up();
+    }
+
+    assert!(
+        app.conversation.conv_state.scroll_offset > before_offset,
+        "conversation focus should route Up into conversation scrolling"
+    );
+    assert_eq!(app.history_idx, None, "conversation focus must not enter history recall");
+    assert_eq!(app.editor.render_text(), "", "conversation focus must not rewrite the composer");
+
+    let after_up_offset = app.conversation.conv_state.scroll_offset;
+    if matches!(app.pane_focus, PaneFocus::Conversation) {
+        app.conversation.scroll_down(3);
+    } else if app.history_idx.is_some() {
+        app.history_down();
+    }
+
+    assert!(
+        app.conversation.conv_state.scroll_offset < after_up_offset,
+        "conversation focus should route Down back toward the live tail"
+    );
+    assert_eq!(app.history_idx, None);
+    assert_eq!(app.editor.render_text(), "");
+}
+
+#[test]
 fn selected_conversation_segment_exports_plain_text() {
     let mut app = test_app();
     app.conversation.push_user("operator prompt");

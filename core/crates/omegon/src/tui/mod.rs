@@ -4692,7 +4692,11 @@ pub async fn run_tui(
                             app.conversation.scroll_down(20);
                         }
                         (KeyCode::Up, _) => {
-                            if app.agent_active {
+                            if matches!(app.pane_focus, PaneFocus::Conversation) {
+                                app.conversation.scroll_up(3);
+                            } else if matches!(app.pane_focus, PaneFocus::Dashboard) {
+                                app.dashboard.scroll_up(3);
+                            } else if app.agent_active {
                                 app.conversation.scroll_up(3);
                             } else if app.editor.line_count() > 1 && app.editor.cursor_row() > 0 {
                                 // Multiline: move cursor up within editor
@@ -4704,7 +4708,11 @@ pub async fn run_tui(
                             }
                         }
                         (KeyCode::Down, _) => {
-                            if app.agent_active {
+                            if matches!(app.pane_focus, PaneFocus::Conversation) {
+                                app.conversation.scroll_down(3);
+                            } else if matches!(app.pane_focus, PaneFocus::Dashboard) {
+                                app.dashboard.scroll_down(3);
+                            } else if app.agent_active {
                                 app.conversation.scroll_down(3);
                             } else if app.history_idx.is_some() {
                                 app.history_down();
