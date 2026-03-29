@@ -202,15 +202,14 @@
     "opened": "2026-03-29T16:13:57Z",
     "nodes": [],
     "frozen": false,
-    "rc_count": 0,
+    "rc_count": 1,
     "notes": [
-      "feat(auth): restructure /login by company=api-key / product=subscription",
-      "feat(auth): split anthropic id into 'anthropic' (api-key) and 'claude' (oauth)",
-      "feat(auth): rename openai-codex id to 'codex', keep 'openai' as api-key",
-      "feat(auth): add 'chatgpt' as alias for 'codex' oauth flow",
-      "feat(auth): update login selector with subscription vs api-key grouping",
-      "feat(auth): update slash-command completions to reflect new ids",
-      "feat(auth): document future provider slots: google/gemini, xai/grok"
-    ]
+      "feat(auth): restructure /login by company=api-key / product=subscription paradigm",
+      "feat(models): interactive model selector \u2014 browse providers and models with context/cost info",
+      "feat(inference): openrouter native routing and unified provider UX",
+      "feat(inference): local inference onboarding and provider discoverability"
+    ],
+    "last_rc": "2026-03-29T20:20:23Z",
+    "rc_version": "0.15.5-rc.1"
   }
 }
