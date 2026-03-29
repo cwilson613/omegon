@@ -151,7 +151,7 @@
     "frozen": false,
     "opened": "2026-03-27T17:03:52Z",
     "released": null,
-    "rc_count": 16,
+    "rc_count": 18,
     "notes": [
       "feat(release): add durable tag-link workflow",
       "feat(tui): add dim segment header timestamps",
@@ -183,9 +183,11 @@
       "feat(web): add embedded control-plane startup contract",
       "fix(web): keep embedded startup stdout machine-readable",
       "fix(tui): refresh inference legend icons and colors",
-      "fix(tui): preserve memory counts in inference panel"
+      "fix(tui): preserve memory counts in inference panel",
+      "fix(memory): refresh harness status after memory updates",
+      "fix(tui): enable mouse interaction at startup"
     ],
-    "rc_version": "0.15.4-rc.17",
-    "last_rc": "2026-03-29T12:54:00Z"
+    "rc_version": "0.15.4-rc.18",
+    "last_rc": "2026-03-29T13:35:00Z"
   }
 }
