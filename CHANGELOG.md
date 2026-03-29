@@ -3,6 +3,45 @@
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.15.4] - 2026-03-29
+
+### Added
+
+- **Auspex native IPC server** — native Unix socket (`$PWD/.omegon/ipc.sock`) with typed MessagePack framing, versioned handshake, capability negotiation, full state snapshots, filtered event subscriptions, and single-controller enforcement. Auspex clients can now connect directly without HTTP/WebSocket. Full contract defined in `docs/auspex-ipc-contract.md`.
+- **Web control-plane startup contract** — machine-readable JSON line on stdout at startup (`omegon.startup` event) with `http_base`, `control_port`, `pid`, and schema version. External tools and CI scripts can now reliably discover the running instance.
+- **Dashboard web auth endpoints** — `/api/startup`, `/api/healthz`, `/api/readyz` with resolved auth state (OAuth token, API key, or unauthenticated), enabling Auspex to attach without operator intervention.
+- **Unified TUI footer console** — redesigned three-zone operations bar: engine block (provider/model/route/version), inference panel (context composition with bucket legend), and live tools strip. Replaces the old split footer design.
+- **Context composition inference panel** — segmented bar showing cached/input/output/reasoning token distribution with a compact legend row. Activity overlay with a "thinking" pulse for extended reasoning turns.
+- **Live tool runtimes in footer** — real elapsed time per tool from `ToolStart`/`ToolEnd` events, fixed-width duration field, decay/history strip on the right.
+- **Segment copy to clipboard** — `Ctrl+Y` copies the currently selected conversation segment as plain text. `Ctrl+Y` in terminal copy mode copies the selection.
+- **Dim segment header timestamps** — every conversation segment shows a muted timestamp in its header, making turn sequencing readable at a glance.
+- **Durable tag-link release workflow** — `just link-tag <version>` reuses an already-built tagged binary without a rebuild. Detached-HEAD release cuts are now blocked at the tool layer.
+
+### Fixed
+
+- **TUI — mouse interaction at startup** — mouse capture was declared enabled in state but `EnableMouseCapture` was never emitted to the terminal. Mouse events now work from the first frame.
+- **TUI — conversation streaming scroll jank** — streaming chunks no longer trigger excessive relayout. Manual scroll position is preserved during live streaming; auto-scroll only applies when the viewport was already at the bottom.
+- **TUI — wrapped editor cursor alignment** — cursor position is now computed against the top border of the editor block, not the terminal origin. Cursor no longer drifts above the editor on multi-line input.
+- **TUI — arrow navigation scope** — `↑`/`↓` in the composer navigate history, not the conversation panel. Horizontal arrow keys (`←`/`→`) never steal focus from the conversation. The two navigation contexts are now fully separated.
+- **TUI — terminal copy as default** — terminal-native text selection is now on at startup; mouse scroll mode is the non-default opt-in, reversing the previous incorrect default.
+- **TUI — inference panel** — replaced placeholder glyph palette with semantically accurate Unicode; memory counts are no longer swallowed by the wave animation; bucket legend labels identify all composition zones.
+- **TUI — tool card rendering** — `change`, `read`, `edit` tool cards no longer leave stale trailing glyphs after path text shrinks. Instrument rows are cleared before each redraw. Status language (running/ok/error glyphs) is now consistent between the tool cards and the tools instrument strip.
+- **TUI — segment reasoning/answer labels** — thinking blocks are labelled `reasoning` and response content is labelled `answer`; both show full text live during streaming.
+- **TUI — input history separation** — scroll fallback no longer bleeds into composer history recall; the two are independently tracked.
+- **TUI — engine block layout** — reorganized as aligned label/value rows, home path compacted to `~/…/project`.
+- **Memory — harness status refresh** — after any memory update (store, archive, supersede) the harness status panel is invalidated and redrawn within the same event cycle.
+- **Status — nested runtime crash** — `startup_memory_probe` no longer spawns a nested Tokio runtime inside an async context, fixing a panic on startup when memory state was probed before the main runtime was fully initialized.
+- **Web — stdout contamination** — log lines no longer leak into stdout alongside the startup JSON contract.
+- **Release — detached-head blocking** — `just rc` and `just release` now verify `git branch --show-current` is non-empty before proceeding.
+- **CI — ghost publish workflow** — removed a stale publish workflow that was re-triggering on every push and failing silently.
+
+### Changed
+
+- TUI footer is now a unified console; the previous split inference widget and tool sidebar are removed.
+- Operator input area defaults to terminal-native selection mode; mouse scroll is toggled with `Ctrl+M`.
+- IPC is started automatically alongside the TUI — no separate server process or flag required.
+- 1252 tests (up from 983 in 0.15.3).
+
 ## [0.15.3] - 2026-03-27
 
 ### Added

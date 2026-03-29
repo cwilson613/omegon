@@ -4048,8 +4048,16 @@ pub async fn run_tui(
                     collected_probes.push(result);
                 }
 
-                // Drain agent events to prevent broadcast buffer overflow
-                while events_rx.try_recv().is_ok() {}
+                // Drain agent events to prevent broadcast buffer overflow.
+                // HarnessStatusChanged carries the startup memory snapshot —
+                // keep the latest one so it isn't lost before the main loop.
+                while let Ok(ev) = events_rx.try_recv() {
+                    if let AgentEvent::HarnessStatusChanged { status_json } = ev {
+                        if let Ok(status) = serde_json::from_value::<crate::status::HarnessStatus>(status_json) {
+                            app.footer_data.update_harness(status);
+                        }
+                    }
+                }
 
                 // Safety timeout
                 if splash_start.elapsed() > safety_timeout {
