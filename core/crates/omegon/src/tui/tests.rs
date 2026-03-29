@@ -332,6 +332,55 @@ fn conversation_focus_blocks_history_recall_on_up_down() {
 }
 
 #[test]
+fn conversation_focus_blocks_lateral_editor_navigation() {
+    let mut app = test_app();
+    app.editor.set_text("draft");
+    app.editor.move_end();
+    app.pane_focus = PaneFocus::Conversation;
+
+    let before_cursor = app.editor.cursor_position();
+
+    if matches!(app.pane_focus, PaneFocus::Editor) {
+        app.editor.move_left();
+    }
+    assert_eq!(
+        app.editor.cursor_position(),
+        before_cursor,
+        "conversation focus must not move the composer cursor left"
+    );
+
+    if matches!(app.pane_focus, PaneFocus::Editor) {
+        app.editor.move_home();
+    }
+    assert_eq!(
+        app.editor.cursor_position(),
+        before_cursor,
+        "conversation focus must not route Home into the composer"
+    );
+
+    if matches!(app.pane_focus, PaneFocus::Editor) {
+        app.editor.move_right();
+    }
+    assert_eq!(
+        app.editor.cursor_position(),
+        before_cursor,
+        "conversation focus must not move the composer cursor right"
+    );
+
+    if matches!(app.pane_focus, PaneFocus::Editor) {
+        app.editor.move_end();
+    }
+    assert_eq!(
+        app.editor.cursor_position(),
+        before_cursor,
+        "conversation focus must not route End into the composer"
+    );
+
+    assert_eq!(app.editor.render_text(), "draft");
+    assert_eq!(app.history_idx, None);
+}
+
+#[test]
 fn selected_conversation_segment_exports_plain_text() {
     let mut app = test_app();
     app.conversation.push_user("operator prompt");

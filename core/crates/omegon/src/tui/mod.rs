@@ -4652,22 +4652,34 @@ pub async fn run_tui(
                             app.editor.backspace();
                         }
                         (KeyCode::Left, KeyModifiers::ALT) => {
-                            app.editor.move_word_backward();
+                            if matches!(app.pane_focus, PaneFocus::Editor) {
+                                app.editor.move_word_backward();
+                            }
                         }
                         (KeyCode::Right, KeyModifiers::ALT) => {
-                            app.editor.move_word_forward();
+                            if matches!(app.pane_focus, PaneFocus::Editor) {
+                                app.editor.move_word_forward();
+                            }
                         }
                         (KeyCode::Left, _) => {
-                            app.editor.move_left();
+                            if matches!(app.pane_focus, PaneFocus::Editor) {
+                                app.editor.move_left();
+                            }
                         }
                         (KeyCode::Right, _) => {
-                            app.editor.move_right();
+                            if matches!(app.pane_focus, PaneFocus::Editor) {
+                                app.editor.move_right();
+                            }
                         }
                         (KeyCode::Home, _) => {
-                            app.editor.move_home();
+                            if matches!(app.pane_focus, PaneFocus::Editor) {
+                                app.editor.move_home();
+                            }
                         }
                         (KeyCode::End, _) => {
-                            app.editor.move_end();
+                            if matches!(app.pane_focus, PaneFocus::Editor) {
+                                app.editor.move_end();
+                            }
                         }
 
                         // ── Scrolling ────────────────────────────────
