@@ -151,7 +151,7 @@
     "frozen": false,
     "opened": "2026-03-27T17:03:52Z",
     "released": null,
-    "rc_count": 8,
+    "rc_count": 9,
     "notes": [
       "feat(release): add durable tag-link workflow",
       "feat(tui): add dim segment header timestamps",
@@ -171,7 +171,7 @@
       "fix(tui): restore terminal copy and normalize pasted input",
       "fix(tui): truncate tool headers before timestamp collision"
     ],
-    "rc_version": "0.15.4-rc.9",
-    "last_rc": "2026-03-29T00:32:00Z"
+    "rc_version": "0.15.4-rc.10",
+    "last_rc": "2026-03-29T01:18:00Z"
   }
 }
