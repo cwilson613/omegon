@@ -7,6 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- **Headless OAuth login** — `omegon auth` now detects SSH sessions and Linux environments without a display server (`$DISPLAY`/`$WAYLAND_DISPLAY`) and falls back to a paste-back flow: prints a numbered instruction block, prompts the user to copy the callback URL from their browser's address bar, and parses `code` + `state` from it. The TUI Enter handler delivers the pasted URL directly to the waiting login coroutine via a oneshot channel. Both Anthropic and OpenAI Codex providers use the same path. Previously the login command hung indefinitely on headless machines waiting for a TCP callback that never arrived.
 - **Auspex native IPC server** — native Unix socket (`$PWD/.omegon/ipc.sock`) with typed MessagePack framing, versioned handshake, capability negotiation, full state snapshots, filtered event subscriptions, and single-controller enforcement. Auspex clients can now connect directly without HTTP/WebSocket. Full contract defined in `docs/auspex-ipc-contract.md`.
 - **Web control-plane startup contract** — machine-readable JSON line on stdout at startup (`omegon.startup` event) with `http_base`, `control_port`, `pid`, and schema version. External tools and CI scripts can now reliably discover the running instance.
 - **Dashboard web auth endpoints** — `/api/startup`, `/api/healthz`, `/api/readyz` with resolved auth state (OAuth token, API key, or unauthenticated), enabling Auspex to attach without operator intervention.
@@ -29,6 +30,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **TUI — segment reasoning/answer labels** — thinking blocks are labelled `reasoning` and response content is labelled `answer`; both show full text live during streaming.
 - **TUI — input history separation** — scroll fallback no longer bleeds into composer history recall; the two are independently tracked.
 - **TUI — engine block layout** — reorganized as aligned label/value rows, home path compacted to `~/…/project`.
+- **TUI — startup memory counts** — the splash screen was silently discarding `HarnessStatusChanged` events while draining the broadcast buffer. All three mind slot counts (project / working / episodes) now populate correctly on the first frame instead of showing zero until the next turn completes.
 - **Memory — harness status refresh** — after any memory update (store, archive, supersede) the harness status panel is invalidated and redrawn within the same event cycle.
 - **Status — nested runtime crash** — `startup_memory_probe` no longer spawns a nested Tokio runtime inside an async context, fixing a panic on startup when memory state was probed before the main runtime was fully initialized.
 - **Web — stdout contamination** — log lines no longer leak into stdout alongside the startup JSON contract.
@@ -40,7 +42,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - TUI footer is now a unified console; the previous split inference widget and tool sidebar are removed.
 - Operator input area defaults to terminal-native selection mode; mouse scroll is toggled with `Ctrl+M`.
 - IPC is started automatically alongside the TUI — no separate server process or flag required.
-- 1252 tests (up from 983 in 0.15.3).
+- 1259 tests (up from 983 in 0.15.3).
 
 ## [0.15.3] - 2026-03-27
 
