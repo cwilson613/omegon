@@ -135,6 +135,21 @@
       "bound_change": null,
       "created_at": "2026-03-29T16:14:29Z",
       "updated_at": "2026-03-29T16:14:29Z"
+    },
+    {
+      "id": "model-selector-ux",
+      "title": "Model selector UX — browse and pick, don't memorize",
+      "state": "seed",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-03-29T20:19:15Z",
+      "updated_at": "2026-03-29T20:19:15Z"
     }
   ],
   "changes": [],
@@ -342,6 +357,15 @@
       "timestamp": "2026-03-29T16:14:29Z",
       "entity_type": "node",
       "entity_id": "login-company-product-paradigm",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-03-29T20:19:15Z",
+      "entity_type": "node",
+      "entity_id": "model-selector-ux",
       "from_state": "(new)",
       "to_state": "seed",
       "reason": null,
