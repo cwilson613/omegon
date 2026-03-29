@@ -151,7 +151,7 @@
     "frozen": false,
     "opened": "2026-03-27T17:03:52Z",
     "released": null,
-    "rc_count": 11,
+    "rc_count": 12,
     "notes": [
       "feat(release): add durable tag-link workflow",
       "feat(tui): add dim segment header timestamps",
@@ -173,9 +173,12 @@
       "fix(tui): replace inference panel glyph palette",
       "fix(tui): align wrapped editor cursor with top-border layout",
       "fix(tui): clarify assistant reasoning and answer labels",
-      "fix(tui): align tool cards with instrument status language"
+      "fix(tui): align tool cards with instrument status language",
+      "fix(tui): keep horizontal navigation out of conversation focus",
+      "fix(tui): simplify tool titles and isolate segment copy",
+      "fix(tui): label inference buckets with compact legend"
     ],
-    "rc_version": "0.15.4-rc.12",
-    "last_rc": "2026-03-28T22:47:00Z"
+    "rc_version": "0.15.4-rc.13",
+    "last_rc": "2026-03-28T23:12:43Z"
   }
 }
