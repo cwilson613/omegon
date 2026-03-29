@@ -1662,8 +1662,10 @@ impl App {
             // cursor_screen_position) so the terminal cursor always lands on
             // the correct visual cell.  Paragraph::wrap uses word boundaries
             // which diverge from cursor math and compound across rows.
-            let content_width = editor_rect.width.saturating_sub(2).max(1);
-            let visible_rows = editor_rect.height.saturating_sub(2).max(1);
+            // Normal editor mode uses Borders::TOP only: content spans the
+            // full width and starts one row below the top border.
+            let content_width = editor_rect.width.max(1);
+            let visible_rows = editor_rect.height.saturating_sub(1).max(1);
             let visual_lines: Vec<Line<'static>> = if self.editor.is_empty() {
                 vec![Line::from(Span::styled(
                     "Ask anything, or type / for commands",

@@ -465,10 +465,12 @@ impl Editor {
     /// terminal cursor always points to the correct visual cell.
     pub fn cursor_screen_position(&mut self, editor_area: Rect) -> (u16, u16) {
         let (cursor_row, cursor_col) = self.textarea.cursor();
-        let content_width = editor_area.width.saturating_sub(2).max(1) as usize;
-        let inner_x = editor_area.x + 1;
+        // Normal editor mode uses Borders::TOP only: no left/right border,
+        // one top border row. Cursor math must match that exact geometry.
+        let content_width = editor_area.width.max(1) as usize;
+        let inner_x = editor_area.x;
         let inner_y = editor_area.y + 1;
-        let inner_height = editor_area.height.saturating_sub(2).max(1);
+        let inner_height = editor_area.height.saturating_sub(1).max(1);
 
         let mut visual_row: u16 = 0;
         let mut visual_col: u16 = 0;

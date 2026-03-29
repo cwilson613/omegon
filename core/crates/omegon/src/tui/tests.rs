@@ -138,11 +138,28 @@ fn editor_cursor_screen_position_wraps_at_expected_column() {
         height: 6,
     };
     let (x, y) = editor.cursor_screen_position(area);
-    assert_eq!(x, 2, "9 chars in 4 content columns should wrap to the second inner column");
+    assert_eq!(x, 3, "9 chars in 6 content columns should wrap to the fourth visible column");
     assert_eq!(
-        y, 3,
-        "9 chars in 4 content columns should land on the third wrapped row beneath the border"
+        y, 2,
+        "9 chars in 6 content columns should land on the second wrapped row beneath the top border"
     );
+}
+
+#[test]
+fn editor_cursor_advances_to_next_visual_row_after_first_wrap() {
+    let mut editor = crate::tui::editor::Editor::new();
+    editor.set_text("1234567");
+    editor.move_end();
+    let area = Rect {
+        x: 0,
+        y: 0,
+        width: 6,
+        height: 4,
+    };
+
+    let (x, y) = editor.cursor_screen_position(area);
+    assert_eq!(y, 2, "cursor should move onto wrapped row 2 after column 6 overflows");
+    assert_eq!(x, 1, "cursor should be at the second visible column on the wrapped row");
 }
 
 #[test]
@@ -189,10 +206,10 @@ fn editor_visible_visual_lines_follow_cursor_scroll() {
     };
 
     let (_x, y) = editor.cursor_screen_position(area);
-    let visible = editor.visible_visual_lines(4, 1);
+    let visible = editor.visible_visual_lines(6, 2);
 
-    assert_eq!(y, 1, "cursor should stay inside the single visible editor row");
-    assert_eq!(visible, vec!["cdef"], "render should follow editor scroll state");
+    assert_eq!(y, 2, "cursor should stay inside the second visible editor row beneath the top border");
+    assert_eq!(visible, vec!["90ab", "cdef"], "render should follow editor scroll state");
 }
 
 #[test]
