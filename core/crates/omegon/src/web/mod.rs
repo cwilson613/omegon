@@ -13,7 +13,7 @@ pub mod auth;
 pub mod ws;
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use tokio::sync::{broadcast, mpsc};
@@ -21,9 +21,13 @@ use tokio::sync::{broadcast, mpsc};
 use crate::tui::dashboard::DashboardHandles;
 pub use auth::{resolve_web_auth_state, WebAuthState};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WebStartupInfo {
-    pub addr: SocketAddr,
+    pub schema_version: u32,
+    pub addr: String,
+    pub http_base: String,
+    pub state_url: String,
+    pub ws_url: String,
     pub token: String,
     pub auth_mode: String,
     pub auth_source: String,
@@ -40,6 +44,8 @@ pub struct WebState {
     pub command_tx: mpsc::Sender<WebCommand>,
     /// Web auth state for dashboard and WebSocket attachment.
     pub web_auth: Arc<WebAuthState>,
+    /// Machine-readable startup/discovery payload once the server is bound.
+    pub startup_info: Arc<Mutex<Option<WebStartupInfo>>>,
 }
 
 impl WebState {
@@ -66,6 +72,7 @@ impl WebState {
             events_tx,
             command_tx,
             web_auth: Arc::new(auth_state),
+            startup_info: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -91,9 +98,11 @@ pub async fn start_server(
     let token = state.web_auth.issue_query_token();
     let auth_mode = state.web_auth.mode_name();
     let auth_source = state.web_auth.source_name().to_string();
+    let startup_info = state.startup_info.clone();
 
     let app = Router::new()
         .route("/api/state", axum::routing::get(api::get_state))
+        .route("/api/startup", axum::routing::get(api::get_startup))
         .route("/api/graph", axum::routing::get(api::get_graph))
         .route("/ws", axum::routing::get(ws::ws_handler))
         .route("/", axum::routing::get(serve_dashboard))
@@ -114,18 +123,25 @@ pub async fn start_server(
     let bound = listener.local_addr()?;
 
     let startup = WebStartupInfo {
-        addr: bound,
+        schema_version: 1,
+        addr: bound.to_string(),
+        http_base: format!("http://{bound}"),
+        state_url: format!("http://{bound}/api/state"),
+        ws_url: format!("ws://{bound}/ws?token={token}"),
         token,
         auth_mode: auth_mode.to_string(),
         auth_source,
     };
+    if let Ok(mut slot) = startup_info.lock() {
+        *slot = Some(startup.clone());
+    }
 
     tracing::debug!(
-        port = startup.addr.port(),
+        port = bound.port(),
         auth_mode = startup.auth_mode,
         auth_source = startup.auth_source,
-        "web dashboard at http://{}/?token={}"
-        ,startup.addr, startup.token
+        "web dashboard at {}/?token={}"
+        ,startup.http_base, startup.token
     );
 
     tokio::spawn(async move {
@@ -205,7 +221,11 @@ mod tests {
             WebAuthState::ephemeral_generated("token-123".into()),
         );
         let startup = WebStartupInfo {
-            addr: ([127, 0, 0, 1], 7842).into(),
+            schema_version: 1,
+            addr: "127.0.0.1:7842".into(),
+            http_base: "http://127.0.0.1:7842".into(),
+            state_url: "http://127.0.0.1:7842/api/state".into(),
+            ws_url: "ws://127.0.0.1:7842/ws?token=token-123".into(),
             token: state.web_auth.issue_query_token(),
             auth_mode: state.web_auth.mode_name().into(),
             auth_source: state.web_auth.source_name().into(),
@@ -214,6 +234,8 @@ mod tests {
         assert_eq!(startup.token, "token-123");
         assert_eq!(startup.auth_mode, "ephemeral-bearer");
         assert_eq!(startup.auth_source, "generated");
+        assert_eq!(startup.state_url, "http://127.0.0.1:7842/api/state");
+        assert_eq!(startup.ws_url, "ws://127.0.0.1:7842/ws?token=token-123");
     }
 
     #[test]

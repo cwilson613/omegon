@@ -5,6 +5,7 @@
 
 use axum::Json;
 use axum::extract::State;
+use axum::http::StatusCode;
 use serde::Serialize;
 
 use super::WebState;
@@ -128,6 +129,16 @@ pub struct GraphLink {
     pub target: String,
     #[serde(rename = "type")]
     pub link_type: String, // "parent", "dependency", "related"
+}
+
+/// GET /api/startup — machine-readable dashboard startup/discovery metadata.
+pub async fn get_startup(
+    State(state): State<WebState>,
+) -> Result<Json<super::WebStartupInfo>, StatusCode> {
+    match state.startup_info.lock() {
+        Ok(guard) => guard.clone().map(Json).ok_or(StatusCode::SERVICE_UNAVAILABLE),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
 }
 
 /// GET /api/graph — graph data for force-directed layout.
@@ -355,7 +366,7 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
 mod tests {
     use super::*;
     use crate::tui::dashboard::DashboardHandles;
-    use crate::web::WebAuthState;
+    use crate::web::{WebAuthState, WebStartupInfo};
 
     fn test_state() -> WebState {
         WebState {
@@ -363,6 +374,16 @@ mod tests {
             events_tx: tokio::sync::broadcast::channel(16).0,
             command_tx: tokio::sync::mpsc::channel(16).0,
             web_auth: std::sync::Arc::new(WebAuthState::ephemeral_generated("test".into())),
+            startup_info: std::sync::Arc::new(std::sync::Mutex::new(Some(WebStartupInfo {
+                schema_version: 1,
+                addr: "127.0.0.1:7842".into(),
+                http_base: "http://127.0.0.1:7842".into(),
+                state_url: "http://127.0.0.1:7842/api/state".into(),
+                ws_url: "ws://127.0.0.1:7842/ws?token=test".into(),
+                token: "test".into(),
+                auth_mode: "ephemeral-bearer".into(),
+                auth_source: "generated".into(),
+            }))),
         }
     }
 
@@ -373,6 +394,15 @@ mod tests {
         assert!(snap.design.focused.is_none());
         assert!(snap.openspec.changes.is_empty());
         assert!(!snap.cleave.active);
+    }
+
+    #[tokio::test]
+    async fn startup_payload_is_available() {
+        let payload = get_startup(axum::extract::State(test_state())).await.unwrap().0;
+
+        assert_eq!(payload.schema_version, 1);
+        assert_eq!(payload.state_url, "http://127.0.0.1:7842/api/state");
+        assert_eq!(payload.auth_mode, "ephemeral-bearer");
     }
 
     #[test]
