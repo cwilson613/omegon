@@ -152,6 +152,7 @@ impl AgentSetup {
         );
         secrets.preflight_session_cache(preflight);
         let session_secret_env = secrets.session_env();
+        let web_auth_state = crate::web::resolve_web_auth_state(&secrets, "".into()).await;
         let session_secret_diag = secrets.session_diagnostics();
         tracing::info!(
             warmed = session_secret_diag.len(),
@@ -401,6 +402,8 @@ impl AgentSetup {
 
         // Populate MCP/plugin info from discovered features
         harness_status.update_from_bus(&bus);
+        harness_status.web_auth_mode = Some(web_auth_state.mode_name().to_string());
+        harness_status.web_auth_source = Some(web_auth_state.source_name().to_string());
 
         // Populate memory stats from the initial count captured during DB load
         harness_status.update_memory(crate::status::MemoryStatus {

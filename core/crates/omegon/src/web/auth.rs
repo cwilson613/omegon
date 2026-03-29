@@ -8,6 +8,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
+pub const WEB_AUTH_SECRET_NAME: &str = "OMEGON_WEB_AUTH_SECRET";
 const TOKEN_SCOPE_WS: &str = "ws";
 const TOKEN_VERSION: u32 = 1;
 const DEFAULT_ATTACH_TTL_SECS: u64 = 300;
@@ -46,6 +47,10 @@ impl WebAuthState {
         }
     }
 
+    pub fn from_resolved_root(root: String, source: WebAuthSource) -> Self {
+        Self::signed_attach(SecretString::from(root), source)
+    }
+
     pub fn signed_attach(root: SecretString, source: WebAuthSource) -> Self {
         Self {
             mode: WebAuthMode::SignedAttach {
@@ -57,6 +62,16 @@ impl WebAuthState {
 
     pub fn source(&self) -> WebAuthSource {
         self.source
+    }
+
+    pub fn source_name(&self) -> &'static str {
+        match self.source {
+            WebAuthSource::Generated => "generated",
+            WebAuthSource::Env => "env",
+            WebAuthSource::Keyring => "keyring",
+            WebAuthSource::SecretStore => "secret-store",
+            WebAuthSource::Vault => "vault",
+        }
     }
 
     pub fn mode_name(&self) -> &'static str {
@@ -83,6 +98,60 @@ impl WebAuthState {
             }
             _ => false,
         }
+    }
+}
+
+pub async fn resolve_web_auth_state(
+    secrets: &omegon_secrets::SecretsManager,
+    fallback_token: String,
+) -> WebAuthState {
+    if let Ok(val) = std::env::var(WEB_AUTH_SECRET_NAME)
+        && !val.is_empty()
+    {
+        return WebAuthState::from_resolved_root(val, WebAuthSource::Env);
+    }
+
+    if let Some(root) = secrets.resolve_async(WEB_AUTH_SECRET_NAME).await {
+        let source = infer_secret_source(secrets, WEB_AUTH_SECRET_NAME);
+        return WebAuthState::from_resolved_root(root, source);
+    }
+
+    WebAuthState::ephemeral_generated(fallback_token)
+}
+
+fn infer_secret_source(
+    secrets: &omegon_secrets::SecretsManager,
+    secret_name: &str,
+) -> WebAuthSource {
+    let diagnostics = secrets.session_diagnostics();
+    if let Some(diag) = diagnostics.iter().find(|diag| diag.name == secret_name) {
+        return match diag.source {
+            "env" => WebAuthSource::Env,
+            "resolved" => WebAuthSource::Keyring,
+            source if source.contains("vault") => WebAuthSource::Vault,
+            source if source.contains("store") => WebAuthSource::SecretStore,
+            _ => WebAuthSource::Keyring,
+        };
+    }
+
+    if let Some((_, recipe)) = secrets
+        .list_recipes()
+        .into_iter()
+        .find(|(name, _)| name == secret_name)
+    {
+        if recipe.starts_with("env:") {
+            WebAuthSource::Env
+        } else if recipe.starts_with("vault:") {
+            WebAuthSource::Vault
+        } else if recipe.starts_with("keyring:") || recipe.starts_with("keychain:") {
+            WebAuthSource::Keyring
+        } else if recipe.starts_with("file:") {
+            WebAuthSource::SecretStore
+        } else {
+            WebAuthSource::Keyring
+        }
+    } else {
+        WebAuthSource::Generated
     }
 }
 
@@ -210,5 +279,30 @@ mod tests {
         let tampered = token.replace("v1.", "v1.x");
 
         assert!(!auth.verify_query_token(Some(&tampered)));
+    }
+
+    #[tokio::test]
+    async fn resolve_web_auth_state_uses_env_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let secrets = omegon_secrets::SecretsManager::new(dir.path()).unwrap();
+        unsafe { std::env::set_var(WEB_AUTH_SECRET_NAME, "env-root") };
+
+        let auth = resolve_web_auth_state(&secrets, "fallback".into()).await;
+
+        assert_eq!(auth.mode_name(), "signed-attach");
+        assert_eq!(auth.source(), WebAuthSource::Env);
+        unsafe { std::env::remove_var(WEB_AUTH_SECRET_NAME) };
+    }
+
+    #[tokio::test]
+    async fn resolve_web_auth_state_falls_back_to_ephemeral() {
+        let dir = tempfile::tempdir().unwrap();
+        let secrets = omegon_secrets::SecretsManager::new(dir.path()).unwrap();
+
+        let auth = resolve_web_auth_state(&secrets, "fallback-token".into()).await;
+
+        assert_eq!(auth.mode_name(), "ephemeral-bearer");
+        assert_eq!(auth.source(), WebAuthSource::Generated);
+        assert!(auth.verify_query_token(Some("fallback-token")));
     }
 }

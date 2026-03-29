@@ -30,6 +30,8 @@ pub struct HarnessStatus {
 
     // ── Secrets ──────────────────────────────────────────────
     pub secret_backend: Option<SecretBackendStatus>,
+    pub web_auth_mode: Option<String>,
+    pub web_auth_source: Option<String>,
 
     // ── Inference backends ───────────────────────────────────
     pub inference_backends: Vec<InferenceBackendStatus>,
@@ -456,6 +458,8 @@ impl Default for HarnessStatus {
             installed_plugins: vec![],
             mcp_servers: vec![],
             secret_backend: None,
+            web_auth_mode: None,
+            web_auth_source: None,
             inference_backends: vec![],
             container_runtime: None,
             context_class: "Squad".into(),
@@ -491,6 +495,8 @@ mod tests {
         assert!(status.git_branch.is_none());
         assert!(!status.git_detached);
         assert!(status.mcp_servers.is_empty());
+        assert!(status.web_auth_mode.is_none());
+        assert!(status.web_auth_source.is_none());
         assert_eq!(status.context_class, "Squad");
         assert!(!status.memory_available);
         assert!(!status.cleave_available);

@@ -19,7 +19,7 @@ use axum::Router;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::tui::dashboard::DashboardHandles;
-pub use auth::WebAuthState;
+pub use auth::{WEB_AUTH_SECRET_NAME, WebAuthSource, WebAuthState, resolve_web_auth_state};
 
 /// Shared state accessible to all web handlers.
 #[derive(Clone)]
