@@ -9,6 +9,7 @@
 //! connect and drive the agent as a black box.
 
 pub mod api;
+pub mod auth;
 pub mod ws;
 
 use std::net::SocketAddr;
@@ -18,6 +19,7 @@ use axum::Router;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::tui::dashboard::DashboardHandles;
+pub use auth::WebAuthState;
 
 /// Shared state accessible to all web handlers.
 #[derive(Clone)]
@@ -28,8 +30,8 @@ pub struct WebState {
     pub events_tx: broadcast::Sender<omegon_traits::AgentEvent>,
     /// Channel for WebSocket commands → main loop.
     pub command_tx: mpsc::Sender<WebCommand>,
-    /// Auth token — required for WebSocket connections.
-    pub auth_token: Arc<String>,
+    /// Web auth state for dashboard and WebSocket attachment.
+    pub web_auth: Arc<WebAuthState>,
 }
 
 impl WebState {
@@ -38,13 +40,24 @@ impl WebState {
         handles: DashboardHandles,
         events_tx: broadcast::Sender<omegon_traits::AgentEvent>,
     ) -> Self {
-        let token = generate_token();
+        Self::with_auth_state(
+            handles,
+            events_tx,
+            WebAuthState::ephemeral_generated(generate_token()),
+        )
+    }
+
+    pub fn with_auth_state(
+        handles: DashboardHandles,
+        events_tx: broadcast::Sender<omegon_traits::AgentEvent>,
+        auth_state: WebAuthState,
+    ) -> Self {
         let (command_tx, _) = mpsc::channel(32); // receiver returned by start_server
         Self {
             handles,
             events_tx,
             command_tx,
-            auth_token: Arc::new(token),
+            web_auth: Arc::new(auth_state),
         }
     }
 }
@@ -67,7 +80,8 @@ pub async fn start_server(
     let (cmd_tx, cmd_rx) = mpsc::channel(32);
     state.command_tx = cmd_tx;
 
-    let token_for_query = state.auth_token.clone();
+    let token = state.web_auth.issue_query_token();
+    let auth_mode = state.web_auth.mode_name();
 
     let app = Router::new()
         .route("/api/state", axum::routing::get(api::get_state))
@@ -90,9 +104,9 @@ pub async fn start_server(
     let listener = bind_with_fallback(preferred_port).await?;
     let bound = listener.local_addr()?;
 
-    let token = token_for_query.to_string();
     tracing::debug!(
         port = bound.port(),
+        auth_mode,
         "web dashboard at http://{bound}/?token={token}"
     );
 
@@ -154,6 +168,15 @@ mod tests {
         let token = generate_token();
         assert!(!token.is_empty());
         assert!(token.len() >= 8);
+    }
+
+    #[test]
+    fn web_state_issues_attach_token_for_query_use() {
+        let state = WebState::new(DashboardHandles::default(), tokio::sync::broadcast::channel(16).0);
+        let token = state.web_auth.issue_query_token();
+
+        assert!(!token.is_empty());
+        assert!(state.web_auth.verify_query_token(Some(&token)));
     }
 
     #[test]

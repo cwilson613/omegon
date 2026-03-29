@@ -42,20 +42,14 @@ pub async fn ws_handler(
     Query(query): Query<WsQuery>,
     State(state): State<WebState>,
 ) -> impl IntoResponse {
-    // Validate auth token
-    let expected = state.auth_token.as_str();
-    match query.token.as_deref() {
-        Some(t) if t == expected => {
-            tracing::debug!("WebSocket auth OK, upgrading");
-        }
-        Some(_) => {
-            tracing::warn!("WebSocket auth failed — token mismatch");
-            return axum::http::StatusCode::UNAUTHORIZED.into_response();
-        }
-        None => {
-            tracing::warn!("WebSocket auth failed — no token provided");
-            return axum::http::StatusCode::UNAUTHORIZED.into_response();
-        }
+    if state.web_auth.verify_query_token(query.token.as_deref()) {
+        tracing::debug!(auth_mode = state.web_auth.mode_name(), "WebSocket auth OK, upgrading");
+    } else if query.token.is_some() {
+        tracing::warn!(auth_mode = state.web_auth.mode_name(), "WebSocket auth failed — token mismatch");
+        return axum::http::StatusCode::UNAUTHORIZED.into_response();
+    } else {
+        tracing::warn!(auth_mode = state.web_auth.mode_name(), "WebSocket auth failed — no token provided");
+        return axum::http::StatusCode::UNAUTHORIZED.into_response();
     }
     ws.on_upgrade(|socket| handle_socket(socket, state))
         .into_response()

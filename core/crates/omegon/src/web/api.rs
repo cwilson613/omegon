@@ -355,13 +355,14 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
 mod tests {
     use super::*;
     use crate::tui::dashboard::DashboardHandles;
+    use crate::web::WebAuthState;
 
     fn test_state() -> WebState {
         WebState {
             handles: DashboardHandles::default(),
             events_tx: tokio::sync::broadcast::channel(16).0,
             command_tx: tokio::sync::mpsc::channel(16).0,
-            auth_token: std::sync::Arc::new("test".into()),
+            web_auth: std::sync::Arc::new(WebAuthState::ephemeral_generated("test".into())),
         }
     }
 
