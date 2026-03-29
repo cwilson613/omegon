@@ -326,16 +326,16 @@ impl App {
         self.set_mouse_capture(!enabled);
         if enabled {
             self.show_toast(
-                "Terminal copy mode enabled — drag to select, then use your terminal's copy shortcut",
+                "Terminal-native selection active — drag to select, then use your terminal's copy shortcut",
                 ratatui_toaster::ToastType::Info,
-            );
-            self.conversation.push_system(
-                "⧉ Terminal copy mode ON — mouse capture disabled. Drag to select text, then use Cmd+C / Ctrl+Shift+C. Press Esc to return.",
             );
         } else {
             self.show_toast(
-                "Terminal copy mode disabled — pane mouse interaction restored",
+                "Mouse interaction mode enabled — pane mouse interaction restored",
                 ratatui_toaster::ToastType::Info,
+            );
+            self.conversation.push_system(
+                "🖱 Mouse interaction mode ON — mouse capture enabled. Pane clicks, wheel scroll, and segment targeting are active. Press Esc to return to terminal-native selection.",
             );
         }
     }
@@ -1919,7 +1919,7 @@ impl App {
     /// Command registry: (name, description, subcommands).
     const COMMANDS: &'static [(&'static str, &'static str, &'static [&'static str])] = &[
         ("help", "show available commands", &[]),
-        ("copy", "toggle terminal-native copy mode", &["on", "off"]),
+        ("mouse", "toggle pane mouse interaction mode", &["on", "off"]),
         ("model", "view or switch model", &["list"]),
         (
             "think",
@@ -2073,20 +2073,20 @@ impl App {
                 ))
             }
 
-            "copy" => match args {
+            "mouse" => match args {
                 "" => {
                     self.set_terminal_copy_mode(!self.terminal_copy_mode);
                     SlashResult::Handled
                 }
                 "on" => {
-                    self.set_terminal_copy_mode(true);
-                    SlashResult::Handled
-                }
-                "off" => {
                     self.set_terminal_copy_mode(false);
                     SlashResult::Handled
                 }
-                _ => SlashResult::Display("Usage: /copy [on|off]".into()),
+                "off" => {
+                    self.set_terminal_copy_mode(true);
+                    SlashResult::Handled
+                }
+                _ => SlashResult::Display("Usage: /mouse [on|off]".into()),
             },
 
             "model" => {
@@ -3821,9 +3821,7 @@ pub async fn run_tui(
     io::stdout().execute(crossterm::terminal::Clear(
         crossterm::terminal::ClearType::All,
     ))?;
-    // Capture mouse input during the TUI session so panes can support wheel
-    // scrolling, click-to-focus, and segment selection.
-    io::stdout().execute(EnableMouseCapture)?;
+    // Default to terminal-native selection/copy. Mouse interaction is opt-in.
     io::stdout().execute(crossterm::event::EnableBracketedPaste)?;
 
     // Enable Kitty keyboard protocol when the terminal supports it.
@@ -3864,7 +3862,8 @@ pub async fn run_tui(
 
     let mut app = App::new(settings);
     app.keyboard_enhancement = has_keyboard_enhancement;
-    app.mouse_capture_enabled = true;
+    app.mouse_capture_enabled = false;
+    app.terminal_copy_mode = true;
     app.history = App::load_history(&config.cwd);
     app.footer_data.cwd = config.cwd.clone();
     app.footer_data.is_oauth = config.is_oauth;
@@ -4452,8 +4451,8 @@ pub async fn run_tui(
                     match (key.code, key.modifiers) {
                         // ── Interrupt: Escape or Ctrl+C ─────────────────
                         (KeyCode::Esc, _) => {
-                            if app.terminal_copy_mode {
-                                app.set_terminal_copy_mode(false);
+                            if !app.terminal_copy_mode {
+                                app.set_terminal_copy_mode(true);
                             } else if app.agent_active {
                                 app.interrupt();
                                 app.agent_active = false; // Unblock editor immediately

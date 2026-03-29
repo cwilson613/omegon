@@ -314,15 +314,19 @@ fn terminal_copy_mode_disables_mouse_capture() {
 }
 
 #[test]
-fn copy_slash_command_toggles_terminal_copy_mode() {
+fn mouse_slash_command_toggles_interaction_mode() {
     let mut app = test_app();
     let tx = test_tx();
+    app.terminal_copy_mode = true;
+    app.mouse_capture_enabled = false;
 
+    assert!(matches!(app.handle_slash_command("/mouse", &tx), SlashResult::Handled));
     assert!(!app.terminal_copy_mode);
-    assert!(matches!(app.handle_slash_command("/copy", &tx), SlashResult::Handled));
+    assert!(app.mouse_capture_enabled);
+
+    assert!(matches!(app.handle_slash_command("/mouse off", &tx), SlashResult::Handled));
     assert!(app.terminal_copy_mode);
-    assert!(matches!(app.handle_slash_command("/copy off", &tx), SlashResult::Handled));
-    assert!(!app.terminal_copy_mode);
+    assert!(!app.mouse_capture_enabled);
 }
 
 #[test]
