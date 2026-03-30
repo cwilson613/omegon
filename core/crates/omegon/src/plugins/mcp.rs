@@ -25,8 +25,10 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::process::Command;
 use tokio::sync::Mutex;
+use tokio::time::timeout as tokio_timeout;
 
 /// Configuration for a single MCP server.
 ///
@@ -134,6 +136,8 @@ pub struct McpFeature {
     feature_name: String,
     tools: Vec<McpTool>,
     clients: Arc<Mutex<HashMap<String, McpConnection>>>,
+    /// Per-server call timeout in seconds, keyed by server name.
+    timeouts: HashMap<String, u64>,
 }
 
 impl McpFeature {
@@ -145,6 +149,7 @@ impl McpFeature {
         let mut all_tools = Vec::new();
         let mut clients = HashMap::new();
 
+        let mut timeouts = HashMap::new();
         for (server_name, config) in servers {
             match Self::connect_one(server_name, config).await {
                 Ok((server_tools, client)) => {
@@ -155,6 +160,7 @@ impl McpFeature {
                         "MCP server connected"
                     );
                     all_tools.extend(server_tools);
+                    timeouts.insert(server_name.clone(), config.timeout_secs);
                     clients.insert(server_name.clone(), client);
                 }
                 Err(e) => {
@@ -172,6 +178,7 @@ impl McpFeature {
             feature_name: plugin_name.to_string(),
             tools: all_tools,
             clients: Arc::new(Mutex::new(clients)),
+            timeouts,
         })
     }
 
@@ -373,6 +380,8 @@ impl Feature for McpFeature {
         let server_name = server_name.to_string();
         let mcp_name = mcp_name.to_string();
 
+        let timeout_secs = self.timeouts.get(&server_name).copied().unwrap_or(30);
+
         let clients = self.clients.lock().await;
         let client = clients
             .get(&server_name)
@@ -388,11 +397,15 @@ impl Feature for McpFeature {
         params.name = mcp_name.into();
         params.arguments = arguments;
 
-        // TODO: Apply config.timeout_secs via tokio::time::timeout wrapping this call.
-        // Currently the _cancel token is available but timeout_secs from the config
-        // is not propagated to the execute method. Requires storing config per-server
-        // in the clients map or a separate timeout map.
-        let result = client.call_tool(params).await?;
+        let result = tokio_timeout(Duration::from_secs(timeout_secs), client.call_tool(params))
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "MCP tool call timed out after {}s (server: '{}')",
+                    timeout_secs,
+                    server_name
+                )
+            })??;
 
         // Convert MCP content to Omegon content blocks
         let content: Vec<ContentBlock> = result

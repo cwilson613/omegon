@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 use tokio_util::sync::CancellationToken;
 
 pub struct RenderProvider;
@@ -93,7 +93,9 @@ fn render_d2(args: &Value) -> anyhow::Result<ToolResult> {
     cmd_args.push(d2_path.to_string_lossy().to_string());
     cmd_args.push(png_path.to_string_lossy().to_string());
 
+    let t0 = Instant::now();
     let output = Command::new("d2").args(&cmd_args).output()?;
+    let elapsed = t0.elapsed().as_secs_f64();
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -120,7 +122,7 @@ fn render_d2(args: &Value) -> anyhow::Result<ToolResult> {
             ContentBlock::Text {
                 text: format!(
                     "{header}📊 D2 ({layout}, {:.1}s)  ·  Saved: {}",
-                    0.0, // TODO: actual timing
+                    elapsed,
                     png_path.display()
                 ),
             },

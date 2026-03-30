@@ -345,7 +345,7 @@ impl App {
                 ratatui_toaster::ToastType::Info,
             );
             self.conversation.push_system(
-                "🖱 Mouse interaction mode ON — mouse capture enabled. Pane clicks, wheel scroll, and segment targeting are active. Press Esc to return to terminal-native selection.",
+                "🖱 Mouse interaction mode ON — mouse capture enabled. Pane clicks, wheel scroll, and segment targeting are active. Use /mouse off to return to terminal-native selection.",
             );
         }
     }
@@ -3919,7 +3919,7 @@ pub async fn run_tui(
         crossterm::terminal::ClearType::All,
     ))?;
     // Default to mouse interaction mode. Terminal-native selection remains
-    // available via Esc or /mouse off.
+    // available via /mouse off.
     io::stdout().execute(crossterm::event::EnableBracketedPaste)?;
 
     // Enable Kitty keyboard protocol when the terminal supports it.
