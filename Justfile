@@ -194,6 +194,23 @@ rc:
         exit 1
     fi
 
+    # In a colocated jj+git repo, jj commits don't automatically advance the git
+    # main branch ref. If jj's working-copy parent differs from git main, there
+    # are commits that would be silently excluded from this RC.
+    if command -v jj &>/dev/null 2>&1 && [ -d ".jj" ]; then
+        JJ_PARENT=$(jj log --no-graph -r '@-' --template 'commit_id' 2>/dev/null | head -c 40 || true)
+        if [ -n "$JJ_PARENT" ] && [ "$JJ_PARENT" != "$MAIN_SHA" ]; then
+            echo "✗ jj has commits not on git main — they would be silently excluded from this RC."
+            echo ""
+            echo "  jj @- : $JJ_PARENT"
+            echo "  git main: $MAIN_SHA"
+            echo ""
+            echo "  To include them:  jj bookmark set main -r @-"
+            echo "  To abandon them:  jj abandon @-"
+            exit 1
+        fi
+    fi
+
     # Refuse to run with uncommitted changes (core/ and milestones)
     DIRTY=$(git status --porcelain -- core/ .omegon/milestones.json)
     if [ -n "$DIRTY" ]; then
@@ -292,6 +309,20 @@ release:
     if [ "$HEAD_SHA" != "$MAIN_SHA" ]; then
         echo "✗ HEAD is not the tip of main. Check out main and retry."
         exit 1
+    fi
+
+    if command -v jj &>/dev/null 2>&1 && [ -d ".jj" ]; then
+        JJ_PARENT=$(jj log --no-graph -r '@-' --template 'commit_id' 2>/dev/null | head -c 40 || true)
+        if [ -n "$JJ_PARENT" ] && [ "$JJ_PARENT" != "$MAIN_SHA" ]; then
+            echo "✗ jj has commits not on git main — they would be silently excluded from this release."
+            echo ""
+            echo "  jj @- : $JJ_PARENT"
+            echo "  git main: $MAIN_SHA"
+            echo ""
+            echo "  To include them:  jj bookmark set main -r @-"
+            echo "  To abandon them:  jj abandon @-"
+            exit 1
+        fi
     fi
 
     DIRTY=$(git status --porcelain -- core/ .omegon/milestones.json)
