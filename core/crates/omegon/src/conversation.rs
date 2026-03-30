@@ -84,6 +84,7 @@ impl AgentMessage {
 
 /// Structured intent tracking — auto-populated, survives compaction verbatim.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct IntentDocument {
     pub current_task: Option<String>,
     pub approach: Option<String>,
@@ -104,6 +105,7 @@ pub struct IntentDocument {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct FailedApproach {
     pub description: String,
     pub reason: String,
@@ -111,6 +113,7 @@ pub struct FailedApproach {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SessionStatsAccumulator {
     pub turns: u32,
     pub tool_calls: u32,
@@ -206,13 +209,27 @@ impl IntentDocument {
 }
 
 /// Serializable session snapshot for save/resume.
+///
+/// All fields use `#[serde(default)]` so that sessions saved by older versions
+/// (which may lack newer fields) deserialize without error.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(default)]
 struct SessionSnapshot {
     messages: Vec<LlmMessage>,
     intent: IntentDocument,
     decay_window: usize,
-    #[serde(default)]
     compaction_summary: Option<String>,
+}
+
+impl Default for SessionSnapshot {
+    fn default() -> Self {
+        Self {
+            messages: Vec::new(),
+            intent: IntentDocument::default(),
+            decay_window: 0,
+            compaction_summary: None,
+        }
+    }
 }
 
 /// The full conversation state.
@@ -1286,6 +1303,48 @@ mod tests {
         assert_eq!(view.len(), 3); // user + assistant + tool_result
 
         // Cleanup
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    /// Sessions saved by older omegon versions may lack fields added later
+    /// (e.g. commit_nudged). Deserialization must not fail — missing fields
+    /// get their Default value.
+    #[test]
+    fn load_session_tolerates_missing_fields() {
+        // Simulate a session file from an older version: no commit_nudged,
+        // no compaction_summary, minimal stats.
+        let old_format_json = serde_json::json!({
+            "messages": [
+                {"role": "user", "content": "hello"}
+            ],
+            "intent": {
+                "current_task": "do stuff",
+                "approach": null,
+                "lifecycle_phase": "Idle",
+                "files_read": [],
+                "files_modified": [],
+                "constraints_discovered": [],
+                "failed_approaches": [],
+                "open_questions": [],
+                "stats": {
+                    "turns": 1,
+                    "tool_calls": 0,
+                    "tokens_consumed": 0,
+                    "compactions": 0
+                }
+            },
+            "decay_window": 10
+            // note: no "compaction_summary", no "commit_nudged"
+        });
+
+        let tmp = std::env::temp_dir().join("omegon-test-old-session.json");
+        std::fs::write(&tmp, old_format_json.to_string()).unwrap();
+
+        let loaded = ConversationState::load_session(&tmp).unwrap();
+        assert_eq!(loaded.intent.current_task.as_deref(), Some("do stuff"));
+        assert!(!loaded.intent.commit_nudged); // defaulted to false
+        assert_eq!(loaded.intent.stats.turns, 1);
+
         let _ = std::fs::remove_file(&tmp);
     }
 

@@ -476,20 +476,31 @@ impl AgentSetup {
             match session::find_session(&cwd, resume_id) {
                 Some(path) => {
                     tracing::info!(path = %path.display(), "Resuming session");
-                    let conv = ConversationState::load_session(&path)?;
-                    // Read the companion meta file to populate the resumption brief
-                    let meta_path = path.with_extension("meta.json");
-                    if let Ok(json) = std::fs::read_to_string(&meta_path) {
-                        if let Ok(meta) = serde_json::from_str::<session::SessionMeta>(&json) {
-                            resume_info = Some(ResumeInfo {
-                                session_id: meta.session_id,
-                                turns: meta.turns,
-                                last_prompt_snippet: meta.last_prompt_snippet,
-                                created_at: meta.created_at,
-                            });
+                    match ConversationState::load_session(&path) {
+                        Ok(conv) => {
+                            // Read the companion meta file to populate the resumption brief
+                            let meta_path = path.with_extension("meta.json");
+                            if let Ok(json) = std::fs::read_to_string(&meta_path) {
+                                if let Ok(meta) = serde_json::from_str::<session::SessionMeta>(&json) {
+                                    resume_info = Some(ResumeInfo {
+                                        session_id: meta.session_id,
+                                        turns: meta.turns,
+                                        last_prompt_snippet: meta.last_prompt_snippet,
+                                        created_at: meta.created_at,
+                                    });
+                                }
+                            }
+                            conv
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                path = %path.display(),
+                                error = %e,
+                                "Failed to load session (format may be from an older version) — starting fresh"
+                            );
+                            ConversationState::new()
                         }
                     }
-                    conv
                 }
                 None => {
                     if resume_id.is_some() {
