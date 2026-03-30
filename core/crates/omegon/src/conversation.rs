@@ -139,6 +139,11 @@ impl IntentDocument {
                         }
                     }
                 }
+                // commit clears the mutation set — after a commit the working tree is clean.
+                // Without this, the end-of-turn nudge fires even when the agent already committed.
+                "commit" => {
+                    self.files_modified.clear();
+                }
                 // bash: can't reliably track which files are modified by arbitrary commands.
                 // File tracking for bash is inherently best-effort — the agent should use
                 // edit/write for trackable mutations. bash is for commands, not file writes.
@@ -1432,6 +1437,38 @@ mod tests {
         assert_eq!(intent.files_read.len(), 1);
         assert_eq!(intent.files_modified.len(), 2);
         assert_eq!(intent.stats.tool_calls, 4);
+    }
+
+    #[test]
+    fn commit_clears_files_modified() {
+        // Regression: commit tool must clear files_modified so the end-of-turn
+        // nudge ("You made file changes but did not run git commit") does not
+        // fire spuriously after the agent already committed.
+        let mut intent = IntentDocument::default();
+
+        // Simulate: agent edits a file, then commits
+        intent.update_from_tools(
+            &[ToolCall {
+                id: "1".into(),
+                name: "edit".into(),
+                arguments: serde_json::json!({"path": "src/foo.rs"}),
+            }],
+            &[],
+        );
+        assert!(!intent.files_modified.is_empty(), "should have a mutation");
+
+        intent.update_from_tools(
+            &[ToolCall {
+                id: "2".into(),
+                name: "commit".into(),
+                arguments: serde_json::json!({"message": "fix: foo"}),
+            }],
+            &[],
+        );
+        assert!(
+            intent.files_modified.is_empty(),
+            "commit must clear files_modified to suppress spurious nudge"
+        );
     }
 
     #[test]

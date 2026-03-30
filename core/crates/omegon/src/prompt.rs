@@ -613,13 +613,6 @@ mod tests {
             group_budgets.push((group, active_count, active_tokens, disabled_tokens));
         }
 
-        // Feature tools (can't easily instantiate without full setup, so measure schemas statically)
-        // We'll add memory + lifecycle + cleave + model_budget + manage_tools tool defs inline
-        let feature_tools: Vec<(&str, &str, &str, serde_json::Value)> = vec![
-            // Samples of the heaviest feature tools — expand as needed
-        ];
-        // For now just report the ToolProvider-based tools
-
         // Sort by token cost descending
         all_tools.sort_by(|a, b| b.1.cmp(&a.1));
 

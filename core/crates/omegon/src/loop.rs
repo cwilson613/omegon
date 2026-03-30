@@ -69,7 +69,8 @@ pub async fn run(
     cancel: CancellationToken,
     config: &LoopConfig,
 ) -> anyhow::Result<()> {
-    let tool_defs = bus.tool_definitions();
+    // tool_defs is refreshed each turn so manage_tools enable/disable takes effect
+    // immediately in the schema sent to the LLM (not just in execution routing).
 
     // Broadcast initial HarnessStatus as AgentEvent so TUI + web dashboard
     // get the first snapshot. The BusEvent was already emitted in setup.rs;
@@ -94,6 +95,9 @@ pub async fn run(
 
         turn += 1;
         conversation.intent.stats.turns = turn;
+        // Refresh tool_defs each turn — manage_tools may have enabled/disabled tools
+        // mid-session and we must reflect that in the schema sent to the LLM.
+        let tool_defs = bus.tool_definitions();
 
         // ─── Turn limit enforcement ─────────────────────────────────
         if config.max_turns > 0 && turn > config.max_turns {
