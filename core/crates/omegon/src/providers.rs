@@ -172,10 +172,23 @@ pub fn infer_provider_id(model_spec: &str) -> String {
         || lower.starts_with("mistral")
         || lower.starts_with("dolphin")
         || lower.starts_with("neural")
+        || lower.starts_with("glm")
+        || lower.starts_with("kimi")
+        || lower.starts_with("gemma")
+        || lower.starts_with("phi")
+        || lower.starts_with("deepseek")
+        || lower.starts_with("wizardlm")
+        || lower.starts_with("orca")
+        || lower.starts_with("vicuna")
     {
         return "ollama".to_string();
     }
 
+    // Unknown model — warn rather than silently route to Anthropic
+    tracing::warn!(
+        "provider_from_model: unrecognized model spec {:?}, defaulting to anthropic",
+        model_spec
+    );
     "anthropic".to_string()
 }
 

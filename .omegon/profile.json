@@ -1,7 +1,7 @@
 {
   "lastUsedModel": {
     "provider": "anthropic",
-    "modelId": "claude-haiku-4-5"
+    "modelId": "claude-sonnet-4-6"
   },
   "thinkingLevel": "low",
   "maxTurns": 50

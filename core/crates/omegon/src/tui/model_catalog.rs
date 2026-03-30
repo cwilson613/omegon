@@ -112,62 +112,90 @@ pub struct ModelCatalog {
 }
 
 impl ModelCatalog {
-    /// Build the canonical model catalog.
-    pub fn new() -> Self {
-        let mut providers = BTreeMap::new();
+    /// Discover the live model catalog.
+    ///
+    /// - Ollama section is populated by running `ollama list` — only models
+    ///   actually installed on this machine appear.
+    /// - Cloud provider sections are included only when a valid API key or
+    ///   OAuth token can be resolved for that provider.
+    pub fn discover() -> Self {
+        let mut cat = Self::cloud_only();
 
-        // ─── Local Inference ──────────────────────────────────────────
-        providers.insert("Ollama".to_string(), vec![
-            // Common Ollama models (user may have different ones installed)
-            ModelInfo {
-                id: "ollama:llama2".to_string(),
-                name: "Llama 2 (7B)".to_string(),
+        // Populate Ollama from live `ollama list`
+        let ollama_models = Self::query_ollama();
+        if !ollama_models.is_empty() {
+            cat.providers.insert("Ollama".to_string(), ollama_models);
+        }
+
+        cat
+    }
+
+    /// Query `ollama list` and parse installed models into ModelInfo entries.
+    fn query_ollama() -> Vec<ModelInfo> {
+        let output = std::process::Command::new("ollama")
+            .arg("list")
+            .output();
+        let output = match output {
+            Ok(o) if o.status.success() => o,
+            _ => return vec![],
+        };
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut models = Vec::new();
+        for line in stdout.lines().skip(1) {
+            // Format: "NAME   ID   SIZE   MODIFIED"
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.is_empty() {
+                continue;
+            }
+            let full_name = parts[0]; // e.g. "glm-4.7-flash:latest"
+            // Title-case display name from the name portion (before the colon tag)
+            let raw = full_name.split(':').next().unwrap_or(full_name);
+            let display_name = raw
+                .replace('-', " ")
+                .split_whitespace()
+                .map(|w| {
+                    let mut c = w.chars();
+                    match c.next() {
+                        None => String::new(),
+                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            let size_str = parts.get(2).copied().unwrap_or("");
+            let description = if size_str.is_empty() {
+                format!("Ollama: {full_name}")
+            } else {
+                format!("Ollama: {full_name} ({size_str})")
+            };
+            models.push(ModelInfo {
+                id: format!("ollama:{full_name}"),
+                name: display_name,
                 provider: "Ollama".to_string(),
-                context_input: 4096,
-                context_output: 2048,
-                cost_tier: CostTier::Local,
-                capabilities: vec![Capability::Instruction],
-                description: "Meta's Llama 2, 7B params — fastest local option".to_string(),
-                available: true, // Show in selector; runtime discovery will update
-            },
-            ModelInfo {
-                id: "ollama:mistral".to_string(),
-                name: "Mistral (7B)".to_string(),
-                provider: "Ollama".to_string(),
-                context_input: 8192,
-                context_output: 4096,
+                context_input: 128_000,
+                context_output: 32_768,
                 cost_tier: CostTier::Local,
                 capabilities: vec![Capability::Instruction, Capability::Coding],
-                description: "Mistral 7B — excellent instruction-following".to_string(),
+                description,
                 available: true,
-            },
-            ModelInfo {
-                id: "ollama:neural-chat".to_string(),
-                name: "Neural Chat (7B)".to_string(),
-                provider: "Ollama".to_string(),
-                context_input: 8192,
-                context_output: 4096,
-                cost_tier: CostTier::Local,
-                capabilities: vec![Capability::Instruction, Capability::Multilingual],
-                description: "Intel's Neural Chat — multilingual, conversation-optimized".to_string(),
-                available: true,
-            },
-            ModelInfo {
-                id: "ollama:dolphin-mixtral".to_string(),
-                name: "Dolphin Mixtral (8x7B)".to_string(),
-                provider: "Ollama".to_string(),
-                context_input: 32768,
-                context_output: 16384,
-                cost_tier: CostTier::Local,
-                capabilities: vec![Capability::Reasoning, Capability::Coding],
-                description: "Mixtral MoE with extended context — best local reasoning".to_string(),
-                available: true,
-            },
-        ]);
+            });
+        }
+        models
+    }
 
-        // ─── Cloud Providers ──────────────────────────────────────────
+    /// Cloud-only catalog — includes a provider section only when an API key
+    /// is present for it.  Call `discover()` for the full live catalog.
+    pub fn cloud_only() -> Self {
+        let mut providers = BTreeMap::new();
 
-        // OpenRouter (largest catalog)
+        fn has_key(provider: &str) -> bool {
+            crate::providers::resolve_api_key_sync(provider).is_some()
+        }
+
+        // ─── Cloud Providers (auth-gated) ─────────────────────────────
+
+        // OpenRouter
+        if has_key("openrouter") {
         providers.insert("OpenRouter".to_string(), vec![
             // Qwen models
             ModelInfo {
@@ -227,9 +255,11 @@ impl ModelCatalog {
                 description: "Meta's Llama 2 via OpenRouter — solid baseline".to_string(),
                 available: true,
             },
-        ]);
+        ]); // end OpenRouter
+        } // end if has_key("openrouter")
 
         // Anthropic
+        if has_key("anthropic") {
         providers.insert("Anthropic".to_string(), vec![
             ModelInfo {
                 id: "anthropic:claude-opus-4-1".to_string(),
@@ -264,9 +294,11 @@ impl ModelCatalog {
                 description: "Claude 3.5 Haiku — fastest, cheapest Claude".to_string(),
                 available: true,
             },
-        ]);
+        ]); // end Anthropic
+        } // end if has_key("anthropic")
 
         // OpenAI
+        if has_key("openai") {
         providers.insert("OpenAI".to_string(), vec![
             ModelInfo {
                 id: "openai:gpt-4o".to_string(),
@@ -301,9 +333,11 @@ impl ModelCatalog {
                 description: "GPT-4 Mini — cost-effective GPT-4".to_string(),
                 available: true,
             },
-        ]);
+        ]); // end OpenAI
+        } // end if has_key("openai")
 
         // Groq
+        if has_key("groq") {
         providers.insert("Groq".to_string(), vec![
             ModelInfo {
                 id: "groq:mixtral-8x7b-32768".to_string(),
@@ -327,9 +361,11 @@ impl ModelCatalog {
                 description: "Llama 3.1 on Groq — long context, instant latency".to_string(),
                 available: true,
             },
-        ]);
+        ]); // end Groq
+        } // end if has_key("groq")
 
         // xAI (Grok)
+        if has_key("xai") {
         providers.insert("xAI".to_string(), vec![
             ModelInfo {
                 id: "xai:grok-2".to_string(),
@@ -342,9 +378,11 @@ impl ModelCatalog {
                 description: "Grok 2 — long context reasoning model".to_string(),
                 available: true,
             },
-        ]);
+        ]); // end xAI
+        } // end if has_key("xai")
 
         // Mistral
+        if has_key("mistral") {
         providers.insert("Mistral".to_string(), vec![
             ModelInfo {
                 id: "mistral:large".to_string(),
@@ -368,9 +406,15 @@ impl ModelCatalog {
                 description: "Mistral Small — lightweight, fast".to_string(),
                 available: true,
             },
-        ]);
+        ]); // end Mistral
+        } // end if has_key("mistral")
 
         ModelCatalog { providers }
+    }
+
+    /// Alias for `cloud_only()` — kept for tests and non-interactive code paths.
+    pub fn new() -> Self {
+        Self::cloud_only()
     }
 
     /// Get all models, flattened and optionally filtered by provider.

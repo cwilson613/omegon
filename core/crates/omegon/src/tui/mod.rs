@@ -354,7 +354,7 @@ impl App {
         let current = self.settings().model.clone();
         
         // Build selector options from the unified model catalog
-        let catalog = self::model_catalog::ModelCatalog::new();
+        let catalog = self::model_catalog::ModelCatalog::discover();
         let mut options: Vec<selector::SelectOption> = Vec::new();
         
         // Group models by provider for visual organization
@@ -2137,7 +2137,7 @@ impl App {
                     SlashResult::Handled
                 } else if args == "list" {
                     // /model list → show all models from catalog
-                    let catalog = self::model_catalog::ModelCatalog::new();
+                    let catalog = self::model_catalog::ModelCatalog::discover();
                     let mut output = String::from("Available models:\n");
                     for (provider_name, models) in &catalog.providers {
                         output.push_str(&format!("\n{}:\n", provider_name));
