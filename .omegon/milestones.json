@@ -202,17 +202,20 @@
     "opened": "2026-03-29T16:13:57Z",
     "nodes": [],
     "frozen": false,
-    "rc_count": 12,
+    "rc_count": 13,
     "notes": [
       "feat(auth): restructure /login by company=api-key / product=subscription paradigm",
       "feat(auth): support headless OAuth login via paste-back flow",
       "feat(bus,lifecycle,memory): auto-ingest lifecycle decisions + output truncation + schema compaction",
       "feat(inference): local inference onboarding and provider discoverability",
       "feat(inference): openrouter native routing and unified provider UX",
+      "feat(instruments): per-turn token stats row + fix sys-band sizing",
+      "feat(instruments): unified braille context bar + polished legend icons",
       "feat(models): interactive model selector — browse providers and models with context/cost info",
       "feat(providers): add MLX local inference server support",
       "feat(site): show current version and copy button on homepage install block",
       "feat(tui): fix model selector — add Ollama models, align columns, prevent overflow",
+      "feat(tui): mouse on by default, Esc no longer silently disables it",
       "feat(tui): unified model catalog for local and cloud inference",
       "feat(tui): wire /model command to unified model catalog selector",
       "feat(tui, cli): simplify model selector and add Ollama launch integration support",
@@ -220,6 +223,7 @@
       "fix(context): wire actual provider token counts end-to-end to TUI",
       "fix(homebrew): bump formula to 0.15.4 and wire brew-tap into publish",
       "fix(install): fix escape sequence rendering and replace broken box layout",
+      "fix(justfile): guard rc and release against jj/git branch divergence",
       "fix(loop): persist commit_nudged across TUI run() invocations\\n\\nThe TUI calls loop::run() once per user turn, so a local\\n`commit_nudged` variable reset to false every message — causing\\nthe \\\"you made file changes\\\" nudge to fire on every turn even\\nafter a successful commit.\\n\\nMove commit_nudged onto IntentDocument (which persists for the\\nentire session lifetime). Also reset it when the commit tool\\nclears files_modified, so a second commit after further changes\\nstill gets a nudge.\\n\\nFixes: commit nudge regression introduced in rc.7\"",
       "fix(loop): suppress spurious commit nudge; refresh tool_defs per turn",
       "fix(session): tolerate missing fields and corrupt sessions on resume",
@@ -229,7 +233,7 @@
       "fix(tui,providers): dynamic Ollama catalog, auth-gated cloud providers, expanded routing",
       "refactor(providers): remove MLX as dedicated provider — use Ollama instead"
     ],
-    "last_rc": "2026-03-30T19:16:27Z",
-    "rc_version": "0.15.5-rc.14"
+    "last_rc": "2026-03-30T20:35:46Z",
+    "rc_version": "0.15.5-rc.15"
   }
 }
