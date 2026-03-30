@@ -262,6 +262,15 @@ pub struct InstrumentPanel {
     pub focus_mode: bool,
     /// True after the first tool call — panel borders brighten on first fire.
     has_ever_fired: bool,
+    // ── Per-turn token stats (from TurnEnd) ──
+    last_input_tokens: u32,
+    last_output_tokens: u32,
+    last_cache_read_tokens: u32,
+    // ── Cumulative session memory op counters ──
+    session_stores: u32,
+    session_recalls: u32,
+    /// Actual context window size in tokens — used to compute realistic sys fraction.
+    context_window: usize,
 }
 
 impl Default for InstrumentPanel {
@@ -283,6 +292,12 @@ impl Default for InstrumentPanel {
             tools: Vec::new(),
             focus_mode: false,
             has_ever_fired: false,
+            last_input_tokens: 0,
+            last_output_tokens: 0,
+            last_cache_read_tokens: 0,
+            session_stores: 0,
+            session_recalls: 0,
+            context_window: 200_000,
         }
     }
 }
@@ -362,7 +377,13 @@ impl InstrumentPanel {
 
     fn context_breakdown(&self) -> [(ContextBand, f64); 6] {
         let total_used = self.context_fill.clamp(0.0, 1.0);
-        let system = 0.08_f64.min(total_used);
+        // System prompt: ~10k tokens of directives/AGENTS.md — fixed size regardless of model.
+        // Express as a fraction of the actual context window so it stays accurate at any size
+        // (100k → 10%, 200k → 5%, 1M → 1%). Cap at 0.15 for tiny windows.
+        const SYS_PROMPT_TOKENS: f64 = 10_000.0;
+        let sys_fraction =
+            (SYS_PROMPT_TOKENS / self.context_window.max(1) as f64).min(0.15);
+        let system = sys_fraction.min(total_used);
         let memory = self.memory_fill.min((total_used - system).max(0.0));
         let thinking = (self.thinking_level_pct * 0.12).min((total_used - system - memory).max(0.0));
         let recent_tool_load = ((self.active_tool_load() * 0.10).min(0.10))
@@ -478,6 +499,22 @@ impl InstrumentPanel {
     }
 
     /// Update mind fact counts and memory context fraction.
+    /// Record token counts from the provider's TurnEnd event.
+    pub fn update_turn_tokens(&mut self, input: u32, output: u32, cache_read: u32) {
+        self.last_input_tokens = input;
+        self.last_output_tokens = output;
+        self.last_cache_read_tokens = cache_read;
+    }
+
+    /// Increment cumulative memory operation counters.
+    pub fn bump_memory_store(&mut self) {
+        self.session_stores += 1;
+    }
+
+    pub fn bump_memory_recall(&mut self) {
+        self.session_recalls += 1;
+    }
+
     pub fn update_mind_facts(
         &mut self,
         project_facts: usize,
@@ -517,6 +554,7 @@ impl InstrumentPanel {
     pub fn update_telemetry(
         &mut self,
         context_pct: f32,
+        context_window: usize,
         _tool_name: Option<&str>,
         _tool_error: bool,
         thinking_level: &str,
@@ -525,6 +563,10 @@ impl InstrumentPanel {
         dt: f64,
     ) {
         self.time += dt;
+
+        if context_window > 0 {
+            self.context_window = context_window;
+        }
 
         // Context: true 0–100% fill, clamped.
         self.context_fill = (context_pct as f64 / 100.0).clamp(0.0, 1.0);
@@ -668,15 +710,70 @@ impl InstrumentPanel {
             }
         }
 
+        // Stats row: token counts + memory op tallies
+        let stats_row_y = inner.y + bar_h + 1;
+        if inner.height > bar_h + 1 {
+            clear_row(stats_row_y, inner.x, inner.right(), buf, panel_bg(t));
+
+            fn fmt_k(n: u32) -> String {
+                if n >= 1000 {
+                    format!("{:.1}k", n as f64 / 1000.0)
+                } else {
+                    format!("{n}")
+                }
+            }
+
+            let cache_pct = if self.last_input_tokens > 0 {
+                (self.last_cache_read_tokens as f64 / self.last_input_tokens as f64 * 100.0)
+                    .round() as u32
+            } else {
+                0
+            };
+            let token_str = if self.last_input_tokens > 0 {
+                format!(
+                    "↑{} ↓{} ⊙{}%",
+                    fmt_k(self.last_input_tokens),
+                    fmt_k(self.last_output_tokens),
+                    cache_pct,
+                )
+            } else {
+                "↑— ↓— ⊙—".to_string()
+            };
+            let mem_str = format!(
+                "  ✦{} stored  ◎{} recalled",
+                self.session_stores, self.session_recalls
+            );
+            let full = format!("{token_str}{mem_str}");
+
+            let dim = t.dim();
+            let accent = Color::Rgb(42, 180, 200);
+            let mut x = inner.x;
+            for ch in full.chars() {
+                if x >= inner.right() {
+                    break;
+                }
+                if let Some(cell) = buf.cell_mut(Position::new(x, stats_row_y)) {
+                    cell.set_char(ch);
+                    let fg = match ch {
+                        '↑' | '↓' | '⊙' | '✦' | '◎' => accent,
+                        _ => dim,
+                    };
+                    cell.set_fg(fg);
+                    cell.set_bg(panel_bg(t));
+                }
+                x += 1;
+            }
+        }
+
         // Tree + memory strings: break through the left border
-        if inner.height > bar_h + 1 && !active_minds.is_empty() {
+        if inner.height > bar_h + 2 && !active_minds.is_empty() {
             // Start at the panel's left BORDER (area.x, not inner.x)
             // so the tree trunk overlays the border character
             let tree_area = Rect {
                 x: area.x,
-                y: inner.y + bar_h + 1,
+                y: inner.y + bar_h + 2,
                 width: inner.width + 1, // include border column
-                height: inner.height - bar_h - 1,
+                height: inner.height.saturating_sub(bar_h + 2),
             };
             self.render_memory_strings(&active_minds, tree_area, buf, t);
         }
@@ -1161,12 +1258,12 @@ mod tests {
     #[test]
     fn context_fill_uses_full_percent_range() {
         let mut panel = InstrumentPanel::default();
-        panel.update_telemetry(50.0, None, false, "off", None, false, 0.016);
+        panel.update_telemetry(50.0, 200_000, None, false, "off", None, false, 0.016);
         assert!(
             (panel.context_fill - 0.5).abs() < 0.001,
             "context fill should track 50%"
         );
-        panel.update_telemetry(100.0, None, false, "off", None, false, 0.016);
+        panel.update_telemetry(100.0, 200_000, None, false, "off", None, false, 0.016);
         assert!(
             (panel.context_fill - 1.0).abs() < 0.001,
             "context fill should track 100%"
@@ -1243,8 +1340,8 @@ mod tests {
         let mut panel = InstrumentPanel::default();
         let base = panel.preferred_height();
         panel.update_mind_facts(18, 3, 2, 0.08);
-        panel.update_telemetry(62.0, Some("read"), false, "medium", None, true, 0.016);
-        panel.update_telemetry(62.0, Some("bash"), false, "medium", None, true, 0.016);
+        panel.update_telemetry(62.0, 200_000, Some("read"), false, "medium", None, true, 0.016);
+        panel.update_telemetry(62.0, 200_000, Some("bash"), false, "medium", None, true, 0.016);
         let grown = panel.preferred_height();
         assert!(grown >= base, "footer height should not shrink after activity");
         assert!(grown >= 10 && grown <= 16, "preferred height stays bounded: {grown}");
@@ -1293,7 +1390,7 @@ mod tests {
     fn tool_runtime_finishes_with_duration() {
         let mut panel = InstrumentPanel::default();
         panel.tool_started("bash");
-        panel.update_telemetry(0.0, None, false, "off", None, false, 1.25);
+        panel.update_telemetry(0.0, 200_000, None, false, "off", None, false, 1.25);
         panel.tool_finished("bash", false);
         let tool = panel.tools.iter().find(|t| t.name == "bash").unwrap();
         assert!(!tool.running);
@@ -1320,8 +1417,9 @@ mod tests {
     fn narrow_memory_rows_preserve_count_before_wave() {
         let mut panel = InstrumentPanel::default();
         panel.update_mind_facts(0, 0, 0, 0.0);
-        let area = Rect::new(0, 0, 24, 6);
-        let backend = ratatui::backend::TestBackend::new(24, 6);
+        // Need at least 8 rows: border(1) + bar_h(2) + legend(1) + stats(1) + memory(1+) + border(1)
+        let area = Rect::new(0, 0, 24, 8);
+        let backend = ratatui::backend::TestBackend::new(24, 8);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         let t = crate::tui::theme::Alpharius;
 
@@ -1330,8 +1428,9 @@ mod tests {
             .unwrap();
 
         let buf = terminal.backend().buffer();
+        // Memory strings start at row 5 (bar_h=2, legend=row3, stats=row4, memories=row5+)
         let line: String = (0..buf.area.width)
-            .map(|x| buf[(x, 4)].symbol().to_string())
+            .map(|x| buf[(x, 5)].symbol().to_string())
             .collect::<String>();
         assert!(
             line.contains("project ⌗0") || line.contains("working ⌗0") || line.contains("episodes ⌗0"),
@@ -1343,7 +1442,7 @@ mod tests {
     fn tool_error_finish_records_runtime_once() {
         let mut panel = InstrumentPanel::default();
         panel.tool_started("bash");
-        panel.update_telemetry(0.0, None, false, "off", None, false, 0.5);
+        panel.update_telemetry(0.0, 200_000, None, false, "off", None, false, 0.5);
         panel.tool_finished("bash", true);
         let tool = panel.tools.iter().find(|t| t.name == "bash").unwrap();
         assert!(tool.is_error);
@@ -1366,7 +1465,7 @@ mod tests {
     fn context_breakdown_stays_normalized_and_ordered() {
         let mut panel = InstrumentPanel::default();
         panel.update_mind_facts(18, 3, 2, 0.08);
-        panel.update_telemetry(62.0, Some("read"), false, "medium", None, true, 0.016);
+        panel.update_telemetry(62.0, 200_000, Some("read"), false, "medium", None, true, 0.016);
         let breakdown = panel.context_breakdown();
         let total: f64 = breakdown.iter().map(|(_, frac)| frac).sum();
         assert!((total - 1.0).abs() < 0.0001, "breakdown should sum to 1.0, got {total}");
@@ -1381,14 +1480,14 @@ mod tests {
     #[test]
     fn thinking_activity_mode_beats_tool_churn() {
         let mut panel = InstrumentPanel::default();
-        panel.update_telemetry(40.0, Some("bash"), false, "high", None, true, 0.016);
+        panel.update_telemetry(40.0, 200_000, Some("bash"), false, "high", None, true, 0.016);
         assert_eq!(panel.activity_mode(), ActivityMode::Thinking);
     }
 
     #[test]
     fn waiting_activity_mode_appears_without_thinking_budget() {
         let mut panel = InstrumentPanel::default();
-        panel.update_telemetry(40.0, None, false, "off", None, true, 0.5);
+        panel.update_telemetry(40.0, 200_000, None, false, "off", None, true, 0.5);
         assert_eq!(panel.activity_mode(), ActivityMode::Waiting);
     }
 
@@ -1397,12 +1496,12 @@ mod tests {
         let mut panel = InstrumentPanel::default();
         panel.update_mind_facts(10, 0, 0, 0.02);
         for _ in 0..4 {
-            panel.update_telemetry(0.0, None, false, "off", None, false, 0.016);
+            panel.update_telemetry(0.0, 200_000, None, false, "off", None, false, 0.016);
         }
         let baseline = panel.minds[0].max_amplitude();
         panel.update_mind_facts(11, 0, 0, 0.02);
         for _ in 0..4 {
-            panel.update_telemetry(0.0, None, false, "off", None, false, 0.016);
+            panel.update_telemetry(0.0, 200_000, None, false, "off", None, false, 0.016);
         }
         let after = panel.minds[0].max_amplitude();
         assert!(after > baseline, "fact count increase should excite the project wave");
@@ -1422,7 +1521,7 @@ mod tests {
         let mut panel = InstrumentPanel::default();
         panel.update_mind_facts(180, 12, 6, 0.08);
         panel.tool_started("read");
-        panel.update_telemetry(68.0, Some("read"), false, "high", None, true, 0.016);
+        panel.update_telemetry(68.0, 200_000, Some("read"), false, "high", None, true, 0.016);
 
         let area = Rect::new(0, 0, 64, 10);
         let backend = ratatui::backend::TestBackend::new(64, 10);

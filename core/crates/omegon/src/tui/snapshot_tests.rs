@@ -294,15 +294,15 @@ fn snapshot_unified_footer_console() {
 
     let mut panel = InstrumentPanel::default();
     panel.update_mind_facts(2440, 8, 45, 0.11);
-    panel.update_telemetry(68.0, None, false, "high", Some((0, super::instruments::WaveDirection::Right)), true, 0.2);
+    panel.update_telemetry(68.0, 200_000, None, false, "high", Some((0, super::instruments::WaveDirection::Right)), true, 0.2);
     panel.tool_started("bash");
-    panel.update_telemetry(68.0, None, false, "high", None, true, 1.2);
+    panel.update_telemetry(68.0, 200_000, None, false, "high", None, true, 1.2);
     panel.tool_finished("bash", false);
     panel.tool_started("web_search");
-    panel.update_telemetry(68.0, None, false, "high", None, true, 8.1);
+    panel.update_telemetry(68.0, 200_000, None, false, "high", None, true, 8.1);
     panel.tool_finished("web_search", true);
     panel.tool_started("memory_recall");
-    panel.update_telemetry(68.0, None, false, "high", Some((0, super::instruments::WaveDirection::Left)), true, 0.22);
+    panel.update_telemetry(68.0, 200_000, None, false, "high", Some((0, super::instruments::WaveDirection::Left)), true, 0.22);
     panel.tool_finished("memory_recall", false);
 
     let backend = TestBackend::new(120, 12);
@@ -327,16 +327,16 @@ fn snapshot_unified_footer_console() {
 fn snapshot_tools_panel_with_runtime_and_error() {
     let mut panel = InstrumentPanel::default();
     panel.tool_started("bash");
-    panel.update_telemetry(40.0, None, false, "off", None, false, 41.0);
+    panel.update_telemetry(40.0, 200_000, None, false, "off", None, false, 41.0);
     panel.tool_finished("bash", false);
     panel.tool_started("web_search");
-    panel.update_telemetry(40.0, None, false, "off", None, false, 8.1);
+    panel.update_telemetry(40.0, 200_000, None, false, "off", None, false, 8.1);
     panel.tool_finished("web_search", true);
     panel.tool_started("memory_recall");
-    panel.update_telemetry(40.0, None, false, "off", None, false, 0.22);
+    panel.update_telemetry(40.0, 200_000, None, false, "off", None, false, 0.22);
     panel.tool_finished("memory_recall", false);
     panel.tool_started("codebase_search");
-    panel.update_telemetry(40.0, None, false, "off", None, false, 0.35);
+    panel.update_telemetry(40.0, 200_000, None, false, "off", None, false, 0.35);
     panel.tool_finished("codebase_search", false);
 
     let backend = TestBackend::new(42, 10);

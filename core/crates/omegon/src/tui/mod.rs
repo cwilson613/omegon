@@ -1571,6 +1571,7 @@ impl App {
             self.last_instrument_update = now;
             self.instrument_panel.update_telemetry(
                 self.footer_data.context_percent,
+                self.footer_data.context_window,
                 tool_name.as_deref(),
                 false,
                 thinking,
@@ -3156,10 +3157,16 @@ impl App {
                 turn,
                 estimated_tokens,
                 actual_input_tokens,
-                actual_output_tokens: _,
-                cache_read_tokens: _,
+                actual_output_tokens,
+                cache_read_tokens,
             } => {
                 self.turn = turn;
+                // Forward raw token counts to the instrument panel
+                self.instrument_panel.update_turn_tokens(
+                    actual_input_tokens as u32,
+                    actual_output_tokens as u32,
+                    cache_read_tokens as u32,
+                );
                 let ctx_window = self.footer_data.context_window;
                 if ctx_window > 0 {
                     // Prefer actual provider-reported tokens; fall back to local estimate.
@@ -3277,6 +3284,7 @@ impl App {
                     );
                     if name == "memory_store" || name == "memory_supersede" {
                         self.footer_data.total_facts += 1;
+                        self.instrument_panel.bump_memory_store();
                     } else if name == "memory_archive" {
                         self.footer_data.total_facts =
                             self.footer_data.total_facts.saturating_sub(1);
@@ -3296,6 +3304,7 @@ impl App {
                             | "memory_release"
                     ) {
                         self.memory_ops_this_frame += 1;
+                        self.instrument_panel.bump_memory_recall();
                     }
                 }
                 // Save for instrument telemetry before clearing
