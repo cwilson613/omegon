@@ -51,7 +51,7 @@ The Omegon website is a static site served from our own infrastructure. We do no
 
 Because we do not collect personal data through the Omegon binary, there is effectively no data to request, correct, or delete from us in that context.
 
-For web server access logs (which may contain your IP address), you may contact us at **privacy@blackmeridian.io** to inquire about data we hold. We will respond within 30 days.
+For web server access logs (which may contain your IP address), you may contact us at **admin@styrene.io** to inquire about data we hold. We will respond within 30 days.
 
 If you are in the European Economic Area, you have rights under GDPR including: access, rectification, erasure, restriction, portability, and objection. The lawful basis for processing web server logs is our legitimate interest in operating and securing the website.
 
@@ -71,6 +71,5 @@ If this policy changes materially, we will update the effective date above and n
 
 ## 6. Contact
 
-Privacy questions: **privacy@blackmeridian.io**  
-Security issues: **security@blackmeridian.io**  
-General: [github.com/styrene-lab/omegon](https://github.com/styrene-lab/omegon)
+General inquiries: **admin@styrene.io**  
+GitHub: [github.com/styrene-lab/omegon](https://github.com/styrene-lab/omegon)

@@ -64,6 +64,15 @@ jobs:
             ghcr.io/styrene-lab/omegon-site:sha-${{ github.sha }}
             ghcr.io/styrene-lab/omegon-site:latest
 
+      - name: Trigger Image Updater webhook
+        env:
+          NEW_TAG: sha-${{ github.sha }}
+        run: |
+          curl -sf -X POST https://image-updater.styrene.dev/api/v1/webhook \
+            -H "Content-Type: application/json" \
+            -H "X-GitHub-Event: package" \
+            -d "{\"action\":\"published\",\"registry_package\":{\"name\":\"omegon-site\",\"package_type\":\"container\",\"namespace\":\"styrene-lab\",\"package_version\":{\"container_metadata\":{\"tag\":{\"name\":\"${NEW_TAG}\"}}}}}"
+
       - name: Summary
         run: |
           echo "### Site Build" >> $GITHUB_STEP_SUMMARY
@@ -72,4 +81,4 @@ jobs:
           echo "- **Pages:** $(find site/dist -name '*.html' | wc -l)" >> $GITHUB_STEP_SUMMARY
           echo "- **Design tree nodes:** $(grep -c '<circle' site/public/design-tree.svg)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "ArgoCD Image Updater will auto-deploy to omegon.styrene.dev." >> $GITHUB_STEP_SUMMARY
+          echo "Image Updater webhook triggered — ArgoCD will deploy immediately." >> $GITHUB_STEP_SUMMARY

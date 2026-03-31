@@ -30,7 +30,7 @@ On **2031-03-19**, or four years after a specific version was first publicly dis
 
 ### Commercial licensing
 
-If you need a production or commercial license, contact us at: **licensing@blackmeridian.io**
+If you need a production or commercial license, contact us at: **admin@styrene.io**
 
 ---
 
@@ -72,8 +72,7 @@ These terms are governed by the laws of the State of Delaware, United States, wi
 
 ## 7. Contact
 
-- **Commercial licensing:** licensing@blackmeridian.io  
-- **Security issues:** security@blackmeridian.io  
+- **Commercial licensing:** admin@styrene.io  
 - **General:** [github.com/styrene-lab/omegon](https://github.com/styrene-lab/omegon)
 
 ---
