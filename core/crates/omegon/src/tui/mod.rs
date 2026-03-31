@@ -52,7 +52,7 @@ use tokio_util::sync::CancellationToken;
 
 use omegon_traits::AgentEvent;
 
-use self::conversation::ConversationView;
+use self::conversation::{ConversationView, Tab};
 use self::dashboard::DashboardState;
 use self::editor::Editor;
 use self::footer::FooterData;
@@ -199,6 +199,8 @@ pub struct App {
     terminal_copy_mode: bool,
     /// Last left-click press used to detect double-click expansion.
     last_left_click: Option<(u16, u16, std::time::Instant)>,
+    /// Extension widgets discovered during setup — keyed by widget_id.
+    extension_widgets: std::collections::HashMap<String, crate::extensions::ExtensionTabWidget>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -314,6 +316,7 @@ impl App {
             mouse_capture_enabled: false,
             terminal_copy_mode: false,
             last_left_click: None,
+            extension_widgets: std::collections::HashMap::new(),
         }
     }
 
@@ -1459,11 +1462,44 @@ impl App {
             ])
             .split(main_area);
 
-        // Conversation view — segment-based widget.
+        // Render tab bar + conversation/widget content
         let t = &self.theme;
-        let (segments, conv_state) = self.conversation.segments_and_state();
-        let conv_widget = conv_widget::ConversationWidget::new(segments, t.as_ref());
-        frame.render_stateful_widget(conv_widget, chunks[0], conv_state);
+        let has_multiple_tabs = self.conversation.tabs.tabs.len() > 1;
+        
+        let content_area = if has_multiple_tabs {
+            // Split conversation area into tab bar + content
+            let conv_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Min(1)])
+                .split(chunks[0]);
+            self.render_tab_bar(frame, conv_chunks[0]);
+            conv_chunks[1]
+        } else {
+            chunks[0]
+        };
+
+        // Render content based on active tab
+        if self.conversation.tabs.is_conversation_active() {
+            // Render conversation widget (can mutate conv_state via frame.render_stateful_widget)
+            let (segments, conv_state) = self.conversation.segments_and_state();
+            let conv_widget = conv_widget::ConversationWidget::new(segments, t.as_ref());
+            frame.render_stateful_widget(conv_widget, content_area, conv_state);
+        } else {
+            // Render extension widget JSON
+            match self.conversation.tabs.active() {
+                Tab::Extension { widget_id, .. } => {
+                    if let Some(widget) = self.extension_widgets.get(widget_id) {
+                        use ratatui::widgets::Paragraph;
+                        let json_str = serde_json::to_string_pretty(&widget.current_data)
+                            .unwrap_or_else(|_| "{}".to_string());
+                        let para = Paragraph::new(json_str);
+                        frame.render_widget(para, content_area);
+                    }
+                }
+                _ => {}
+            }
+        }
+
         self.conversation_area = Some(chunks[0]);
         self.editor_area = Some(chunks[1]);
 
@@ -3180,6 +3216,47 @@ impl App {
         self.terminal_copy_mode
     }
 
+    /// Render tab bar showing all tabs, with active tab highlighted.
+    fn render_tab_bar(&self, frame: &mut Frame, area: Rect) {
+        use ratatui::widgets::Paragraph;
+        use ratatui::text::{Line, Span};
+        
+        let mut line_spans = vec![];
+        for (idx, tab) in self.conversation.tabs.tabs.iter().enumerate() {
+            if idx > 0 {
+                line_spans.push(Span::raw(" "));
+            }
+            
+            let label = tab.label();
+            let is_active = idx == self.conversation.tabs.active_tab;
+            
+            if is_active {
+                // Active tab: reverse video
+                line_spans.push(
+                    Span::styled(
+                        format!(" {} ", label),
+                        ratatui::style::Style::default()
+                            .bg(ratatui::style::Color::Cyan)
+                            .fg(ratatui::style::Color::Black),
+                    ),
+                );
+            } else {
+                // Inactive tab: dim
+                line_spans.push(
+                    Span::styled(
+                        format!(" {} ", label),
+                        ratatui::style::Style::default()
+                            .fg(ratatui::style::Color::DarkGray),
+                    ),
+                );
+            }
+        }
+        
+        let line = Line::from(line_spans);
+        let paragraph = Paragraph::new(line);
+        frame.render_widget(paragraph, area);
+    }
+
     fn handle_agent_event(&mut self, event: AgentEvent) {
         match event {
             AgentEvent::TurnStart { turn } => {
@@ -3450,6 +3527,8 @@ pub struct TuiConfig {
     /// Shared channel for headless login prompt input. The login task stores a
     /// oneshot sender here; the TUI Enter handler consumes it.
     pub login_prompt_tx: std::sync::Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<String>>>>,
+    /// Extension widgets discovered during setup — for tab rendering.
+    pub extension_widgets: Vec<crate::extensions::ExtensionTabWidget>,
 }
 
 /// Initial state snapshot gathered during setup, before the TUI event loop starts.
@@ -3996,6 +4075,10 @@ pub async fn run_tui(
     let mouse_enabled = settings.lock().map(|s| s.mouse).unwrap_or(true);
     let mut app = App::new(settings.clone());
     app.keyboard_enhancement = has_keyboard_enhancement;
+    // Populate extension widgets from config
+    for widget in config.extension_widgets {
+        app.extension_widgets.insert(widget.widget_id.clone(), widget);
+    }
     // Respect the persisted mouse setting (default: true).
     if mouse_enabled {
         app.enable_mouse_interaction_mode();
@@ -4006,6 +4089,14 @@ pub async fn run_tui(
     app.bus_commands = config.bus_commands;
     app.dashboard_handles = config.dashboard_handles;
     app.cancel = cancel;
+
+    // Add extension widgets as tabs to the conversation view
+    for widget in app.extension_widgets.values() {
+        app.conversation.tabs.add_extension_tab(
+            widget.widget_id.clone(),
+            widget.label.clone(),
+        );
+    }
 
     // Spawn background update check
     let (update_tx, update_rx) = crate::update::channel();

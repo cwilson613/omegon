@@ -881,6 +881,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         start_tutorial: cli.tutorial,
         resume_info: agent.resume_info.clone(),
         login_prompt_tx: login_prompt_tx.clone(),
+        extension_widgets: agent.extension_widgets,
     };
     let tui_cancel = shared_cancel.clone();
     let tui_settings = shared_settings.clone();

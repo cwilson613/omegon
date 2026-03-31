@@ -632,4 +632,19 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   76b138b2 docs: scribe manifest declares timeline widget for work tracking
   791cb06a feat: extension widget system — stateful tabs + ephemeral modals
   f38d445f docs: comprehensive extension contract and manifest documentation
+## 2026-03-31 — main (43t 7081tc 5m27s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  778a5c3d feat: add tab switching key bindings (Ctrl+Tab, Ctrl+Shift+Tab)
+  d1e3f819 feat: add Tab and TabState for conversation widget tabbed interface
+  76b138b2 docs: scribe manifest declares timeline widget for work tracking
 
