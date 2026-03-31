@@ -2,6 +2,17 @@
 
 Omegon is built using open-source software. This file lists the third-party components compiled into or distributed with Omegon, along with their licenses and copyright holders.
 
+A machine-readable **CycloneDX SBOM** (`omegon-sbom.cdx.json`) is published alongside every release, containing the full component inventory with SPDX license expressions, checksums, and package URLs. Both the SBOM and this file are cosign-signed for verifiability.
+
+Verify the SBOM:
+```sh
+cosign verify-blob omegon-sbom.cdx.json \
+  --signature omegon-sbom.cdx.json.sig \
+  --certificate omegon-sbom.cdx.json.pem \
+  --certificate-identity-regexp "https://github.com/styrene-lab/omegon" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
+
 ---
 
 ## License Summary
@@ -76,6 +87,12 @@ cargo license --json
 
 from the `core/` directory of the Omegon source repository:  
 https://github.com/styrene-lab/omegon
+
+To check for new unacknowledged copyleft dependencies (also runs automatically in CI):
+
+```sh
+cd core && cargo license --json | python3 ../scripts/license-audit.py --summary
+```
 
 ---
 

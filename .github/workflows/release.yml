@@ -174,7 +174,14 @@ jobs:
 
       - name: Install cargo-cyclonedx
         if: ${{ !contains(env.RELEASE_TAG, '-nightly.') }}
-        run: cargo install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx cargo-license
+
+      - name: License audit
+        if: ${{ !contains(env.RELEASE_TAG, '-nightly.') }}
+        run: |
+          cd core
+          cargo license --json > /tmp/licenses.json
+          python3 ../scripts/license-audit.py --input /tmp/licenses.json --summary
 
       - name: Generate CycloneDX SBOM
         if: ${{ !contains(env.RELEASE_TAG, '-nightly.') }}
@@ -188,6 +195,8 @@ jobs:
           else
             echo '{"bomFormat":"CycloneDX","specVersion":"1.4","components":[]}' > ../artifacts/omegon-sbom.cdx.json
           fi
+          # Bundle third-party notices alongside the SBOM
+          cp ../THIRD_PARTY_NOTICES.md ../artifacts/THIRD_PARTY_NOTICES.md
 
       # ─── Signing (Sigstore cosign keyless) ─────────────────────
       - name: Install cosign
@@ -203,13 +212,16 @@ jobs:
               --output-certificate "${archive}.pem"
           done
 
-      - name: Sign SBOM
+      - name: Sign SBOM and notices
         if: ${{ !contains(env.RELEASE_TAG, '-nightly.') }}
         run: |
           cd artifacts
           cosign sign-blob --yes omegon-sbom.cdx.json \
             --output-signature omegon-sbom.cdx.json.sig \
             --output-certificate omegon-sbom.cdx.json.pem
+          cosign sign-blob --yes THIRD_PARTY_NOTICES.md \
+            --output-signature THIRD_PARTY_NOTICES.md.sig \
+            --output-certificate THIRD_PARTY_NOTICES.md.pem
 
       # ─── Provenance attestation ────────────────────────────────
       - name: Attest build provenance
@@ -264,3 +276,6 @@ jobs:
             artifacts/omegon-sbom.cdx.json
             artifacts/omegon-sbom.cdx.json.sig
             artifacts/omegon-sbom.cdx.json.pem
+            artifacts/THIRD_PARTY_NOTICES.md
+            artifacts/THIRD_PARTY_NOTICES.md.sig
+            artifacts/THIRD_PARTY_NOTICES.md.pem
