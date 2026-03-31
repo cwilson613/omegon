@@ -269,25 +269,46 @@ pub struct LoadItem {
 
 const SCAN_GLYPHS: &[&str] = &["░ ", "▒ ", "▓ ", "▒ ", "░ ", "▸ ", "▸ ", "▸ "];
 
-/// Render the checklist as a multi-row grid (3 columns).
+/// Return the display text for a checklist cell (without indicator).
+fn cell_text(item: &LoadItem) -> String {
+    match &item.summary {
+        Some(s) if s != "none" && s != "not found" && s != "empty" => {
+            format!("{} ({})", item.label, s)
+        }
+        _ => item.label.to_string(),
+    }
+}
+
+/// Render the checklist as a 3-column grid.
+///
+/// `col_width` is the maximum content width per column (pre-computed from
+/// actual cell text lengths so the grid is content-sized, not terminal-sized).
+/// Text longer than `col_width` is truncated with `…`.
+/// Columns are separated by a fixed 3-space gap — no sprawling whitespace.
 fn render_grid<'a>(
     items: &[LoadItem],
     scan_frame: usize,
     col_width: usize,
     t: &dyn Theme,
 ) -> Vec<Line<'a>> {
-    let cols = 3usize;
-    let rows = (items.len() + cols - 1) / cols;
+    const COLS: usize = 3;
+    const SEP: &str = "   "; // 3-space column separator
+    let rows = (items.len() + COLS - 1) / COLS;
     let mut output = Vec::with_capacity(rows);
 
     for row in 0..rows {
         let mut spans: Vec<Span<'a>> = Vec::new();
-        for col in 0..cols {
-            let idx = row * cols + col; // row-major: items fill left-to-right, top-to-bottom
+        for col in 0..COLS {
+            let idx = row * COLS + col;
             if idx >= items.len() {
                 break;
             }
             let item = &items[idx];
+
+            // Column separator (not before the first column)
+            if col > 0 {
+                spans.push(Span::raw(SEP));
+            }
 
             let (indicator, ind_style) = match item.state {
                 LoadState::Pending => ("· ", Style::default().fg(t.dim())),
@@ -306,22 +327,19 @@ fn render_grid<'a>(
                 LoadState::Failed => Style::default().fg(t.error()),
             };
 
-            // Build cell text: "label (summary)" or just "label"
-            let cell_text = if let Some(ref summary) = item.summary {
-                if summary == "none" || summary == "not found" || summary == "empty" {
-                    item.label.to_string()
-                } else {
-                    format!("{} ({})", item.label, summary)
-                }
+            // Build cell text; truncate with … if it exceeds col_width
+            let text = cell_text(item);
+            let fitted: String = if text.chars().count() > col_width {
+                let mut s: String = text.chars().take(col_width.saturating_sub(1)).collect();
+                s.push('…');
+                s
             } else {
-                item.label.to_string()
+                // Right-pad to col_width so columns stay aligned
+                format!("{:<col_width$}", text, col_width = col_width)
             };
 
-            // Pad to column width
-            let padded = format!("{:<width$}", cell_text, width = col_width);
-
             spans.push(Span::styled(indicator.to_string(), ind_style));
-            spans.push(Span::styled(padded, label_style));
+            spans.push(Span::styled(fitted, label_style));
         }
         output.push(Line::from(spans));
     }
@@ -568,13 +586,23 @@ impl SplashScreen {
         if !self.dismissed {
             lines.push(Line::from(""));
 
-            // Calculate column width from terminal width
-            let cols = 3usize;
-            let indicator_width = 2; // "✓ "
-            let total_indicator = indicator_width * cols;
-            let available = (area.width as usize).saturating_sub(total_indicator + 6); // 6 for padding
-            let col_width = available / cols;
-            let grid_width = (col_width + indicator_width) * cols;
+            // Compute column width from actual content — tight fit, not terminal-proportional.
+            // Cap at 24 so no one summary can blow up the grid on a narrow terminal.
+            const INDICATOR_W: usize = 2; // "✓ " or "· " etc.
+            const SEP_W: usize = 3;       // separator between columns
+            const COLS: usize = 3;
+            const MAX_COL: usize = 24;
+
+            let col_width = self
+                .items
+                .iter()
+                .map(|i| cell_text(i).chars().count())
+                .max()
+                .unwrap_or(9)
+                .min(MAX_COL);
+
+            // grid_width = 3 × (indicator + content) + 2 × separator
+            let grid_width = (INDICATOR_W + col_width) * COLS + SEP_W * (COLS - 1);
             let cl_pad = (area.width as usize).saturating_sub(grid_width) / 2;
 
             let grid_lines = render_grid(&self.items, self.scan_frame, col_width, t);
