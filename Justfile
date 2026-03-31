@@ -572,8 +572,24 @@ publish:
     cd ..
 
     # ── 4. Link the binary ────────────────────────────────────
+    # Do NOT call `just link` here — it uses a newest-wins heuristic between
+    # release and dev-release targets and may pick a dev build that was compiled
+    # after the release binary (e.g. the 0.15.6-rc.1 cargo check that runs at
+    # the end of `just release`). Link $BINARY directly so we always install
+    # exactly what was built and signed for this release.
     echo ""
-    just link
+    if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
+        DEST="/usr/local/bin/omegon"
+        ALT="$HOME/.local/bin/omegon"
+    else
+        mkdir -p "$HOME/.local/bin"
+        DEST="$HOME/.local/bin/omegon"
+        ALT="/usr/local/bin/omegon"
+    fi
+    rm -f "$ALT" 2>/dev/null || true
+    ln -sf "$BINARY" "$DEST"
+    echo "✓ omegon → $DEST"
+    echo "  hash -d omegon 2>/dev/null || true   (if your shell cached the old path)"
 
     # ── 5. Run post-publish smoke test ────────────────────────
     echo ""
@@ -951,13 +967,24 @@ smoke:
     echo "Running post-merge smoke test..."
     FAIL=0
 
-    # 1. Binary works
-    VERSION=$(cd core && cargo run -q -- --version 2>/dev/null || echo "FAILED")
+    # 1. Binary works — check the release binary directly, NOT cargo run.
+    # cargo run recompiles against the current Cargo.toml version (which is
+    # already bumped to the next RC), producing the wrong version string.
+    RELEASE_BIN="$(pwd)/core/target/release/omegon"
+    if [ ! -f "$RELEASE_BIN" ]; then
+        echo "  ✗ No release binary at $RELEASE_BIN — run 'just rc' or 'just release' first"
+        FAIL=1
+        VERSION="MISSING"
+    else
+        VERSION=$("$RELEASE_BIN" --version 2>/dev/null || echo "FAILED")
+    fi
     echo "  Binary: $VERSION"
     [[ "$VERSION" == *"omegon"* ]] || { echo "  ✗ Binary doesn't produce version"; FAIL=1; }
 
     # 2. Test count doesn't drop below known floor
-    TEST_COUNT=$(cd core && cargo test -p omegon 2>&1 | grep 'test result:' | awk '{print $4}')
+    # Use INSTA_UPDATE=new to auto-accept any pending snapshot updates caused
+    # by the version bump in Cargo.toml (the footer snapshot embeds the version).
+    TEST_COUNT=$(cd core && INSTA_UPDATE=new cargo test -p omegon 2>&1 | grep 'test result: ok' | awk '{print $4}')
     echo "  Tests: $TEST_COUNT"
     if [ "$TEST_COUNT" -lt 850 ]; then
         echo "  ✗ Test count ($TEST_COUNT) below safety floor (850)"
