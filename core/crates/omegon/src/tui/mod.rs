@@ -27,6 +27,7 @@ pub mod splash;
 pub mod theme;
 pub mod tutorial;
 pub mod widgets;
+pub mod widget_renderer;
 
 #[cfg(test)]
 mod snapshot_tests;
@@ -1488,15 +1489,17 @@ impl App {
             let conv_widget = conv_widget::ConversationWidget::new(segments, t.as_ref());
             frame.render_stateful_widget(conv_widget, content_area, conv_state);
         } else {
-            // Render extension widget JSON
+            // Render extension widget with schema-aware formatting
             match self.conversation.tabs.active() {
                 Tab::Extension { widget_id, .. } => {
                     if let Some(widget) = self.extension_widgets.get(widget_id) {
-                        use ratatui::widgets::Paragraph;
-                        let json_str = serde_json::to_string_pretty(&widget.current_data)
-                            .unwrap_or_else(|_| "{}".to_string());
-                        let para = Paragraph::new(json_str);
-                        frame.render_widget(para, content_area);
+                        widget_renderer::render_widget(
+                            frame,
+                            content_area,
+                            &widget.renderer,
+                            &widget.current_data,
+                            &widget.label,
+                        );
                     }
                 }
                 _ => {}
