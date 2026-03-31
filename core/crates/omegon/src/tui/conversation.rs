@@ -7,6 +7,78 @@ use super::conv_widget::ConvState;
 use super::image::ImageCache;
 use super::segments::{Segment, SegmentContent, SegmentExportMode, SegmentMeta};
 
+/// Tab variant — conversation or extension widget
+#[derive(Debug, Clone)]
+pub enum Tab {
+    /// Main conversation tab (index 0, always present)
+    Conversation,
+    /// Extension widget tab
+    Extension {
+        widget_id: String,
+        label: String,
+    },
+}
+
+impl Tab {
+    pub fn label(&self) -> &str {
+        match self {
+            Tab::Conversation => "Conversation",
+            Tab::Extension { label, .. } => label,
+        }
+    }
+}
+
+/// Tab state — manages active tab and list of tabs
+#[derive(Debug, Clone)]
+pub struct TabState {
+    pub tabs: Vec<Tab>,
+    pub active_tab: usize,  // always valid index into tabs
+}
+
+impl TabState {
+    pub fn new() -> Self {
+        Self {
+            tabs: vec![Tab::Conversation],
+            active_tab: 0,
+        }
+    }
+
+    /// Add an extension widget as a new tab
+    pub fn add_extension_tab(&mut self, widget_id: String, label: String) {
+        self.tabs.push(Tab::Extension { widget_id, label });
+    }
+
+    /// Switch to next tab (wrap around)
+    pub fn next_tab(&mut self) {
+        self.active_tab = (self.active_tab + 1) % self.tabs.len();
+    }
+
+    /// Switch to previous tab (wrap around)
+    pub fn prev_tab(&mut self) {
+        self.active_tab = if self.active_tab == 0 {
+            self.tabs.len() - 1
+        } else {
+            self.active_tab - 1
+        };
+    }
+
+    /// Get the active tab
+    pub fn active(&self) -> &Tab {
+        &self.tabs[self.active_tab]
+    }
+
+    /// Check if conversation tab is active
+    pub fn is_conversation_active(&self) -> bool {
+        matches!(self.active(), Tab::Conversation)
+    }
+}
+
+impl Default for TabState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Conversation view state — segment list + scroll.
 pub struct ConversationView {
     segments: Vec<Segment>,
@@ -21,6 +93,8 @@ pub struct ConversationView {
     pub pinned_segment: Option<usize>,
     /// Explicitly selected segment index from operator interaction.
     pub selected_segment: Option<usize>,
+    /// Tab state — manages conversation tab and extension widget tabs
+    pub tabs: TabState,
 }
 
 impl ConversationView {
@@ -32,6 +106,7 @@ impl ConversationView {
             image_cache: ImageCache::default(),
             pinned_segment: None,
             selected_segment: None,
+            tabs: TabState::new(),
         }
     }
 
@@ -368,6 +443,7 @@ impl ConversationView {
         self.image_cache.clear();
         self.pinned_segment = None;
         self.selected_segment = None;
+        self.tabs = TabState::new();
     }
 }
 
