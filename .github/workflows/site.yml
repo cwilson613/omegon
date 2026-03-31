@@ -64,14 +64,28 @@ jobs:
             ghcr.io/styrene-lab/omegon-site:sha-${{ github.sha }}
             ghcr.io/styrene-lab/omegon-site:latest
 
-      - name: Trigger Image Updater webhook
+      - name: Update vanderlyn kustomization (direct git push)
         env:
+          GH_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
           NEW_TAG: sha-${{ github.sha }}
         run: |
-          curl -sf -X POST https://image-updater.styrene.dev/api/v1/webhook \
-            -H "Content-Type: application/json" \
-            -H "X-GitHub-Event: package" \
-            -d "{\"action\":\"published\",\"registry_package\":{\"name\":\"omegon-site\",\"package_type\":\"container\",\"namespace\":\"styrene-lab\",\"package_version\":{\"container_metadata\":{\"tag\":{\"name\":\"${NEW_TAG}\"}}}}}"
+          # Clone the config repo
+          git clone --depth=1 https://x-access-token:${GH_TOKEN}@github.com/cwilson613/vanderlyn.git /tmp/vanderlyn
+          cd /tmp/vanderlyn
+          git config user.name "omegon[bot]"
+          git config user.email "noreply@styrene.dev"
+          
+          # Update kustomization.yaml with the new image tag
+          sed -i "s|newTag: sha-.*|newTag: ${NEW_TAG}|" apps/omegon-site/kustomization.yaml
+          
+          # Commit and push (only if changed)
+          if git diff --exit-code --quiet; then
+            echo "No changes needed"
+          else
+            git add apps/omegon-site/kustomization.yaml
+            git commit -m "chore(omegon-site): deploy ${NEW_TAG}"
+            git push origin main
+          fi
 
       - name: Summary
         run: |
@@ -81,4 +95,4 @@ jobs:
           echo "- **Pages:** $(find site/dist -name '*.html' | wc -l)" >> $GITHUB_STEP_SUMMARY
           echo "- **Design tree nodes:** $(grep -c '<circle' site/public/design-tree.svg)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Image Updater webhook triggered — ArgoCD will deploy immediately." >> $GITHUB_STEP_SUMMARY
+          echo "Kustomization updated. ArgoCD auto-sync deploys immediately." >> $GITHUB_STEP_SUMMARY
