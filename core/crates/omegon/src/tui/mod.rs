@@ -204,6 +204,8 @@ pub struct App {
     extension_widgets: std::collections::HashMap<String, crate::extensions::ExtensionTabWidget>,
     /// Broadcast receivers for widget events — one per extension.
     widget_receivers: Vec<tokio::sync::broadcast::Receiver<crate::extensions::WidgetEvent>>,
+    /// Active ephemeral modal from extension widget (widget_id, data, auto_dismiss_ms, spawn_time).
+    active_modal: Option<(String, serde_json::Value, Option<u64>, std::time::Instant)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -321,6 +323,7 @@ impl App {
             last_left_click: None,
             extension_widgets: std::collections::HashMap::new(),
             widget_receivers: Vec::new(),
+            active_modal: None,
         }
     }
 
@@ -1881,6 +1884,57 @@ impl App {
                 }
             }
         }
+
+        // Render modal overlay if active
+        if let Some((widget_id, data, auto_dismiss_ms, spawn_time)) = &self.active_modal {
+            // Check if modal should auto-dismiss
+            if let Some(dismiss_ms) = auto_dismiss_ms {
+                if spawn_time.elapsed().as_millis() > *dismiss_ms as u128 {
+                    self.active_modal = None;
+                } else {
+                    self.render_modal(frame, widget_id, data);
+                }
+            } else {
+                self.render_modal(frame, widget_id, data);
+            }
+        }
+    }
+
+    /// Render an ephemeral modal from an extension widget.
+    fn render_modal(&self, frame: &mut Frame, widget_id: &str, data: &serde_json::Value) {
+        let area = frame.area();
+        
+        // Center modal in viewport (40% of width, 50% of height)
+        let modal_width = (area.width as f32 * 0.4) as u16;
+        let modal_height = (area.height as f32 * 0.5) as u16;
+        let x = (area.width.saturating_sub(modal_width)) / 2;
+        let y = (area.height.saturating_sub(modal_height)) / 2;
+        let modal_area = Rect {
+            x,
+            y,
+            width: modal_width,
+            height: modal_height,
+        };
+
+        // Semi-transparent overlay (dim everything behind modal)
+        let overlay = ratatui::widgets::Clear; // Clear background for modal
+        frame.render_widget(&overlay, modal_area);
+
+        // Modal content
+        let title = widget_id.to_string();
+        let json_str = serde_json::to_string_pretty(data)
+            .unwrap_or_else(|_| "{}".to_string());
+
+        let block = ratatui::widgets::Block::default()
+            .title(format!(" {} ", title))
+            .borders(ratatui::widgets::Borders::ALL)
+            .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan));
+
+        let para = ratatui::widgets::Paragraph::new(json_str)
+            .block(block)
+            .wrap(ratatui::widgets::Wrap { trim: true });
+
+        frame.render_widget(para, modal_area);
     }
 
     /// Show a transient toast notification.
@@ -4361,8 +4415,15 @@ pub async fn run_tui(
                             // Frame will automatically re-render with updated data
                         }
                     }
+                    crate::extensions::WidgetEvent::ShowModal {
+                        widget_id,
+                        data,
+                        auto_dismiss_ms,
+                    } => {
+                        app.active_modal = Some((widget_id, data, auto_dismiss_ms, std::time::Instant::now()));
+                    }
                     _ => {
-                        // Ignore other widget events for now (ShowModal, ActionRequired)
+                        // Ignore ActionRequired for now (future enhancement)
                     }
                 }
             }
