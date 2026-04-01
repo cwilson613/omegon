@@ -6,7 +6,6 @@ members = [
     "crates/omegon-memory",
     "crates/omegon-secrets",
     "crates/omegon-traits",
-    "crates/scribe-rpc",
     "crates/opsx-core",
 ]
 
