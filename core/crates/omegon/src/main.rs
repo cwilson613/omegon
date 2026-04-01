@@ -1174,9 +1174,10 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 agent.conversation = crate::conversation::ConversationState::new();
                 agent.resume_info = None;
                 
-                // Reset metrics
+                // Reset metrics — extract context_window in single lock scope to avoid deadlock
                 if let Ok(mut metrics) = agent.context_metrics.lock() {
-                    metrics.update(0, agent.context_metrics.lock().unwrap().context_window, "Squad", "off");
+                    let context_window = metrics.context_window;
+                    metrics.update(0, context_window, "Squad", "off");
                 }
                 
                 // Send context update event to TUI for immediate display refresh

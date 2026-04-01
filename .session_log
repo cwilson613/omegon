@@ -1007,4 +1007,19 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   c32f9dd8 chore(release): 0.15.6-rc.14
   84a35b67 fix(startup): consolidate dual keychain prompts into single OS request
   26452371 chore(release): 0.15.6-rc.13
+## 2026-04-01 — main (16t 7686tc 6m34s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  4df9a2c5 chore(release): 0.15.6-rc.15
+  3c664c58 fix(footer): use compact token formatting for session counters
+  c32f9dd8 chore(release): 0.15.6-rc.14
 
