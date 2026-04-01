@@ -257,7 +257,7 @@
     "frozen": false,
     "opened": "2026-03-31T02:04:48Z",
     "released": null,
-    "rc_count": 12,
+    "rc_count": 13,
     "notes": [
       "feat(ci): integrate THIRD_PARTY_NOTICES with SBOM in release workflow",
       "feat(omegon): implement extension mind persistence (Phase 3 of BYOM)",
@@ -291,12 +291,13 @@
       "fix(justfile): smoke and publish robust to post-release RC cycle bump",
       "fix(legal): update contact address to admin@styrene.io",
       "fix(site): add nginx location blocks for /terms and /privacy",
+      "fix(startup): consolidate dual keychain prompts into single OS request",
       "fix: change tab navigation keybindings from Ctrl+Tab to Alt+N/P",
       "fix: install scribe-rpc extension to ~/.omegon/extensions",
       "refactor: remove dead TypeScript extension bridge — scribe is pure Rust",
       "refactor: remove scribe-rpc crate from omegon workspace"
     ],
-    "rc_version": "0.15.6-rc.13",
-    "last_rc": "2026-04-01T02:39:48Z"
+    "rc_version": "0.15.6-rc.14",
+    "last_rc": "2026-04-01T02:46:59Z"
   }
 }
