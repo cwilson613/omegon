@@ -257,7 +257,7 @@
     "frozen": false,
     "opened": "2026-03-31T02:04:48Z",
     "released": null,
-    "rc_count": 25,
+    "rc_count": 26,
     "notes": [
       "feat(ci): integrate THIRD_PARTY_NOTICES with SBOM in release workflow",
       "feat(extensions): deliver secrets via bootstrap_secrets RPC, not env vars",
@@ -267,6 +267,7 @@
       "feat(omegon-extension): add BYOM (Bring Your Own Mind) types and manifest support",
       "feat(scribe): implement first Rust-native extension",
       "feat(scribe): implement rust-native extension — RPC sidecar integration",
+      "feat(secrets): wire vault into startup preflight path",
       "feat(tui): add session-long token counters to footer engine stats",
       "feat: /context subcommand interface for organic context management",
       "feat: SharedContextMetrics for real-time status collection",
@@ -309,7 +310,7 @@
       "refactor: remove dead TypeScript extension bridge — scribe is pure Rust",
       "refactor: remove scribe-rpc crate from omegon workspace"
     ],
-    "rc_version": "0.15.6-rc.26",
-    "last_rc": "2026-04-01T15:16:55Z"
+    "rc_version": "0.15.6-rc.27",
+    "last_rc": "2026-04-01T15:25:51Z"
   }
 }
