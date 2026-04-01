@@ -521,9 +521,23 @@ impl SecretsManager {
         set.clear();
 
         // Resolve from recipes (sync only - vault recipes will be skipped here)
+        // IMPORTANT: Skip keyring: recipes at startup to avoid unexpected Keychain prompts.
+        // Keyring values will be resolved on-demand when actually needed (lazy resolution).
         for (name, recipe) in self.recipes.read().unwrap().iter() {
-            if let Some(value) = resolve::execute_recipe(name, recipe) {
-                set.insert(name.clone(), value);
+            match recipe {
+                crate::recipes::Recipe::String(recipe_str) if recipe_str.starts_with("keyring:") => {
+                    // Skip keyring recipes at startup — will resolve on-demand
+                    tracing::debug!(
+                        name = name,
+                        "skipping keyring recipe at startup (will resolve on-demand)"
+                    );
+                    continue;
+                }
+                _ => {
+                    if let Some(value) = resolve::execute_recipe(name, recipe) {
+                        set.insert(name.clone(), value);
+                    }
+                }
             }
         }
 
