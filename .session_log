@@ -1127,4 +1127,19 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   54aa3ef1 chore(release): 0.15.6-rc.20
   fdbe9e70 fix(secrets): defer redactor rebuild until after batch preflight
   cf6dd0f6 chore(release): 0.15.6-rc.19
+## 2026-04-01 — main (15t 7871tc 5m16s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  d1340e7d chore(release): 0.15.6-rc.21
+  d3eca523 fix(startup): warm only preferred auth method, not all alternatives
+  54aa3ef1 chore(release): 0.15.6-rc.20
 

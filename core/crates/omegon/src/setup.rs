@@ -155,9 +155,9 @@ impl AgentSetup {
                 preflight.insert((*env_var).to_string());
             }
         }
-        // Include web auth secret in preflight so it's warmed in the same keychain
-        // prompt as the LLM provider credentials, avoiding a second OS Keychain request
-        preflight.insert("OMEGON_WEB_AUTH_SECRET".to_string());
+        // NOTE: OMEGON_WEB_AUTH_SECRET is NOT preflighted here.
+        // Web auth (Brave, Google, etc.) is only needed on-demand during web search.
+        // Resolving it lazily avoids an extra keychain prompt at startup.
         tracing::info!(
             requested = preflight.len(),
             names = ?preflight,
@@ -167,9 +167,10 @@ impl AgentSetup {
         secrets.preflight_session_cache(preflight);
         let session_secret_env = secrets.session_env();
         
-        // Extract web auth secret from already-loaded cache.
-        // Since we included OMEGON_WEB_AUTH_SECRET in preflight, it's warmed
-        // in the same keychain call as LLM provider creds — no second prompt.
+        // Web auth secret: Try to load from preflight cache; fall back to ephemeral.
+        // OMEGON_WEB_AUTH_SECRET is NOT preflighted (see above), so we'll get
+        // an ephemeral root and will prompt for keychain access only if the user
+        // actually performs a web search (on-demand).
         let web_auth_state = if let Some((_, secret)) = session_secret_env
             .iter()
             .find(|(name, _)| name == crate::web::WEB_AUTH_SECRET_NAME)
@@ -179,8 +180,8 @@ impl AgentSetup {
                 crate::web::WebAuthSource::Keyring,
             )
         } else {
-            // Preflight didn't provide it — generate ephemeral for this session
-            // (fallback to avoid hitting keychain a second time)
+            // Not in preflight cache — generate ephemeral for this session.
+            // Will upgrade to persistent keyring value on first web search.
             crate::web::WebAuthState::ephemeral_generated("session-generated".into())
         };
         let session_secret_diag = secrets.session_diagnostics();
