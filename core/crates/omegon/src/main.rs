@@ -1144,6 +1144,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                 );
                             }
                             
+                            // Send context update event to TUI for immediate display refresh
+                            let _ = events_tx.send(AgentEvent::ContextUpdated { tokens: est as u64 });
+                            
                             let _ = events_tx.send(AgentEvent::SystemNotification {
                                 message: format!("Context compressed. Now using {est} tokens."),
                             });
@@ -1175,6 +1178,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 if let Ok(mut metrics) = agent.context_metrics.lock() {
                     metrics.update(0, agent.context_metrics.lock().unwrap().context_window, "Squad", "off");
                 }
+                
+                // Send context update event to TUI for immediate display refresh
+                let _ = events_tx.send(AgentEvent::ContextUpdated { tokens: 0 });
                 
                 let _ = events_tx.send(AgentEvent::SystemNotification {
                     message: "Context cleared. Starting fresh conversation.".into(),

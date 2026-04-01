@@ -403,6 +403,7 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
             Some(IpcEventPayload::SessionReset),
         // Internal-only events — not projected to IPC
         AgentEvent::MessageStart { .. } => None,
+        AgentEvent::ContextUpdated { .. } => None,
     }
 }
 

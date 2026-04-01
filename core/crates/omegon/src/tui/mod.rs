@@ -3612,6 +3612,16 @@ impl App {
                     self.effects.ping_footer(self.theme.as_ref());
                 }
             }
+            AgentEvent::ContextUpdated { tokens } => {
+                // Update context usage metrics in footer
+                let ctx_window = self.footer_data.context_window;
+                if ctx_window > 0 {
+                    self.footer_data.estimated_tokens = tokens as usize;
+                    self.footer_data.context_percent =
+                        (tokens as f32 / ctx_window as f32 * 100.0).min(100.0);
+                    self.effects.ping_footer(self.theme.as_ref());
+                }
+            }
             _ => {}
         }
     }
