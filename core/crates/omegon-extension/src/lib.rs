@@ -74,11 +74,13 @@
 mod error;
 mod extension;
 mod manifest;
+mod mind;
 mod rpc;
 
 pub use error::{Error, ErrorCode, Result};
 pub use extension::{Extension, ExtensionServe};
 pub use manifest::{ExtensionManifest, ManifestError};
+pub use mind::{Fact, Episode, GetMindResponse, LoadMindResponse, StoreMindResponse, AddFactResponse, FactOpResponse, MindMetadata};
 pub use rpc::{RpcMessage, RpcRequest, RpcResponse, RpcError};
 
 /// Convenience type for RPC method results.

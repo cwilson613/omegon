@@ -36,6 +36,8 @@ pub struct ExtensionManifest {
     pub startup: StartupConfig,
     #[serde(default)]
     pub widgets: HashMap<String, WidgetConfig>,
+    #[serde(default)]
+    pub mind: MindConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +94,36 @@ pub struct WidgetConfig {
     pub renderer: String,
     #[serde(default)]
     pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MindConfig {
+    /// Whether this extension has a persistent mind
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Description of the mind for UI/documentation
+    #[serde(default)]
+    pub description: String,
+
+    /// Maximum facts to keep (optional, default: unlimited)
+    #[serde(default)]
+    pub max_facts: Option<usize>,
+
+    /// Retention policy: delete facts older than this many days
+    #[serde(default)]
+    pub retention_days: Option<u32>,
+}
+
+impl Default for MindConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            description: String::new(),
+            max_facts: None,
+            retention_days: None,
+        }
+    }
 }
 
 impl ExtensionManifest {
@@ -226,6 +258,7 @@ mod tests {
             },
             startup: StartupConfig::default(),
             widgets: HashMap::new(),
+            mind: MindConfig::default(),
         };
 
         assert!(manifest.validate().is_ok());
@@ -245,6 +278,7 @@ mod tests {
             },
             startup: StartupConfig::default(),
             widgets: HashMap::new(),
+            mind: MindConfig::default(),
         };
 
         assert!(manifest.validate().is_err());
@@ -264,6 +298,7 @@ mod tests {
             },
             startup: StartupConfig::default(),
             widgets: HashMap::new(),
+            mind: MindConfig::default(),
         };
 
         // Exact match

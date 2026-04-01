@@ -16,6 +16,7 @@ thiserror.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
 toml = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
