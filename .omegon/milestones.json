@@ -313,5 +313,22 @@
     ],
     "rc_version": "0.15.6-rc.28",
     "last_rc": "2026-04-01T16:03:17Z"
+  },
+  "0.15.7": {
+    "status": "rc",
+    "channel": "stable",
+    "nodes": [],
+    "frozen": false,
+    "opened": "2026-04-01T23:29:18Z",
+    "last_rc": "2026-04-01T23:29:18Z",
+    "rc_version": "0.15.7-rc.1",
+    "rc_count": 1,
+    "released": null,
+    "notes": [
+      "fix(codex): harden parse_codex_stream against bridge crash false-positives",
+      "fix(model-catalog): add openai-codex section to ModelCatalog",
+      "feat: deploy omegon.styrene.io via Cloudflare Pages",
+      "fix(justfile): push specific tag only in rc/publish to avoid GitHub Actions trigger drops"
+    ]
   }
 }
