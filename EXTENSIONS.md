@@ -1,348 +1,411 @@
-# Omegon Extension Contract & Manifest Format
+# Omegon Extension Ecosystem
 
-All extensions (native Rust binaries, Python scripts, TypeScript Node.js apps, OCI containers) communicate with omegon via **JSON-RPC 2.0 over stdin/stdout**. This is the universal contract.
+This document provides an overview of Omegon's extension system — how it works, what's available for developers, and how to build extensions.
 
-## Installation
+## Overview
 
-Extensions live in `~/.omegon/extensions/{name}/`. Each extension directory must contain:
+Omegon's extension system allows third-party developers to add tools, widgets, and features without modifying the core codebase or coupling to its release cycle.
+
+**Key design principles:**
+- **Safety first**: Extension crashes don't crash Omegon
+- **Version stability**: Extensions declare SDK version, validated at install time
+- **Process isolation**: Extensions run as separate processes, communicate via RPC
+- **Developer friendly**: Minimal boilerplate, clear API contract
+
+## Architecture
+
+### Components
 
 ```
-~/.omegon/extensions/{name}/
-├── manifest.toml              # Required: extension metadata + runtime config
-├── target/release/{binary}    # For native (RuntimeConfig::Native)
-└── (any supporting files)
+Omegon (parent process)
+    ↓
+    ├─ Extension Discovery (startup)
+    │   ├─ Scans ~/.omegon/extensions/
+    │   ├─ Parses manifest.toml files
+    │   └─ Validates metadata and SDK version
+    │
+    ├─ Extension Spawning
+    │   ├─ Native: direct binary execution
+    │   └─ OCI: podman run --rm -i image
+    │
+    ├─ RPC Communication
+    │   └─ JSON-RPC 2.0 over stdin/stdout
+    │
+    ├─ Widget Rendering
+    │   ├─ Tabs registered from widget declarations
+    │   └─ Data fetched on demand via RPC
+    │
+    └─ Tool Integration
+        ├─ Tools discovered from extensions
+        ├─ Tools callable from conversation
+        └─ Results rendered in conversation view
 ```
 
-Or for OCI:
+### Extension Lifecycle
 
-```
-~/.omegon/extensions/{name}/
-├── manifest.toml              # RuntimeConfig::Oci with image name
-└── (optional: Dockerfile if rebuilding locally)
-```
+1. **Installation** (manual)
+   - Developer builds extension with `omegon-extension` SDK
+   - Installs to `~/.omegon/extensions/{name}/`
+   - Contains: binary/OCI image + manifest.toml
 
-## manifest.toml Format
+2. **Discovery** (TUI startup)
+   - Omegon scans `~/.omegon/extensions/`
+   - Parses manifest.toml for each extension
+   - Validates schema (name, version, runtime type, widgets)
 
-```toml
-[extension]
-name = "my-extension"
-version = "0.1.0"
-description = "What this extension does"
+3. **Validation** (TUI startup)
+   - SDK version check: extension's `sdk_version` matches Omegon's SDK crate version
+   - Binary/image existence check
+   - If validation fails, extension is disabled (logged)
 
-[runtime]
-# For native Rust/Go/compiled binaries:
-type = "native"
-binary = "target/release/my-extension"
+4. **Spawning** (TUI startup)
+   - Extension binary launched or OCI image pulled
+   - stdin/stdout open for RPC communication
 
-# OR for OCI containers:
-# type = "oci"
-# image = "my-registry/my-extension:latest"
+5. **Health Check** (TUI startup)
+   - RPC call to `ping_method` (default: `get_tools`)
+   - If timeout or error, extension is disabled
+   - If success, extension is ready
 
-[startup]
-# Optional: method to call for health check (e.g., "get_tools")
-ping_method = "get_tools"
-# How long to wait (ms) for health check response
-timeout_ms = 5000
-```
+6. **Registration** (TUI startup)
+   - Widgets declared in manifest become tabs in UI
+   - Tools declared become available in conversation
+   - Extension marked as active
 
-## JSON-RPC Protocol
+7. **Runtime** (TUI running)
+   - User can invoke tools → Omegon calls `execute_{tool_name}` RPC
+   - User can open widget tabs → Omegon calls `get_{widget_id}` RPC
+   - Extension responds with results
+   - Omegon renders in UI
 
-Omegon sends requests and reads responses on stdin/stdout, one JSON object per line (ndjson).
+8. **Shutdown** (TUI exit)
+   - Omegon sends SIGTERM to extension processes
+   - Waits for graceful shutdown
+   - Closes stdin/stdout
 
-### Request Format
+## Developer Documentation
 
-```json
-{"jsonrpc":"2.0","id":1,"method":"get_tools","params":{}}
-```
+### For Extension Developers
 
-### Response Format
+Start with **[EXTENSION_SDK.md](./EXTENSION_SDK.md)** — 5-minute quick start:
 
-```json
-{"jsonrpc":"2.0","id":1,"result":[...]}
-```
+1. Create a Rust project with `omegon-extension` dependency
+2. Implement the `Extension` trait
+3. Create manifest.toml
+4. Install to `~/.omegon/extensions/{name}/`
 
-Or error:
+### Advanced Patterns
 
-```json
-{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"Invalid Request"}}
-```
+See **[EXTENSION_INTEGRATION.md](./EXTENSION_INTEGRATION.md)** for:
 
-### Notifications (server → client, no response expected)
+- Tool design patterns
+- Widget patterns (timeline, memory, custom)
+- State management
+- Performance optimization
+- Testing strategies
+- Publishing to GitHub/OCI registries
 
-```json
-{"jsonrpc":"2.0","method":"shutdown","params":{}}
-```
+### API Reference
 
-## Required Methods
+The `omegon-extension` crate exports:
 
-Every extension must implement these two RPC methods:
+- **`Extension` trait**: Implement to handle RPC calls
+- **`Error` enum**: Typed error codes with install-time flags
+- **`RpcMessage`, `RpcRequest`, `RpcResponse`**: JSON-RPC types
+- **`ExtensionManifest`**: Manifest validation
 
-### `get_tools` — Declare available tools
+All types are fully documented with examples.
+
+## Standard RPC Methods
+
+Every extension should implement (or intentionally reject) these methods:
+
+### `get_tools`
+
+Return list of tools provided by the extension.
 
 **Request:**
 ```json
-{"jsonrpc":"2.0","id":1,"method":"get_tools","params":{}}
+{"jsonrpc": "2.0", "id": "1", "method": "get_tools", "params": {}}
 ```
 
-**Response:** Array of tool definitions
-
+**Response:**
 ```json
 {
-  "jsonrpc":"2.0",
-  "id":1,
-  "result":[
+  "jsonrpc": "2.0",
+  "id": "1",
+  "result": [
     {
-      "name":"my_tool",
-      "label":"My Tool",
-      "description":"What my tool does",
-      "parameters":{
-        "type":"object",
-        "properties":{
-          "arg1":{"type":"string"}
-        },
-        "required":["arg1"]
-      }
+      "name": "my_tool",
+      "description": "Tool description",
+      "input_schema": {"type": "object", "properties": {...}}
     }
   ]
 }
 ```
 
-Schema for each tool:
-- `name` (string) — identifier used in `execute_tool` calls
-- `label` (string) — human-readable name for UI
-- `description` (string) — what the tool does
-- `parameters` (JSON Schema) — input schema (object with properties, required array)
+### `get_{widget_id}`
 
-### `execute_tool` — Run a tool
+Return initial data for a widget.
+
+**Request:**
+```json
+{"jsonrpc": "2.0", "id": "2", "method": "get_timeline", "params": {}}
+```
+
+**Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "2",
+  "result": {
+    "events": [
+      {"title": "...", "timestamp": "...", "description": "..."}
+    ]
+  }
+}
+```
+
+### `execute_{tool_name}`
+
+Execute a tool with user-provided parameters.
 
 **Request:**
 ```json
 {
-  "jsonrpc":"2.0",
-  "id":2,
-  "method":"execute_tool",
-  "params":{
-    "name":"my_tool",
-    "args":{"arg1":"value"}
-  }
+  "jsonrpc": "2.0",
+  "id": "3",
+  "method": "execute_my_tool",
+  "params": {"arg1": "value"}
 }
 ```
 
-**Response:** Tool result (text content)
-
+**Response:**
 ```json
 {
-  "jsonrpc":"2.0",
-  "id":2,
-  "result":{
-    "content":[{"type":"text","text":"Tool output here"}],
-    "details":{}
-  }
+  "jsonrpc": "2.0",
+  "id": "3",
+  "result": {"status": "success", "output": "..."}
 }
 ```
 
-Or error:
+## Safety Model
 
-```json
-{
-  "jsonrpc":"2.0",
-  "id":2,
-  "error":{"code":-32603,"message":"Internal error: tool failed"}
-}
-```
+### Install-Time Checks
 
-## Runtime Modes
+Errors caught **before the extension ever runs**:
 
-### Native Binary
+- Manifest TOML parse error
+- Missing required manifest fields
+- Invalid field values (name not lowercase, version not semver)
+- SDK version mismatch
+- Binary not found (native) or image not pullable (OCI)
 
-For `RuntimeConfig::Native { binary = "..." }`:
+These errors prevent installation. The extension won't run.
 
-```bash
-# Omegon spawns it with:
-./path/to/binary --rpc
+### Runtime Safety
 
-# OR detects --rpc flag from manifest [startup] section
-# and spawns accordingly
-```
+Guarantees **during TUI operation**:
 
-The binary reads JSON-RPC requests from stdin, writes responses to stdout.
+1. **Process isolation**: Extension crash → EOF detected, extension disabled, Omegon continues
+2. **RPC timeouts**: Unresponsive extension → timeout error returned, Omegon continues
+3. **Type validation**: Malformed JSON → serde error, extension returns error object
+4. **Error propagation**: Extension error → typed error code in response, user sees error message
+5. **Graceful shutdown**: SIGTERM → extension has 5 seconds to shut down, then SIGKILL
 
-**Example (Rust):**
+### Error Codes
+
+Extensions return typed errors:
+
+- `MethodNotFound`: Unknown RPC method
+- `InvalidParams`: Malformed parameters
+- `InternalError`: Extension error (non-fatal)
+- `ManifestError`: Invalid manifest (fatal)
+- `VersionMismatch`: SDK version incompatible (fatal)
+- `Timeout`: RPC call timed out
+- `ParseError`: Malformed JSON
+- `NotImplemented`: Feature not implemented
+
+## Examples
+
+### Example 1: Simple Tool Extension
+
+A Python code analyzer extension:
+
 ```rust
-#[tokio::main]
-async fn main() {
-    let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
-    let mut reader = BufReader::new(stdin);
-    
-    let mut line = String::new();
-    while reader.read_line(&mut line).await.is_ok() && !line.is_empty() {
-        let req: JsonRpcRequest = serde_json::from_str(&line)?;
-        let resp = match req.method {
-            "get_tools" => { /* return tools */ },
-            "execute_tool" => { /* run tool */ },
-            _ => { /* error */ }
-        };
-        stdout.write_all(format!("{}\n", serde_json::to_string(&resp)?).as_bytes()).await?;
-        line.clear();
+#[async_trait]
+impl Extension for PythonAnalyzer {
+    fn name(&self) -> &str { "python-analyzer" }
+    fn version(&self) -> &str { env!("CARGO_PKG_VERSION") }
+
+    async fn handle_rpc(&self, method: &str, params: Value) -> Result<Value> {
+        match method {
+            "get_tools" => Ok(json!([
+                {
+                    "name": "analyze_python",
+                    "description": "Analyze Python code",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"code": {"type": "string"}},
+                        "required": ["code"]
+                    }
+                }
+            ])),
+            "execute_analyze_python" => {
+                let code = params["code"].as_str().unwrap();
+                let errors = analyze(code)?;
+                Ok(json!({"errors": errors}))
+            }
+            _ => Err(Error::method_not_found(method)),
+        }
     }
 }
 ```
 
-### OCI Container
+### Example 2: Timeline Widget Extension
 
-For `RuntimeConfig::Oci { image = "..." }`:
+A scribe-rpc example that provides timeline events:
 
-```bash
-# Omegon spawns it with:
-podman run --rm -i my-registry/my-extension:latest
-
-# Container receives stdin, writes stdout, inherits stderr
-```
-
-The container process must:
-1. Read JSON-RPC requests from stdin
-2. Write JSON-RPC responses to stdout (ndjson)
-3. Exit cleanly on EOF or SIGTERM
-
-**Example Dockerfile (Python):**
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-COPY . .
-RUN pip install -r requirements.txt
-ENTRYPOINT ["python", "extension.py"]
-```
-
-**Example (Python):**
-```python
-import sys
-import json
-
-def main():
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        
-        req = json.loads(line)
-        
-        if req['method'] == 'get_tools':
-            result = [
-                {"name": "my_tool", "label": "My Tool", "description": "...", "parameters": {...}}
-            ]
-        elif req['method'] == 'execute_tool':
-            tool_name = req['params']['name']
-            args = req['params']['args']
-            result = {"content": [{"type": "text", "text": f"Output of {tool_name}"}], "details": {}}
-        else:
-            result = None
-            error = {"code": -32601, "message": "Method not found"}
-        
-        resp = {
-            "jsonrpc": "2.0",
-            "id": req.get('id'),
-            "result": result if 'error' not in locals() else None,
-            "error": error if 'error' in locals() else None,
+```rust
+#[async_trait]
+impl Extension for TimelineExt {
+    async fn handle_rpc(&self, method: &str, _params: Value) -> Result<Value> {
+        match method {
+            "get_timeline" => Ok(json!({
+                "events": [
+                    {
+                        "title": "Session Started",
+                        "timestamp": "2024-03-31T14:00:00Z",
+                        "description": "User opened Omegon"
+                    }
+                ]
+            })),
+            _ => Err(Error::method_not_found(method)),
         }
-        print(json.dumps(resp))
-        sys.stdout.flush()
-
-if __name__ == '__main__':
-    main()
+    }
+}
 ```
 
-## Discovery & Registration
+See [scribe-rpc](https://github.com/styrene-lab/scribe-rpc) for the full implementation.
 
-On startup, omegon:
+## Manifest Reference
 
-1. Scans `~/.omegon/extensions/` for subdirectories
-2. Looks for `manifest.toml` in each directory
-3. Parses the manifest
-4. Spawns the process (native binary or `podman run`)
-5. Calls `get_tools` to fetch available tools
-6. Registers the extension as a Feature with the EventBus
-7. Logs success/failure for each extension
+Required sections in `manifest.toml`:
 
-If an extension fails to spawn or health-check, omegon logs a warning and continues.
-
-## Examples
-
-### Example 1: Rust Binary (scribe-rpc)
-
-**manifest.toml:**
 ```toml
 [extension]
-name = "scribe-rpc"
-version = "0.1.0"
-description = "Engagement tracking"
+name = "my-extension"       # Lowercase, alphanumeric + hyphens
+version = "0.1.0"           # Semantic version
+description = "..."         # Optional
+sdk_version = "0.15"        # Omegon SDK version constraint
 
 [runtime]
-type = "native"
-binary = "target/release/scribe-rpc"
+type = "native"             # "native" or "oci"
+binary = "target/release/my-extension"  # For native
+# OR
+# image = "registry/image:tag"  # For OCI
+
+[startup]
+ping_method = "get_tools"   # Method to call for health check
+timeout_ms = 5000           # Health check timeout
+
+[widgets.my_widget]         # Optional, one per widget
+label = "My Widget"         # Tab label
+kind = "stateful"           # "stateful" or "ephemeral"
+renderer = "timeline"       # Widget type
 ```
 
-**Binary location:** `~/.omegon/extensions/scribe-rpc/target/release/scribe-rpc`
+## Troubleshooting
 
-**Behavior:**
-- `scribe-rpc --rpc` spawned by omegon
-- Reads JSON-RPC on stdin, writes on stdout
-- Implements get_tools() and execute_tool()
+### Extension not discovered
 
-### Example 2: Python OCI Container
+- Check path: `~/.omegon/extensions/{name}/manifest.toml`
+- Check manifest is valid TOML: `toml-cli ~/.omegon/extensions/{name}/manifest.toml`
+- Check extension name matches directory name (or close enough)
 
-**manifest.toml:**
+### Extension fails health check
+
+- Ensure binary is built and executable
+- Run binary manually, send `{"jsonrpc":"2.0","id":"1","method":"get_tools","params":{}}`
+- Check that `startup.ping_method` exists and returns success
+- Increase `startup.timeout_ms` if extension needs more time
+
+### RPC calls hang
+
+- Ensure `handle_rpc` doesn't block forever
+- Use `tokio::time::timeout()` for long operations
+- Check extension logs: `RUST_LOG=debug,my_extension=trace`
+
+### Type validation fails
+
+- Validate incoming params: `.as_str()`, `.as_object()`, etc.
+- Use `serde_json::json!()` for responses
+- Check error messages — serde reports type mismatches clearly
+
+## Version Compatibility
+
+Each Omegon release ships with a specific `omegon-extension` SDK version.
+
+**Extensions declare their target SDK version:**
+
 ```toml
 [extension]
-name = "python-analyzer"
-version = "0.1.0"
-description = "Python code analyzer"
-
-[runtime]
-type = "oci"
-image = "my-registry/python-analyzer:latest"
+sdk_version = "0.15"
 ```
 
-**Dockerfile:**
-```dockerfile
-FROM python:3.11
-WORKDIR /app
-COPY extension.py .
-ENTRYPOINT ["python", "extension.py"]
-```
+**Validation at install time:**
+- `sdk_version = "0.15"` matches Omegon SDK `0.15.0`, `0.15.6`, `0.15.6-rc.1` (prefix match)
+- `sdk_version = "0.15.6"` matches Omegon SDK `0.15.6`, `0.15.6-rc.1` (stricter)
+- Mismatch → installation fails with clear error
 
-**Behavior:**
-- `podman run --rm -i my-registry/python-analyzer:latest` spawned by omegon
-- Container's entrypoint (python script) handles RPC protocol
-- Implements get_tools() and execute_tool()
+**Breaking changes** (next major version):
+- New required RPC methods
+- Changed error codes
+- Removed features
 
-## Debugging
+**Non-breaking changes** (minor version):
+- New optional RPC methods
+- New optional manifest fields
+- New error codes (old code still works)
 
-To test an extension locally:
+## Contributing to Omegon
 
-```bash
-# For native binary:
-echo '{"jsonrpc":"2.0","id":1,"method":"get_tools","params":{}}' | \
-  ~/.omegon/extensions/scribe-rpc/target/release/scribe-rpc --rpc
+The extension system is part of Omegon core. To contribute:
 
-# For OCI:
-echo '{"jsonrpc":"2.0","id":1,"method":"get_tools","params":{}}' | \
-  podman run --rm -i my-registry/python-analyzer:latest
-```
+1. Fork [styrene-lab/omegon](https://github.com/styrene-lab/omegon)
+2. Create feature branch: `git checkout -b feature/extension-xyz`
+3. Make changes to `core/crates/omegon-extension/`
+4. Add tests: `cargo test -p omegon-extension`
+5. Update documentation in `EXTENSION_SDK.md` or `EXTENSION_INTEGRATION.md`
+6. Open PR with description of SDK changes
 
-You should get a JSON response with the tool list.
+All SDK changes must maintain backward compatibility or clearly document breaking changes.
 
-## Migration from pi (TypeScript Extensions)
+## Resources
 
-If you have a pi extension:
+- **SDK Quick Start**: [EXTENSION_SDK.md](./EXTENSION_SDK.md)
+- **Advanced Patterns**: [EXTENSION_INTEGRATION.md](./EXTENSION_INTEGRATION.md)
+- **Example Implementation**: [scribe-rpc](https://github.com/styrene-lab/scribe-rpc)
+- **API Documentation**: `cargo doc -p omegon-extension --open`
+- **Issues & Discussions**: [GitHub Issues](https://github.com/styrene-lab/omegon/issues)
 
-1. **Extract business logic** into a Rust binary or containerized service
-2. **Add RPC handler** that implements `get_tools()` and `execute_tool()`
-3. **Create manifest.toml** and install to `~/.omegon/extensions/{name}/`
-4. Done — omegon discovers and registers it automatically
+## Roadmap
 
-No TypeScript glue needed. RPC is the contract.
+Future enhancements:
+
+- [ ] Extension marketplace/registry
+- [ ] Extension versioning constraints (allow extensions to require minimal Omegon version)
+- [ ] Hot-reload without TUI restart
+- [ ] Shared extension dependencies (monorepo support)
+- [ ] gRPC transport option (lower latency than JSON-RPC)
+- [ ] Binary SDK for Go, Python, TypeScript
 
 ---
 
-**Omegon treats all extensions uniformly.** Whether it's Rust, Python, TypeScript in a container, Go, or anything else — if it speaks JSON-RPC 2.0 over stdin/stdout, it works.
+**The extension system is production-ready.** Build with confidence knowing that extension failures will not crash Omegon, and that your extension will remain compatible across Omegon updates.
+
+**Questions?** Join the [Omegon Discord community](https://discord.com/invite/...) or file an issue on GitHub.
+
+---
+
+Happy building! 🚀
