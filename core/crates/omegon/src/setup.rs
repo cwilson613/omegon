@@ -148,11 +148,12 @@ impl AgentSetup {
             && let Ok(guard) = settings.lock()
         {
             let provider = crate::providers::infer_provider_id(&guard.model);
-            preflight.extend(
-                crate::auth::provider_env_vars(&provider)
-                    .iter()
-                    .map(|s| (*s).to_string()),
-            );
+            // Add only the FIRST env var per provider (highest priority auth method).
+            // e.g., for Anthropic: ANTHROPIC_OAUTH_TOKEN preferred over ANTHROPIC_API_KEY.
+            // This avoids multiple keychain prompts for alternatives we won't use.
+            if let Some(env_var) = crate::auth::provider_env_vars(&provider).first() {
+                preflight.insert((*env_var).to_string());
+            }
         }
         // Include web auth secret in preflight so it's warmed in the same keychain
         // prompt as the LLM provider credentials, avoiding a second OS Keychain request
