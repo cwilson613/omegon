@@ -160,6 +160,11 @@ impl AgentSetup {
         for name in collect_extension_secret_requirements() {
             preflight.insert(name);
         }
+        // Plugin MCP env templates — scan {VAR_NAME} references so vault-backed
+        // secrets referenced in plugin.toml / mcp.toml are warmed before plugins connect.
+        for name in collect_plugin_secret_requirements(&cwd) {
+            preflight.insert(name);
+        }
         // NOTE: OMEGON_WEB_AUTH_SECRET is NOT preflighted here.
         // Web auth (Brave, Google, etc.) is only needed on-demand during web search.
         // Resolving it lazily avoids an extra keychain prompt at startup.
@@ -424,7 +429,7 @@ impl AgentSetup {
         };
 
         // ─── External plugins (TOML manifests) ────────────────────────
-        let plugins = crate::plugins::discover_plugins(&cwd).await;
+        let plugins = crate::plugins::discover_plugins(&cwd, Some(secrets.as_ref())).await;
         for plugin in plugins {
             bus.register(plugin);
         }
@@ -689,9 +694,84 @@ fn collect_extension_secret_requirements() -> Vec<String> {
     names
 }
 
-/// Discover and spawn operator-installed extensions from ~/.omegon/extensions/.
-/// Each subdirectory with a manifest.toml is treated as an extension.
-/// Returns collected ExtensionTabWidgets and all widget event receivers.
+/// Scan plugin manifests and project MCP config for `{VAR_NAME}` template references.
+/// Called during the startup preflight phase so vault-backed secrets used by MCP
+/// servers (e.g. `env = { MY_TOKEN = "{MY_TOKEN}" }`) are warmed before plugins connect.
+fn collect_plugin_secret_requirements(cwd: &std::path::Path) -> Vec<String> {
+    let mut names = Vec::new();
+
+    // Helper: extract {VAR_NAME} references from a string
+    fn extract_templates(s: &str, out: &mut Vec<String>) {
+        let mut i = 0;
+        let bytes = s.as_bytes();
+        while i < bytes.len() {
+            if bytes[i] == b'{' {
+                if let Some(end) = s[i + 1..].find('}') {
+                    let var = &s[i + 1..i + 1 + end];
+                    if !var.is_empty() && var.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_') {
+                        out.push(var.to_string());
+                    }
+                    i += end + 2;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+    }
+
+    // Helper: scan a HashMap<String, McpServerConfig> for env template vars
+    fn scan_servers(
+        servers: &std::collections::HashMap<String, crate::plugins::mcp::McpServerConfig>,
+        out: &mut Vec<String>,
+    ) {
+        for config in servers.values() {
+            for value in config.env.values() {
+                extract_templates(value, out);
+            }
+        }
+    }
+
+    // 1. User-level plugin manifests: ~/.omegon/plugins/*/plugin.toml
+    let plugin_dirs: Vec<std::path::PathBuf> = [
+        dirs::home_dir().map(|h| h.join(".omegon/plugins")),
+        Some(cwd.join(".omegon/plugins")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    for dir in &plugin_dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else { continue };
+        for entry in entries.flatten() {
+            let manifest_path = entry.path().join("plugin.toml");
+            let Ok(content) = std::fs::read_to_string(&manifest_path) else { continue };
+            // Try armory-style manifest (has MCP servers)
+            if let Ok(manifest) = crate::plugins::armory::ArmoryManifest::parse(&content) {
+                scan_servers(&manifest.mcp_servers, &mut names);
+            }
+        }
+    }
+
+    // 2. Project-level MCP config: {cwd}/.omegon/mcp.toml
+    let mcp_toml = cwd.join(".omegon/mcp.toml");
+    if let Ok(content) = std::fs::read_to_string(&mcp_toml) {
+        if let Ok(servers) = toml::from_str::<
+            std::collections::HashMap<String, crate::plugins::mcp::McpServerConfig>,
+        >(&content) {
+            scan_servers(&servers, &mut names);
+        }
+    }
+
+    // Deduplicate
+    names.sort_unstable();
+    names.dedup();
+    tracing::debug!(
+        count = names.len(),
+        names = ?names,
+        "plugin MCP env template vars collected for preflight"
+    );
+    names
+}
 ///
 /// Resolves declared secrets from the session cache and delivers them to each
 /// extension via `bootstrap_secrets` RPC — never via subprocess environment.

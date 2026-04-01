@@ -145,13 +145,14 @@ impl McpFeature {
     pub async fn connect(
         plugin_name: &str,
         servers: &HashMap<String, McpServerConfig>,
+        secrets: Option<&omegon_secrets::SecretsManager>,
     ) -> anyhow::Result<Self> {
         let mut all_tools = Vec::new();
         let mut clients = HashMap::new();
 
         let mut timeouts = HashMap::new();
         for (server_name, config) in servers {
-            match Self::connect_one(server_name, config).await {
+            match Self::connect_one(server_name, config, secrets).await {
                 Ok((server_tools, client)) => {
                     tracing::info!(
                         plugin = plugin_name,
@@ -185,6 +186,7 @@ impl McpFeature {
     async fn connect_one(
         server_name: &str,
         config: &McpServerConfig,
+        secrets: Option<&omegon_secrets::SecretsManager>,
     ) -> anyhow::Result<(Vec<McpTool>, McpConnection)> {
         let client = if let Some(ref url) = config.url {
             // HTTP transport mode
@@ -193,7 +195,7 @@ impl McpFeature {
             service::serve_client(OmegonMcpClient, transport).await?
         } else {
             // Local process transport mode
-            let cmd = Self::build_command(server_name, config)?;
+            let cmd = Self::build_command(server_name, config, secrets)?;
             let transport = TokioChildProcess::new(cmd)?;
             service::serve_client(OmegonMcpClient, transport).await?
         };
@@ -256,7 +258,7 @@ impl McpFeature {
     /// 2. Docker MCP Gateway — Docker Desktop MCP Toolkit
     /// 3. OCI container — podman/docker with mount/network policy
     /// 4. Local process — direct command spawn (default)
-    fn build_command(server_name: &str, config: &McpServerConfig) -> anyhow::Result<Command> {
+    fn build_command(server_name: &str, config: &McpServerConfig, secrets: Option<&omegon_secrets::SecretsManager>) -> anyhow::Result<Command> {
         // Mode 1: Styrene mesh transport
         // The MCP server runs on a remote node. We use styrene-ipc's
         // DaemonFleet::terminal_open() for bidirectional stdio, wrapped
@@ -273,7 +275,7 @@ impl McpFeature {
             cmd.arg(command);
             cmd.args(&config.args);
             for (key, value) in &config.env {
-                cmd.env(key, resolve_env_template(value));
+                cmd.env(key, resolve_env_template(value, secrets));
             }
             return Ok(cmd);
         }
@@ -283,7 +285,7 @@ impl McpFeature {
             let mut cmd = Command::new("docker");
             cmd.args(["mcp", "gateway", "run", gateway_name]);
             for (key, value) in &config.env {
-                cmd.env(key, resolve_env_template(value));
+                cmd.env(key, resolve_env_template(value, secrets));
             }
             return Ok(cmd);
         }
@@ -314,7 +316,7 @@ impl McpFeature {
                     tracing::warn!(key = key, "skipping env var with invalid name");
                     continue;
                 }
-                cmd.arg(format!("-e={}={}", key, resolve_env_template(value)));
+                cmd.arg(format!("-e={}={}", key, resolve_env_template(value, secrets)));
             }
 
             cmd.arg(image);
@@ -333,7 +335,7 @@ impl McpFeature {
         let mut cmd = Command::new(command);
         cmd.args(&config.args);
         for (key, value) in &config.env {
-            cmd.env(key, resolve_env_template(value));
+            cmd.env(key, resolve_env_template(value, secrets));
         }
 
         Ok(cmd)
@@ -479,7 +481,15 @@ fn which_exists(name: &str) -> bool {
 ///
 /// Single-pass left-to-right — resolved values are not re-scanned,
 /// preventing infinite loops from values containing `{`.
-fn resolve_env_template(template: &str) -> String {
+/// Resolve a `{VAR_NAME}` template string.
+///
+/// Resolution priority:
+/// 1. `SecretsManager` session cache (covers vault: and keyring: recipes preflighted at startup)
+/// 2. Process environment — covers well-known secrets hydrated by hydrate_process_env()
+///    and any env var not managed through the secrets system
+///
+/// Non-matching literals are passed through unchanged.
+fn resolve_env_template(template: &str, secrets: Option<&omegon_secrets::SecretsManager>) -> String {
     let mut result = String::with_capacity(template.len());
     let mut chars = template.char_indices().peekable();
 
@@ -490,7 +500,11 @@ fn resolve_env_template(template: &str) -> String {
                 let var = &template[i + 1..i + 1 + end_offset];
                 // Only resolve if var looks like an env var name (alphanumeric + _)
                 if !var.is_empty() && var.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                    let value = std::env::var(var).unwrap_or_default();
+                    // Priority: secrets session cache → process env
+                    let value = secrets
+                        .and_then(|s| s.resolve(var))
+                        .or_else(|| std::env::var(var).ok())
+                        .unwrap_or_default();
                     result.push_str(&value);
                     // Advance past the closing brace
                     for _ in 0..end_offset + 1 {
@@ -516,26 +530,26 @@ mod tests {
     #[test]
     fn resolve_env_template_basic() {
         // Use CARGO_PKG_NAME which is always "omegon" during cargo test
-        let result = resolve_env_template("pkg:{CARGO_PKG_NAME}");
+        let result = resolve_env_template("pkg:{CARGO_PKG_NAME}", None);
         assert_eq!(result, "pkg:omegon");
     }
 
     #[test]
     fn resolve_env_template_missing_var() {
-        let result = resolve_env_template("{NONEXISTENT_VAR_12345}");
+        let result = resolve_env_template("{NONEXISTENT_VAR_12345}", None);
         assert_eq!(result, "");
     }
 
     #[test]
     fn resolve_env_template_no_pattern() {
-        let result = resolve_env_template("plain string");
+        let result = resolve_env_template("plain string", None);
         assert_eq!(result, "plain string");
     }
 
     #[test]
     fn resolve_env_template_nested_braces() {
         // Nested braces should not cause infinite loop
-        let result = resolve_env_template("{foo{bar}}");
+        let result = resolve_env_template("{foo{bar}}", None);
         // {foo{bar}} — `foo{bar` is not a valid env var name (contains {)
         // so it's emitted literally
         assert!(result.contains("foo"), "should not loop: {result}");
@@ -546,14 +560,14 @@ mod tests {
         // If the resolved value contains {, it should NOT be re-scanned.
         // CARGO_MANIFEST_DIR contains path separators but no braces —
         // test the single-pass property by checking it doesn't recurse
-        let result = resolve_env_template("{CARGO_MANIFEST_DIR}");
+        let result = resolve_env_template("{CARGO_MANIFEST_DIR}", None);
         assert!(result.contains("omegon"), "should resolve: {result}");
         // No re-scan: the result isn't treated as a template
     }
 
     #[test]
     fn resolve_env_template_unclosed_brace() {
-        let result = resolve_env_template("prefix {UNCLOSED");
+        let result = resolve_env_template("prefix {UNCLOSED", None);
         assert_eq!(result, "prefix {UNCLOSED");
     }
 
@@ -658,7 +672,7 @@ mod tests {
             styrene_dest: None,
             timeout_secs: 30,
         };
-        let cmd = McpFeature::build_command("test", &config).unwrap();
+        let cmd = McpFeature::build_command("test", &config, None).unwrap();
         let prog = cmd.as_std().get_program().to_str().unwrap();
         assert_eq!(prog, "npx");
     }
@@ -677,7 +691,7 @@ mod tests {
             styrene_dest: None,
             timeout_secs: 30,
         };
-        let cmd = McpFeature::build_command("test", &config).unwrap();
+        let cmd = McpFeature::build_command("test", &config, None).unwrap();
         let prog = cmd.as_std().get_program().to_str().unwrap();
         // Should use detected runtime (podman or docker)
         assert!(
@@ -713,7 +727,7 @@ mod tests {
             styrene_dest: None,
             timeout_secs: 30,
         };
-        let cmd = McpFeature::build_command("test", &config).unwrap();
+        let cmd = McpFeature::build_command("test", &config, None).unwrap();
         let prog = cmd.as_std().get_program().to_str().unwrap();
         assert_eq!(prog, "docker");
         let args: Vec<_> = cmd
@@ -761,7 +775,7 @@ mod tests {
             styrene_dest: Some("a7b3c9d1e5f2".into()),
             timeout_secs: 60,
         };
-        let cmd = McpFeature::build_command("gpu", &config).unwrap();
+        let cmd = McpFeature::build_command("gpu", &config, None).unwrap();
         let prog = cmd.as_std().get_program().to_str().unwrap();
         assert_eq!(prog, "styrene");
         let args: Vec<_> = cmd
@@ -797,7 +811,7 @@ mod tests {
             styrene_dest: None,
             timeout_secs: 30,
         };
-        let result = McpFeature::build_command("test", &config);
+        let result = McpFeature::build_command("test", &config, None);
         assert!(
             result.is_err(),
             "should error without command, image, or docker_mcp"

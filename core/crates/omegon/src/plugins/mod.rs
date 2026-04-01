@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 ///
 /// Handles both legacy HTTP-only manifests and armory-style manifests
 /// (with MCP servers, script tools, OCI tools, etc.).
-pub async fn discover_plugins(cwd: &Path) -> Vec<Box<dyn omegon_traits::Feature>> {
+pub async fn discover_plugins(cwd: &Path, secrets: Option<&omegon_secrets::SecretsManager>) -> Vec<Box<dyn omegon_traits::Feature>> {
     let plugin_dirs = plugin_search_paths();
     let mut features: Vec<Box<dyn omegon_traits::Feature>> = Vec::new();
 
@@ -57,7 +57,7 @@ pub async fn discover_plugins(cwd: &Path) -> Vec<Box<dyn omegon_traits::Feature>
 
             // Try armory-style manifest first (has plugin.type field),
             // fall back to legacy HTTP-only manifest.
-            match load_armory_plugin(&manifest_path, cwd).await {
+            match load_armory_plugin(&manifest_path, cwd, secrets).await {
                 Ok(Some(mut loaded)) => {
                     for f in loaded.drain(..) {
                         tracing::info!(
@@ -106,7 +106,7 @@ pub async fn discover_plugins(cwd: &Path) -> Vec<Box<dyn omegon_traits::Feature>
     }
 
     // Also discover MCP servers from project-level config
-    let project_mcp = discover_project_mcp_servers(cwd).await;
+    let project_mcp = discover_project_mcp_servers(cwd, secrets).await;
     features.extend(project_mcp);
 
     features
@@ -117,6 +117,7 @@ pub async fn discover_plugins(cwd: &Path) -> Vec<Box<dyn omegon_traits::Feature>
 async fn load_armory_plugin(
     manifest_path: &Path,
     _cwd: &Path,
+    secrets: Option<&omegon_secrets::SecretsManager>,
 ) -> anyhow::Result<Option<Vec<Box<dyn omegon_traits::Feature>>>> {
     let content = std::fs::read_to_string(manifest_path)?;
 
@@ -141,7 +142,7 @@ async fn load_armory_plugin(
     // Connect MCP servers if declared
     if !manifest.mcp_servers.is_empty() {
         let mcp_feature =
-            mcp::McpFeature::connect(&manifest.plugin.name, &manifest.mcp_servers).await?;
+            mcp::McpFeature::connect(&manifest.plugin.name, &manifest.mcp_servers, secrets).await?;
 
         if !mcp_feature.tools().is_empty() {
             features.push(Box::new(mcp_feature));
@@ -189,7 +190,7 @@ fn load_legacy_plugin(
 
 /// Discover MCP servers declared in project-level config files.
 /// Checks: .omegon/mcp.toml, opencode.json (for compatibility), .mcp.json
-async fn discover_project_mcp_servers(cwd: &Path) -> Vec<Box<dyn omegon_traits::Feature>> {
+async fn discover_project_mcp_servers(cwd: &Path, secrets: Option<&omegon_secrets::SecretsManager>) -> Vec<Box<dyn omegon_traits::Feature>> {
     let mut features: Vec<Box<dyn omegon_traits::Feature>> = Vec::new();
 
     // Check .omegon/mcp.toml (native Omegon MCP config)
@@ -199,7 +200,7 @@ async fn discover_project_mcp_servers(cwd: &Path) -> Vec<Box<dyn omegon_traits::
         && let Ok(servers) =
             toml::from_str::<std::collections::HashMap<String, mcp::McpServerConfig>>(&content)
     {
-        match mcp::McpFeature::connect("project-mcp", &servers).await {
+        match mcp::McpFeature::connect("project-mcp", &servers, secrets).await {
             Ok(feature) if !feature.tools().is_empty() => {
                 tracing::info!(
                     servers = servers.len(),
@@ -247,7 +248,7 @@ mod tests {
     #[tokio::test]
     async fn discover_in_empty_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let plugins = discover_plugins(dir.path()).await;
+        let plugins = discover_plugins(dir.path(), None).await;
         assert!(plugins.is_empty());
     }
 

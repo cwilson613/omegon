@@ -1337,4 +1337,19 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   73d99e93 chore(release): 0.15.6-rc.26
   ab947ced feat(extensions): deliver secrets via bootstrap_secrets RPC, not env vars
   13dd8c2c fix(extensions): refuse to spawn extension when required secrets are absent
+## 2026-04-01 — main (20t 8208tc 9m35s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  25f675fb chore(release): 0.15.6-rc.27
+  f7d2533f feat(secrets): wire vault into startup preflight path
+  73d99e93 chore(release): 0.15.6-rc.26
 
