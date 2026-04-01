@@ -131,5 +131,5 @@ async fn handle_get_timeline(params: &Value) -> anyhow::Result<Value> {
         .unwrap_or(20);
 
     let timeline = scribe::get_timeline(cwd, page as usize, per_page as usize).await?;
-    Ok(serde_json::to_value(timeline)?)
+    Ok(timeline)
 }

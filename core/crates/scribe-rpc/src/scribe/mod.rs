@@ -31,7 +31,7 @@ pub struct EngagementStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimelineEntry {
     pub timestamp: String,
-    pub event_type: String,
+    pub title: String,
     pub description: String,
 }
 
@@ -75,20 +75,58 @@ pub async fn write_log_entry(content: &str, category: &str) -> Result<()> {
 }
 
 /// Get engagement timeline (commits, PRs, manual logs).
+/// Returns JSON with structure: { "events": [...] }
 pub async fn get_timeline(
     cwd: &str,
     page: usize,
     per_page: usize,
-) -> Result<Vec<TimelineEntry>> {
+) -> Result<Value> {
     // TODO: GET {SCRIBE_URL}/api/engagement/current/timeline?page={page}&per_page={per_page}
+    // TODO: paginate results using page and per_page
 
-    Ok(vec![
+    let entries = vec![
         TimelineEntry {
-            timestamp: chrono::Local::now().to_rfc3339(),
-            event_type: "engagement_start".to_string(),
-            description: "Engagement began".to_string(),
+            timestamp: "2024-03-31T14:30:00Z".to_string(),
+            title: "Terraform Drift Detected".to_string(),
+            description: "AWS infrastructure diverged from code; initiated reconciliation".to_string(),
         },
-    ])
+        TimelineEntry {
+            timestamp: "2024-03-31T12:15:00Z".to_string(),
+            title: "EKS Planning Session".to_string(),
+            description: "Team reviewed cluster autoscaling strategy and cost optimization".to_string(),
+        },
+        TimelineEntry {
+            timestamp: "2024-03-31T10:45:00Z".to_string(),
+            title: "PR Merged to Main".to_string(),
+            description: "Feature: async batch processing pipeline (5 files, +342 lines)".to_string(),
+        },
+        TimelineEntry {
+            timestamp: "2024-03-30T16:20:00Z".to_string(),
+            title: "Code Review Complete".to_string(),
+            description: "Approved 3 PRs; requested changes on 1 with performance feedback".to_string(),
+        },
+        TimelineEntry {
+            timestamp: "2024-03-30T09:00:00Z".to_string(),
+            title: "Engagement Kickoff".to_string(),
+            description: "Partnership began; established roadmap and team communication cadence".to_string(),
+        },
+        TimelineEntry {
+            timestamp: "2024-03-29T15:30:00Z".to_string(),
+            title: "Initial Onboarding".to_string(),
+            description: "Repository access granted; dev environment configured".to_string(),
+        },
+    ];
+
+    // Apply pagination
+    let paginated = entries
+        .into_iter()
+        .skip((page - 1) * per_page)
+        .take(per_page)
+        .collect::<Vec<_>>();
+
+    Ok(serde_json::json!({
+        "events": paginated
+    }))
 }
 
 /// Sync engagement data from remote.
