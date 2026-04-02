@@ -50,6 +50,24 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
+
+      - name: Add custom domain
+        if: github.ref == 'refs/heads/main'
+        run: |
+          curl -s -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/omegon-styrene-io/domains" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{"name":"omegon.styrene.io"}' | python3 -c "
+          import json,sys
+          r=json.load(sys.stdin)
+          errs=[e for e in r.get('errors',[]) if e.get('code') not in (8000018,8000019)]
+          sys.exit(1 if errs else 0)
+          "
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Prepare container build context
         run: |
           cp core/install.sh core/site/install.sh
