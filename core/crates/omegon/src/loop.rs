@@ -46,8 +46,8 @@ impl Default for LoopConfig {
         Self {
             max_turns: 50,
             soft_limit_turns: 35,
-            max_retries: 3,
-            retry_delay_ms: 2000,
+            max_retries: 8,
+            retry_delay_ms: 750,
             model: "anthropic:claude-sonnet-4-6".into(),
             cwd: std::env::current_dir().unwrap_or_default(),
             extended_context: false,
@@ -668,7 +668,7 @@ async fn stream_with_retry(
                 );
                 let _ = events.send(AgentEvent::SystemNotification { message: msg });
                 tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
-                delay = (delay * 2).min(30_000); // exponential backoff, cap at 30s
+                delay = (delay * 2).min(10_000); // exponential backoff, cap at 10s
             }
         }
     }
@@ -1717,8 +1717,8 @@ mod tests {
         let config = LoopConfig {
             max_turns: 60,
             soft_limit_turns: 0, // 0 means auto-calculate
-            max_retries: 3,
-            retry_delay_ms: 1000,
+            max_retries: 8,
+            retry_delay_ms: 750,
             model: "test".into(),
             cwd: std::path::PathBuf::from("/tmp"),
             extended_context: false,
@@ -1728,6 +1728,13 @@ mod tests {
         };
         // soft_limit_turns=0 → loop should compute 2/3 of max_turns (40)
         assert_eq!(config.soft_limit_turns, 0, "0 = auto-calculate in run()");
+    }
+
+    #[test]
+    fn loop_config_default_uses_aggressive_bounded_retry() {
+        let config = LoopConfig::default();
+        assert_eq!(config.max_retries, 8);
+        assert_eq!(config.retry_delay_ms, 750);
     }
 
     // ── Mutation detection ─────────────────────────────────────────────
