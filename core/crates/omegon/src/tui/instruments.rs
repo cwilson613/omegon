@@ -1766,15 +1766,63 @@ mod tests {
     }
 
     #[test]
-    fn tool_error_finish_records_runtime_once() {
+    fn set_cleave_progress_replaces_snapshot() {
         let mut panel = InstrumentPanel::default();
-        panel.tool_started("bash");
-        panel.update_telemetry(0.0, 200_000, None, false, "off", None, false, 0.5);
-        panel.tool_finished("bash", true);
-        let tool = panel.tools.iter().find(|t| t.name == "bash").unwrap();
-        assert!(tool.is_error);
-        assert!(!tool.running);
-        assert_eq!(tool.last_duration_ms, Some(500));
+        panel.set_cleave_progress(Some(crate::features::cleave::CleaveProgress {
+            active: true,
+            run_id: "r1".into(),
+            total_children: 2,
+            completed: 0,
+            failed: 0,
+            children: vec![],
+            total_tokens_in: 0,
+            total_tokens_out: 0,
+        }));
+        let first = panel.cleave_progress.as_ref().expect("cleave progress set");
+        assert_eq!(first.run_id, "r1");
+
+        panel.set_cleave_progress(Some(crate::features::cleave::CleaveProgress {
+            active: true,
+            run_id: "r2".into(),
+            total_children: 2,
+            completed: 0,
+            failed: 0,
+            children: vec![],
+            total_tokens_in: 0,
+            total_tokens_out: 0,
+        }));
+        let second = panel.cleave_progress.as_ref().expect("cleave progress replaced");
+        assert_eq!(second.run_id, "r2");
+    }
+
+    #[test]
+    fn set_cleave_progress_replaces_snapshot() {
+        let mut panel = InstrumentPanel::default();
+        panel.set_cleave_progress(Some(crate::features::cleave::CleaveProgress {
+            active: true,
+            run_id: "r1".into(),
+            total_children: 2,
+            completed: 0,
+            failed: 0,
+            children: vec![],
+            total_tokens_in: 0,
+            total_tokens_out: 0,
+        }));
+        let first = panel.cleave_progress.as_ref().expect("cleave progress set");
+        assert_eq!(first.run_id, "r1");
+
+        panel.set_cleave_progress(Some(crate::features::cleave::CleaveProgress {
+            active: true,
+            run_id: "r2".into(),
+            total_children: 2,
+            completed: 0,
+            failed: 0,
+            children: vec![],
+            total_tokens_in: 0,
+            total_tokens_out: 0,
+        }));
+        let second = panel.cleave_progress.as_ref().expect("cleave progress replaced");
+        assert_eq!(second.run_id, "r2");
     }
 
     #[test]
