@@ -1,36 +1,36 @@
 {
-  "runId": "clv-01xylxt6-kvta",
-  "directive": "Minimal internal cleave_run smoke test: inspect the repository README and report one concise observation about the project; do not modify tracked files.",
+  "runId": "clv-plvpwxwv-ubnn",
+  "directive": "Delegate a basic file read. Have the child read README.md in the repository root and report back the first heading it finds. Do not modify any files.",
   "repoPath": "/Users/cwilson/workspace/black-meridian/omegon",
   "workspacePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace",
   "children": [
     {
       "childId": 0,
-      "label": "readme-observation",
-      "description": "Read README.md, extract one concise observation about the project, and report it back without modifying tracked files.",
+      "label": "readme-read",
+      "description": "Read README.md at the repository root and report the first heading found. Do not edit files.",
       "scope": [
         "README.md"
       ],
       "dependsOn": [],
       "status": "failed",
-      "error": "branch not found: cleave/0-readme-observation",
-      "branch": "cleave/0-readme-observation",
-      "worktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/0-wt-readme-observation",
+      "error": "branch not found: cleave/0-readme-read",
+      "branch": "cleave/0-readme-read",
       "backend": "native",
-      "executeModel": "anthropic:claude-sonnet-4-6"
+      "executeModel": "anthropic:claude-sonnet-4-6",
+      "durationSecs": 11.001895834
     }
   ],
   "plan": {
     "children": [
       {
         "depends_on": [],
-        "description": "Read README.md, extract one concise observation about the project, and report it back without modifying tracked files.",
-        "label": "readme-observation",
+        "description": "Read README.md at the repository root and report the first heading found. Do not edit files.",
+        "label": "readme-read",
         "scope": [
           "README.md"
         ]
       }
     ],
-    "rationale": "Smallest viable internal cleave_run demonstration: a single child with no code changes."
+    "rationale": "Minimal cleave smoke test of native tool surface by delegating a single file read."
   }
 }

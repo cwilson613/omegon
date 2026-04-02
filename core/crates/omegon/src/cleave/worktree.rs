@@ -11,8 +11,13 @@ use std::path::{Path, PathBuf};
 
 /// Create a worktree/workspace for a child.
 ///
-/// Uses jj workspace when co-located (lock-free, all files immediately
-/// available, no submodule init). Falls back to git worktree otherwise.
+/// Native cleave currently relies on git-branch-based merge semantics: each
+/// child is created on a named branch and later squash-merged by that branch
+/// name. jj workspaces do not satisfy that contract yet because they create
+/// workspace-local changes without a corresponding git branch for merge.
+///
+/// Until cleave grows a jj-aware harvest/merge path, always use a git worktree
+/// here, even in co-located jj repos.
 pub fn create_worktree(
     repo_path: &Path,
     workspace_path: &Path,
@@ -21,29 +26,24 @@ pub fn create_worktree(
     branch: &str,
 ) -> Result<PathBuf> {
     let worktree_dir = workspace_path.join(format!("{}-wt-{}", child_id, label));
-    let name = format!("cleave-{}-{}", child_id, label);
-    omegon_git::worktree::create_smart(repo_path, &worktree_dir, &name, branch)?;
+    omegon_git::worktree::create(repo_path, &worktree_dir, branch)?;
     Ok(worktree_dir)
 }
 
-/// Remove a worktree/workspace.
+/// Remove a child worktree.
+///
+/// This matches `create_worktree`: cleave children always use git worktrees,
+/// so cleanup should remove the git worktree directly.
 pub fn remove_worktree(repo_path: &Path, worktree_path: &Path) -> Result<()> {
-    // Extract workspace name from path for jj cleanup
-    let name = worktree_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
-    omegon_git::worktree::remove_smart(repo_path, name, worktree_path)
+    omegon_git::worktree::remove(repo_path, worktree_path)
 }
 
-/// Delete a branch after merge (git-only, no-op for jj).
+/// Delete a child branch after merge.
+///
+/// Cleave children are always created on git branches, even in co-located jj
+/// repos, so the branch should always be removed through git.
 pub fn delete_branch(repo_path: &Path, branch: &str) -> Result<()> {
-    if omegon_git::jj::is_jj_repo(repo_path) {
-        // jj doesn't use branches for workspaces — nothing to delete
-        Ok(())
-    } else {
-        omegon_git::worktree::delete_branch(repo_path, branch)
-    }
+    omegon_git::worktree::delete_branch(repo_path, branch)
 }
 
 // ── Merge ───────────────────────────────────────────────────────────────
@@ -53,6 +53,7 @@ pub fn delete_branch(repo_path: &Path, branch: &str) -> Result<()> {
 #[derive(Debug)]
 pub enum MergeResult {
     Success,
+    NoChanges,
     Conflict(String),
     Failed(String),
 }
@@ -65,9 +66,7 @@ pub enum MergeResult {
 pub fn squash_merge_branch(repo_path: &Path, branch: &str, message: &str) -> Result<MergeResult> {
     match omegon_git::merge::squash_merge(repo_path, branch, message)? {
         omegon_git::merge::MergeResult::Success { .. } => Ok(MergeResult::Success),
-        omegon_git::merge::MergeResult::NoChanges => Ok(MergeResult::Failed(
-            "Branch has no new commits — child did not produce any work".to_string(),
-        )),
+        omegon_git::merge::MergeResult::NoChanges => Ok(MergeResult::NoChanges),
         omegon_git::merge::MergeResult::Conflict { files } => {
             Ok(MergeResult::Conflict(files.join(", ")))
         }
@@ -80,9 +79,7 @@ pub fn merge_branch(repo_path: &Path, branch: &str) -> Result<MergeResult> {
     let message = format!("cleave: merge {}", branch);
     match omegon_git::merge::merge_no_ff(repo_path, branch, &message)? {
         omegon_git::merge::MergeResult::Success { .. } => Ok(MergeResult::Success),
-        omegon_git::merge::MergeResult::NoChanges => Ok(MergeResult::Failed(
-            "Branch has no new commits — child did not produce any work".to_string(),
-        )),
+        omegon_git::merge::MergeResult::NoChanges => Ok(MergeResult::NoChanges),
         omegon_git::merge::MergeResult::Conflict { files } => {
             Ok(MergeResult::Conflict(files.join(", ")))
         }
@@ -261,6 +258,8 @@ mod tests {
     fn merge_result_variants() {
         let s = MergeResult::Success;
         assert!(format!("{s:?}").contains("Success"));
+        let n = MergeResult::NoChanges;
+        assert!(format!("{n:?}").contains("NoChanges"));
         let c = MergeResult::Conflict("file.rs".into());
         assert!(format!("{c:?}").contains("file.rs"));
         let f = MergeResult::Failed("error".into());
@@ -352,6 +351,13 @@ mod tests {
 
             if let Ok(wt_path) = result {
                 assert!(wt_path.exists(), "worktree should exist");
+
+                let repo = git2::Repository::open(model.repo_path()).unwrap();
+                assert!(
+                    repo.find_branch(&branch_name, git2::BranchType::Local).is_ok(),
+                    "cleave worktree must create a git branch so merge can address it"
+                );
+
                 let _ = remove_worktree(model.repo_path(), &wt_path);
                 let _ = delete_branch(model.repo_path(), &branch_name);
             }

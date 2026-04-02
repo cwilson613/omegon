@@ -543,6 +543,9 @@ impl CleaveFeature {
                 cleave::orchestrator::MergeOutcome::Success => {
                     report.push_str(&format!("  ✓ {} merged\n", label));
                 }
+                cleave::orchestrator::MergeOutcome::NoChanges => {
+                    report.push_str(&format!("  ○ {} completed (no changes)\n", label));
+                }
                 cleave::orchestrator::MergeOutcome::Conflict(d) => {
                     report.push_str(&format!(
                         "  ✗ {} CONFLICT: {}\n",
@@ -573,6 +576,9 @@ impl CleaveFeature {
                 "duration_secs": result.duration_secs,
                 "merged": result.merge_results.iter()
                     .filter(|(_, o)| matches!(o, cleave::orchestrator::MergeOutcome::Success))
+                    .count(),
+                "no_change": result.merge_results.iter()
+                    .filter(|(_, o)| matches!(o, cleave::orchestrator::MergeOutcome::NoChanges))
                     .count(),
             }),
         })

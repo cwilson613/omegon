@@ -46,6 +46,7 @@ pub struct CleaveResult {
 
 pub enum MergeOutcome {
     Success,
+    NoChanges,
     Conflict(String),
     Failed(String),
     Skipped(String),
@@ -418,6 +419,16 @@ pub async fn run_cleave(
                     child: child.label.clone(),
                     success: true,
                     detail: None,
+                });
+            }
+            Ok(worktree::MergeResult::NoChanges) => {
+                tracing::info!(child = %child.label, "child completed without repo changes");
+                let _ = worktree::delete_branch(repo_path, branch);
+                merge_results.push((child.label.clone(), MergeOutcome::NoChanges));
+                config.progress_sink.emit(&ProgressEvent::MergeResult {
+                    child: child.label.clone(),
+                    success: true,
+                    detail: Some("no changes".to_string()),
                 });
             }
             Ok(worktree::MergeResult::Conflict(detail)) => {

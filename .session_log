@@ -1667,4 +1667,79 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   e6bb6108 fix(loop): use aggressive bounded retries for upstream stalls
   f5640f10 fix(loop): retry stalled llm streams instead of hanging
   ce32b59d fix(footer): mark session cost as an estimate
+## 2026-04-02 — main (13t 191tc 7m49s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  615d3ccf chore(release): 0.15.7-rc.3
+  811895df test(providers): align gpt-5.4-mini expectations with upstream model ids
+  fec3e03d docs(changelog): correct ChatGPT/Codex model names for 0.15.7
+## 2026-04-02 — main (5t 201tc 54s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  4ccae049 chore: trim trailing whitespace from astro.config.mjs
+  6db0aa5a feat: add omegon.styrene.io custom domain step
+  764a8e35 chore: trigger site rebuild for CF Pages deploy fix
+## 2026-04-02 — main (6t 216tc 1m24s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  4ccae049 chore: trim trailing whitespace from astro.config.mjs
+  6db0aa5a feat: add omegon.styrene.io custom domain step
+  764a8e35 chore: trigger site rebuild for CF Pages deploy fix
+## 2026-04-02 — main (2t 217tc 29s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  4ccae049 chore: trim trailing whitespace from astro.config.mjs
+  6db0aa5a feat: add omegon.styrene.io custom domain step
+  764a8e35 chore: trigger site rebuild for CF Pages deploy fix
+## 2026-04-02 — main (7t 237tc 2m54s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  4ccae049 chore: trim trailing whitespace from astro.config.mjs
+  6db0aa5a feat: add omegon.styrene.io custom domain step
+  764a8e35 chore: trigger site rebuild for CF Pages deploy fix
 
