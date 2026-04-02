@@ -1,10 +1,10 @@
 ---
-task_id: 0
-label: tokens-test
-siblings: [1:instruments-test, 2:retry-test]
+task_id: 2
+label: retry-test
+siblings: [0:tokens-test, 1:instruments-test]
 ---
 
-# Task 0: tokens-test
+# Task 2: retry-test
 
 ## Root Directive
 
@@ -12,18 +12,18 @@ siblings: [1:instruments-test, 2:retry-test]
 
 ## Mission
 
-In core/crates/omegon/src/features/cleave.rs, add a test named `apply_progress_event_accumulates_tokens` inside the existing #[cfg(test)] mod. It should: create a CleaveProgress with one child (label='alpha', zero token counts), call apply_progress_event with ProgressEvent::ChildTokens { child: 'alpha'.into(), tokens_in: 100, tokens_out: 50 }, then assert child.tokens_in==100, child.tokens_out==50, progress.total_tokens_in==100, progress.total_tokens_out==50. Run cargo test -p omegon to confirm it passes.
+In core/crates/omegon/src/loop.rs, find the retry backoff constants (RETRY_BASE_MS, RETRY_MAX_MS or similar) and the delay formula. Add a #[cfg(test)] test named `retry_backoff_is_capped` that reconstructs the backoff formula inline and asserts that for attempt indices 0, 1, 2, 10, and 100 the computed delay never exceeds the cap constant. Run cargo test -p omegon to confirm it passes.
 
 ## Scope
 
-- `core/crates/omegon/src/features/cleave.rs`
+- `core/crates/omegon/src/loop.rs`
 
 **Depends on:** none (independent)
 
 ## Siblings
 
+- **tokens-test**: In core/crates/omegon/src/features/cleave.rs, add a test named `apply_progress_event_accumulates_tokens` inside the existing #[cfg(test)] mod. It should: create a CleaveProgress with one child (label='alpha', zero token counts), call apply_progress_event with ProgressEvent::ChildTokens { child: 'alpha'.into(), tokens_in: 100, tokens_out: 50 }, then assert child.tokens_in==100, child.tokens_out==50, progress.total_tokens_in==100, progress.total_tokens_out==50. Run cargo test -p omegon to confirm it passes.
 - **instruments-test**: In core/crates/omegon/src/tui/instruments.rs, add a #[cfg(test)] mod with a test named `set_cleave_progress_replaces_snapshot`. Create an InstrumentPanel, call set_cleave_progress with a CleaveProgress (active=true, run_id='r1', total_children=2, completed=0, failed=0, children=vec![], total_tokens_in=0, total_tokens_out=0), assert cleave_progress is Some and run_id=='r1', then call set_cleave_progress again with run_id='r2' and assert the new run_id=='r2'. Run cargo test -p omegon to confirm it passes.
-- **retry-test**: In core/crates/omegon/src/loop.rs, find the retry backoff constants (RETRY_BASE_MS, RETRY_MAX_MS or similar) and the delay formula. Add a #[cfg(test)] test named `retry_backoff_is_capped` that reconstructs the backoff formula inline and asserts that for attempt indices 0, 1, 2, 10, and 100 the computed delay never exceeds the cap constant. Run cargo test -p omegon to confirm it passes.
 
 ## Dependency Versions
 

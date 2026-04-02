@@ -1,35 +1,79 @@
 {
-  "runId": "clv-01lvs026-kvhi",
-  "directive": "Run this task with a nonexistent model to force a child exit code 1 and validate stderr tail capture.",
+  "runId": "clv-pl5o2c5r-ag10",
+  "directive": "Add a #[cfg(test)] unit test to each of three independent files: cleave.rs (token accumulation), instruments.rs (set_cleave_progress snapshot replacement), and loop.rs (retry backoff cap).",
   "repoPath": "/Users/cwilson/workspace/black-meridian/omegon",
   "workspacePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace",
   "children": [
     {
       "childId": 0,
-      "label": "fail-probe",
-      "description": "List the top-level files in the repo and write a brief summary. Make no edits.",
+      "label": "tokens-test",
+      "description": "In core/crates/omegon/src/features/cleave.rs, add a test named `apply_progress_event_accumulates_tokens` inside the existing #[cfg(test)] mod. It should: create a CleaveProgress with one child (label='alpha', zero token counts), call apply_progress_event with ProgressEvent::ChildTokens { child: 'alpha'.into(), tokens_in: 100, tokens_out: 50 }, then assert child.tokens_in==100, child.tokens_out==50, progress.total_tokens_in==100, progress.total_tokens_out==50. Run cargo test -p omegon to confirm it passes.",
       "scope": [
-        "README.md"
+        "core/crates/omegon/src/features/cleave.rs"
       ],
       "dependsOn": [],
       "status": "completed",
-      "branch": "cleave/0-fail-probe",
+      "branch": "cleave/0-tokens-test",
       "backend": "native",
       "executeModel": "anthropic:claude-sonnet-4-6",
-      "durationSecs": 15.113058542
+      "durationSecs": 297.551192333
+    },
+    {
+      "childId": 1,
+      "label": "instruments-test",
+      "description": "In core/crates/omegon/src/tui/instruments.rs, add a #[cfg(test)] mod with a test named `set_cleave_progress_replaces_snapshot`. Create an InstrumentPanel, call set_cleave_progress with a CleaveProgress (active=true, run_id='r1', total_children=2, completed=0, failed=0, children=vec![], total_tokens_in=0, total_tokens_out=0), assert cleave_progress is Some and run_id=='r1', then call set_cleave_progress again with run_id='r2' and assert the new run_id=='r2'. Run cargo test -p omegon to confirm it passes.",
+      "scope": [
+        "core/crates/omegon/src/tui/instruments.rs"
+      ],
+      "dependsOn": [],
+      "status": "completed",
+      "branch": "cleave/1-instruments-test",
+      "backend": "native",
+      "executeModel": "anthropic:claude-sonnet-4-6",
+      "durationSecs": 290.392410333
+    },
+    {
+      "childId": 2,
+      "label": "retry-test",
+      "description": "In core/crates/omegon/src/loop.rs, find the retry backoff constants (RETRY_BASE_MS, RETRY_MAX_MS or similar) and the delay formula. Add a #[cfg(test)] test named `retry_backoff_is_capped` that reconstructs the backoff formula inline and asserts that for attempt indices 0, 1, 2, 10, and 100 the computed delay never exceeds the cap constant. Run cargo test -p omegon to confirm it passes.",
+      "scope": [
+        "core/crates/omegon/src/loop.rs"
+      ],
+      "dependsOn": [],
+      "status": "completed",
+      "branch": "cleave/2-retry-test",
+      "backend": "native",
+      "executeModel": "anthropic:claude-sonnet-4-6",
+      "durationSecs": 158.729154833
     }
   ],
   "plan": {
     "children": [
       {
         "depends_on": [],
-        "description": "List the top-level files in the repo and write a brief summary. Make no edits.",
-        "label": "fail-probe",
+        "description": "In core/crates/omegon/src/features/cleave.rs, add a test named `apply_progress_event_accumulates_tokens` inside the existing #[cfg(test)] mod. It should: create a CleaveProgress with one child (label='alpha', zero token counts), call apply_progress_event with ProgressEvent::ChildTokens { child: 'alpha'.into(), tokens_in: 100, tokens_out: 50 }, then assert child.tokens_in==100, child.tokens_out==50, progress.total_tokens_in==100, progress.total_tokens_out==50. Run cargo test -p omegon to confirm it passes.",
+        "label": "tokens-test",
         "scope": [
-          "README.md"
+          "core/crates/omegon/src/features/cleave.rs"
+        ]
+      },
+      {
+        "depends_on": [],
+        "description": "In core/crates/omegon/src/tui/instruments.rs, add a #[cfg(test)] mod with a test named `set_cleave_progress_replaces_snapshot`. Create an InstrumentPanel, call set_cleave_progress with a CleaveProgress (active=true, run_id='r1', total_children=2, completed=0, failed=0, children=vec![], total_tokens_in=0, total_tokens_out=0), assert cleave_progress is Some and run_id=='r1', then call set_cleave_progress again with run_id='r2' and assert the new run_id=='r2'. Run cargo test -p omegon to confirm it passes.",
+        "label": "instruments-test",
+        "scope": [
+          "core/crates/omegon/src/tui/instruments.rs"
+        ]
+      },
+      {
+        "depends_on": [],
+        "description": "In core/crates/omegon/src/loop.rs, find the retry backoff constants (RETRY_BASE_MS, RETRY_MAX_MS or similar) and the delay formula. Add a #[cfg(test)] test named `retry_backoff_is_capped` that reconstructs the backoff formula inline and asserts that for attempt indices 0, 1, 2, 10, and 100 the computed delay never exceeds the cap constant. Run cargo test -p omegon to confirm it passes.",
+        "label": "retry-test",
+        "scope": [
+          "core/crates/omegon/src/loop.rs"
         ]
       }
     ],
-    "rationale": "Smoke test stderr tail capture on non-zero child exit (rc.9)"
+    "rationale": "Three independent files, no shared state — safe to parallelize"
   }
 }

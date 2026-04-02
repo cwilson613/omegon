@@ -2252,4 +2252,34 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   74a619c7 feat(cleave): cancel-bounded transient retry, smoke harness, fallback env fix
   47afea04 chore(release): 0.15.7-rc.13
   1202136f fix(cleave): report upstream exhaustion honestly
+## 2026-04-02 — main (32t 801tc 14m6s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  75ceeb2d chore(release): 0.15.7-rc.15
+  f5b4ba90 feat(tui): cleave panel swaps tools display during active runs
+  74a619c7 feat(cleave): cancel-bounded transient retry, smoke harness, fallback env fix
+## 2026-04-02 — main (2t 803tc 37s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  75ceeb2d chore(release): 0.15.7-rc.15
+  f5b4ba90 feat(tui): cleave panel swaps tools display during active runs
+  74a619c7 feat(cleave): cancel-bounded transient retry, smoke harness, fallback env fix
 
