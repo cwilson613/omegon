@@ -313,6 +313,7 @@ fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &ProgressEve
             let status_text = match status {
                 ChildProgressStatus::Completed => "completed",
                 ChildProgressStatus::Failed => "failed",
+                ChildProgressStatus::UpstreamExhausted => "upstream_exhausted",
             };
             if let Some(existing) = progress.children.iter_mut().find(|c| c.label == *child) {
                 existing.status = status_text.into();
@@ -489,6 +490,7 @@ impl CleaveFeature {
                     p.status = match child.status {
                         ChildStatus::Completed => "completed".into(),
                         ChildStatus::Failed => "failed".into(),
+                        ChildStatus::UpstreamExhausted => "upstream_exhausted".into(),
                         ChildStatus::Running => "running".into(),
                         ChildStatus::Pending => "pending".into(),
                     };
@@ -510,13 +512,26 @@ impl CleaveFeature {
             .iter()
             .filter(|c| c.status == ChildStatus::Failed)
             .count();
+        let exhausted = result
+            .state
+            .children
+            .iter()
+            .filter(|c| c.status == ChildStatus::UpstreamExhausted)
+            .count();
+
+        let summary_suffix = if exhausted > 0 {
+            format!(", {} upstream-exhausted", exhausted)
+        } else {
+            String::new()
+        };
 
         let mut report = format!(
-            "## Cleave Report: {}\n**Duration:** {:.0}s\n**Children:** {} completed, {} failed of {}\n\n",
+            "## Cleave Report: {}\n**Duration:** {:.0}s\n**Children:** {} completed, {} failed{} of {}\n\n",
             result.state.run_id,
             result.duration_secs,
             completed,
             failed,
+            summary_suffix,
             result.state.children.len()
         );
 
@@ -524,6 +539,7 @@ impl CleaveFeature {
             let icon = match child.status {
                 ChildStatus::Completed => "✓",
                 ChildStatus::Failed => "✗",
+                ChildStatus::UpstreamExhausted => "⚡",
                 ChildStatus::Running => "⏳",
                 ChildStatus::Pending => "○",
             };
@@ -531,9 +547,23 @@ impl CleaveFeature {
                 .duration_secs
                 .map(|d| format!(" ({:.0}s)", d))
                 .unwrap_or_default();
-            report.push_str(&format!("  {} **{}**{}\n", icon, child.label, dur));
+            let model_note = child
+                .execute_model
+                .as_deref()
+                .map(|m| format!(" `{m}`"))
+                .unwrap_or_default();
+            report.push_str(&format!("  {} **{}**{}{}\n", icon, child.label, dur, model_note));
+            if child.status == ChildStatus::UpstreamExhausted {
+                report.push_str("    ⚡ Provider upstream exhausted — check inventory for available fallbacks.\n");
+            }
             if let Some(err) = &child.error {
-                report.push_str(&format!("    Error: {}\n", err));
+                // Truncate long error details (stderr tails can be long)
+                let short = if err.len() > 400 {
+                    format!("{}…", &err[..400])
+                } else {
+                    err.clone()
+                };
+                report.push_str(&format!("    Error: {}\n", short));
             }
         }
 

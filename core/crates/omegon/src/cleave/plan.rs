@@ -8,6 +8,11 @@ pub struct CleavePlan {
     pub children: Vec<ChildPlan>,
     #[serde(default)]
     pub rationale: String,
+    /// Default model for all children. Overrides scope-based heuristic routing.
+    /// Individual children can further override with their own `model` field.
+    /// If absent, the orchestrator applies cost-aware routing from the provider inventory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
 }
 
 /// A single child in the plan.
@@ -18,6 +23,11 @@ pub struct ChildPlan {
     pub scope: Vec<String>,
     #[serde(default)]
     pub depends_on: Vec<String>,
+    /// Explicit model override for this child. Takes priority over `CleavePlan::default_model`
+    /// and scope-based routing. Use for intentional up- or down-delegation
+    /// (e.g. a research child that needs a higher-tier model).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 impl CleavePlan {

@@ -618,6 +618,7 @@ async fn run_cleave_command(
         let icon = match child.status {
             cleave::state::ChildStatus::Completed => "✓",
             cleave::state::ChildStatus::Failed => "✗",
+            cleave::state::ChildStatus::UpstreamExhausted => "⚡",
             cleave::state::ChildStatus::Running => "⏳",
             cleave::state::ChildStatus::Pending => "○",
         };
@@ -1957,6 +1958,13 @@ async fn run_agent_command(cli: &Cli) -> anyhow::Result<()> {
             }
         }
         Err(e) => {
+            if r#loop::is_upstream_exhausted(&e) {
+                // Exit 2 signals the cleave orchestrator (and any supervisor) that this
+                // child failed due to upstream provider exhaustion, not a logic error.
+                // The orchestrator may retry with a cross-provider fallback.
+                eprintln!("upstream exhausted: {e}");
+                std::process::exit(2);
+            }
             eprintln!("Error: {e}");
             std::process::exit(1);
         }

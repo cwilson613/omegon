@@ -20,6 +20,27 @@ use tokio::process::Command;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
+/// Structured child failure — separates upstream exhaustion from logic/tool failures
+/// so the orchestrator can decide whether to retry with a fallback provider.
+#[derive(Debug)]
+enum ChildError {
+    /// Exit code 2: upstream provider exhausted all retries (rate limit, provider down).
+    UpstreamExhausted { provider: String, message: String },
+    /// Exit code 1 or I/O error: task/logic failure, not retryable by switching provider.
+    Failed(String),
+}
+
+impl std::fmt::Display for ChildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ChildError::UpstreamExhausted { provider, message } => {
+                write!(f, "[upstream-exhausted provider={provider}] {message}")
+            }
+            ChildError::Failed(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
 /// Configuration for a cleave run.
 pub struct CleaveConfig {
     pub agent_binary: PathBuf,
@@ -248,38 +269,45 @@ pub async fn run_cleave(
             let idle_timeout_secs = config.idle_timeout_secs;
             let progress_sink = config.progress_sink.clone();
 
-            // Route per-child model: if inventory is available and child has no explicit model,
-            // infer capability tier from scope size and route to best provider+model.
+            // Route per-child model: explicit plan model wins; if absent, infer from scope size.
+            // Parent model is the floor — we never route to a tier above the parent.
             let model = if let Some(ref inv_lock) = config.inventory {
                 let child_state = &state.children[info.child_idx];
-                if child_state
-                    .execute_model
-                    .as_deref()
-                    .is_none_or(|m| m == config.model)
-                {
-                    let inv = inv_lock.read().await;
-                    let tier = crate::routing::infer_capability_tier(child_state.scope.len());
-                    let req = crate::routing::CapabilityRequest {
-                        tier,
-                        prefer_local: false,
-                        avoid_providers: vec![],
-                    };
-                    let candidates = crate::routing::route(&req, &inv);
-                    if let Some(best) = candidates.first() {
-                        let routed = format!("{}:{}", best.provider_id, best.model_id);
-                        tracing::info!(child = %info.label, tier = %tier, routed = %routed, "per-child routing");
-                        routed
+                if let Some(explicit) = &child_state.execute_model {
+                    if explicit != &config.model {
+                        // Plan provided an explicit per-child or plan-level override — use it.
+                        tracing::info!(child = %info.label, model = %explicit, "using explicit plan model");
+                        explicit.clone()
                     } else {
-                        config.model.clone()
+                        // Model was set to parent's model (from_plan default path) — apply routing.
+                        let inv = inv_lock.read().await;
+                        let parent_tier = crate::routing::infer_model_tier(&config.model);
+                        let scope_tier = crate::routing::infer_capability_tier(child_state.scope.len());
+                        // Cap the child at the parent's tier so delegation never upgrades cost.
+                        let tier = scope_tier.min(parent_tier);
+                        let req = crate::routing::CapabilityRequest {
+                            tier,
+                            prefer_local: false,
+                            avoid_providers: vec![],
+                        };
+                        let candidates = crate::routing::route(&req, &inv);
+                        if let Some(best) = candidates.first() {
+                            let routed = format!("{}:{}", best.provider_id, best.model_id);
+                            tracing::info!(child = %info.label, scope_tier = %scope_tier, parent_tier = %parent_tier, effective_tier = %tier, routed = %routed, "per-child routing");
+                            routed
+                        } else {
+                            config.model.clone()
+                        }
                     }
                 } else {
-                    child_state
-                        .execute_model
-                        .clone()
-                        .unwrap_or_else(|| config.model.clone())
+                    config.model.clone()
                 }
             } else {
-                config.model.clone()
+                // No inventory — use plan model or parent.
+                state.children[info.child_idx]
+                    .execute_model
+                    .clone()
+                    .unwrap_or_else(|| config.model.clone())
             };
 
             let inherited_env = config.inherited_env.clone();
@@ -342,28 +370,135 @@ pub async fn run_cleave(
                     });
                 }
                 Err(e) => {
-                    state.children[child_idx].status = ChildStatus::Failed;
-                    state.children[child_idx].error = Some(format!("{e}"));
-                    tracing::error!(child = %label, "child failed: {e}");
+                    match e {
+                        ChildError::UpstreamExhausted { ref provider, ref message } => {
+                            tracing::warn!(
+                                child = %label,
+                                provider = %provider,
+                                "upstream exhausted — attempting cross-provider fallback"
+                            );
 
-                    // Salvage whatever work the child produced before failing.
-                    // A timed-out or errored child may have made real edits
-                    // inside a submodule that would otherwise be silently lost.
-                    let salvaged = salvage_worktree_changes(&state.children[child_idx], true);
-                    if salvaged > 0 {
-                        tracing::info!(
-                            child = %label,
-                            files = salvaged,
-                            "salvaged changes from failed child"
-                        );
+                            // Resolve fallback from the inventory, avoiding the failed provider.
+                            let fallback_model = if let Some(ref inv_lock) = config.inventory {
+                                let inv = inv_lock.read().await;
+                                let failed_model = state.children[child_idx]
+                                    .execute_model
+                                    .as_deref()
+                                    .unwrap_or(&config.model);
+                                let tier = crate::routing::infer_model_tier(failed_model);
+                                let req = crate::routing::CapabilityRequest {
+                                    tier,
+                                    prefer_local: false,
+                                    avoid_providers: vec![provider.clone()],
+                                };
+                                crate::routing::route(&req, &inv)
+                                    .into_iter()
+                                    .next()
+                                    .map(|c| format!("{}:{}", c.provider_id, c.model_id))
+                            } else {
+                                None
+                            };
+
+                            if let Some(ref fb_model) = fallback_model {
+                                tracing::info!(child = %label, fallback = %fb_model, "retrying with fallback model");
+                                state.children[child_idx].execute_model = Some(fb_model.clone());
+
+                                let wt_path = state.children[child_idx]
+                                    .worktree_path
+                                    .as_deref()
+                                    .map(PathBuf::from)
+                                    .unwrap_or_else(|| workspace_path.join(format!("{}-wt-{}", child_idx, label)));
+
+                                // Re-read the prompt that was written during worktree setup.
+                                let fb_prompt = std::fs::read_to_string(wt_path.join(".cleave-prompt.md"))
+                                    .unwrap_or_default();
+
+                                let fb_dispatch = ChildDispatchConfig {
+                                    agent_binary: &config.agent_binary,
+                                    bridge_path: &config.bridge_path,
+                                    node: &config.node,
+                                    model: fb_model,
+                                    max_turns: config.max_turns,
+                                    timeout_secs: config.timeout_secs,
+                                    idle_timeout_secs: config.idle_timeout_secs,
+                                    inherited_env: &config.inherited_env,
+                                    progress_sink: config.progress_sink.clone(),
+                                };
+
+                                let fallback_result = dispatch_child(
+                                    &fb_dispatch,
+                                    &wt_path,
+                                    label,
+                                    &fb_prompt,
+                                    cancel.clone(),
+                                ).await;
+
+                                match fallback_result {
+                                    Ok(output) => {
+                                        state.children[child_idx].status = ChildStatus::Completed;
+                                        state.children[child_idx].duration_secs = Some(output.duration_secs);
+                                        tracing::info!(
+                                            child = %label, fallback = %fb_model,
+                                            duration = format!("{:.0}s", output.duration_secs),
+                                            "child completed via fallback"
+                                        );
+                                        let ac = salvage_worktree_changes(&state.children[child_idx], false);
+                                        if ac > 0 {
+                                            config.progress_sink.emit(&ProgressEvent::AutoCommit {
+                                                child: label.clone(), files: ac,
+                                            });
+                                        }
+                                        config.progress_sink.emit(&ProgressEvent::ChildStatus {
+                                            child: label.clone(),
+                                            status: ChildProgressStatus::Completed,
+                                            duration_secs: Some(output.duration_secs),
+                                            error: None,
+                                        });
+                                    }
+                                    Err(fb_e) => {
+                                        let combined = format!("primary: {message}\nfallback({fb_model}): {fb_e}");
+                                        tracing::error!(child = %label, "fallback also failed: {fb_e}");
+                                        state.children[child_idx].status = ChildStatus::UpstreamExhausted;
+                                        state.children[child_idx].error = Some(combined.clone());
+                                        config.progress_sink.emit(&ProgressEvent::ChildStatus {
+                                            child: label.clone(),
+                                            status: ChildProgressStatus::UpstreamExhausted,
+                                            duration_secs: None,
+                                            error: Some(combined),
+                                        });
+                                    }
+                                }
+                            } else {
+                                tracing::error!(child = %label, "no fallback provider available — upstream-exhausted");
+                                state.children[child_idx].status = ChildStatus::UpstreamExhausted;
+                                state.children[child_idx].error = Some(message.clone());
+                                config.progress_sink.emit(&ProgressEvent::ChildStatus {
+                                    child: label.clone(),
+                                    status: ChildProgressStatus::UpstreamExhausted,
+                                    duration_secs: None,
+                                    error: Some(message.clone()),
+                                });
+                            }
+                        }
+
+                        ChildError::Failed(msg) => {
+                            state.children[child_idx].status = ChildStatus::Failed;
+                            state.children[child_idx].error = Some(msg.clone());
+                            tracing::error!(child = %label, "child failed: {msg}");
+
+                            let salvaged = salvage_worktree_changes(&state.children[child_idx], true);
+                            if salvaged > 0 {
+                                tracing::info!(child = %label, files = salvaged, "salvaged changes from failed child");
+                            }
+
+                            config.progress_sink.emit(&ProgressEvent::ChildStatus {
+                                child: label.clone(),
+                                status: ChildProgressStatus::Failed,
+                                duration_secs: None,
+                                error: Some(msg),
+                            });
+                        }
                     }
-
-                    config.progress_sink.emit(&ProgressEvent::ChildStatus {
-                        child: label.clone(),
-                        status: ChildProgressStatus::Failed,
-                        duration_secs: Some(started.elapsed().as_secs_f64()),
-                        error: Some(format!("{e}")),
-                    });
                 }
             }
         }
@@ -380,6 +515,7 @@ pub async fn run_cleave(
         let dominated_skip = match child.status {
             ChildStatus::Completed => false,
             ChildStatus::Failed => false, // Try merge — salvage may have produced commits
+            ChildStatus::UpstreamExhausted => false, // Also try merge — fallback may have produced commits
             _ => true,
         };
         if dominated_skip {
@@ -524,6 +660,27 @@ struct ChildDispatchConfig<'a> {
 
 /// Dispatch a single omegon-agent child process.
 async fn dispatch_child(
+    config: &ChildDispatchConfig<'_>,
+    cwd: &Path,
+    label: &str,
+    prompt: &str,
+    cancel: CancellationToken,
+) -> Result<ChildOutput, ChildError> {
+    let provider = config.model.split(':').next().unwrap_or("unknown").to_string();
+    dispatch_child_inner(config, cwd, label, prompt, cancel)
+        .await
+        .map_err(|e| {
+            let msg = e.to_string();
+            // Exit code 2 means the child tagged itself as upstream-exhausted via main.rs.
+            if msg.contains("exit code 2") || msg.contains("upstream provider exhausted") {
+                ChildError::UpstreamExhausted { provider, message: msg }
+            } else {
+                ChildError::Failed(msg)
+            }
+        })
+}
+
+async fn dispatch_child_inner(
     config: &ChildDispatchConfig<'_>,
     cwd: &Path,
     label: &str,

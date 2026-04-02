@@ -1,18 +1,18 @@
 ---
 task_id: 0
-label: readme-read
+label: fail-probe
 siblings: []
 ---
 
-# Task 0: readme-read
+# Task 0: fail-probe
 
 ## Root Directive
 
-> Delegate a basic file read. Have the child read README.md in the repository root and report back the first heading it finds. Do not modify any files.
+> Run this task with a nonexistent model to force a child exit code 1 and validate stderr tail capture.
 
 ## Mission
 
-Read README.md at the repository root and report the first heading found. Do not edit files.
+List the top-level files in the repo and write a brief summary. Make no edits.
 
 ## Scope
 

@@ -89,6 +89,8 @@ pub enum ProgressEvent {
 pub enum ChildProgressStatus {
     Completed,
     Failed,
+    /// Provider upstream exhausted — orchestrator may retry with a fallback provider.
+    UpstreamExhausted,
 }
 
 /// Embedding-aware sink for progress events.

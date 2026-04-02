@@ -647,6 +647,17 @@ async fn stream_with_retry(
                 let is_transient = is_transient_error(&err_msg);
 
                 if !is_transient || attempt > config.max_retries {
+                    if is_transient && attempt > config.max_retries {
+                        // All retry budget spent on a transient failure.
+                        // Tag the error so the process exit handler (and cleave orchestrator)
+                        // can distinguish upstream exhaustion from a logic failure.
+                        tracing::error!(attempts = config.max_retries, "upstream provider exhausted: {err_msg}");
+                        return Err(anyhow::anyhow!(
+                            "upstream provider exhausted after {} retries: {}",
+                            config.max_retries,
+                            err_msg
+                        ));
+                    }
                     if attempt > 1 {
                         tracing::error!("LLM error after {attempt} attempts: {err_msg}");
                     }
@@ -712,6 +723,13 @@ fn is_malformed_history(msg: &str) -> bool {
         || lower.contains("must have a corresponding")
         || lower.contains("field required")
         || lower.contains("does not match pattern")
+}
+
+/// Returns true if the error was produced by `stream_with_retry` exhausting its retry
+/// budget on transient upstream failures. The orchestrator uses this to distinguish
+/// provider-rate-limit failures from logic failures when classifying child exit codes.
+pub fn is_upstream_exhausted(e: &anyhow::Error) -> bool {
+    e.to_string().starts_with("upstream provider exhausted after")
 }
 
 /// Heuristic: is this error message transient (worth retrying)?

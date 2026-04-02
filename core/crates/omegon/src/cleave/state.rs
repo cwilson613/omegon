@@ -50,6 +50,9 @@ pub enum ChildStatus {
     Running,
     Completed,
     Failed,
+    /// Provider upstream exhausted (rate-limit after all retries). May be retried
+    /// by the orchestrator using a cross-provider fallback.
+    UpstreamExhausted,
 }
 
 impl CleaveState {
@@ -79,20 +82,31 @@ impl CleaveState {
             .children
             .iter()
             .enumerate()
-            .map(|(i, c)| ChildState {
-                child_id: i,
-                label: c.label.clone(),
-                description: c.description.clone(),
-                scope: c.scope.clone(),
-                depends_on: c.depends_on.clone(),
-                status: ChildStatus::Pending,
-                error: None,
-                branch: Some(format!("cleave/{}-{}", i, c.label)),
-                worktree_path: None,
-                backend: "native".to_string(),
-                execute_model: Some(model.to_string()),
-                provider_id: None,
-                duration_secs: None,
+            .map(|(i, c)| {
+                // Model priority: child explicit > plan default > None (triggers routing).
+                // When None the orchestrator applies scope-based cost-aware routing.
+                // We only fall back to the parent model if neither is set, so that the
+                // orchestrator routing condition (is_none_or(m == config.model)) still fires.
+                let execute_model = c
+                    .model
+                    .clone()
+                    .or_else(|| plan.default_model.clone())
+                    .or_else(|| Some(model.to_string()));
+                ChildState {
+                    child_id: i,
+                    label: c.label.clone(),
+                    description: c.description.clone(),
+                    scope: c.scope.clone(),
+                    depends_on: c.depends_on.clone(),
+                    status: ChildStatus::Pending,
+                    error: None,
+                    branch: Some(format!("cleave/{}-{}", i, c.label)),
+                    worktree_path: None,
+                    backend: "native".to_string(),
+                    execute_model,
+                    provider_id: None,
+                    duration_secs: None,
+                }
             })
             .collect();
 

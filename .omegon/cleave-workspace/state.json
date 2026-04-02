@@ -1,36 +1,35 @@
 {
-  "runId": "clv-plvpwxwv-ubnn",
-  "directive": "Delegate a basic file read. Have the child read README.md in the repository root and report back the first heading it finds. Do not modify any files.",
+  "runId": "clv-01lvs026-kvhi",
+  "directive": "Run this task with a nonexistent model to force a child exit code 1 and validate stderr tail capture.",
   "repoPath": "/Users/cwilson/workspace/black-meridian/omegon",
   "workspacePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace",
   "children": [
     {
       "childId": 0,
-      "label": "readme-read",
-      "description": "Read README.md at the repository root and report the first heading found. Do not edit files.",
+      "label": "fail-probe",
+      "description": "List the top-level files in the repo and write a brief summary. Make no edits.",
       "scope": [
         "README.md"
       ],
       "dependsOn": [],
-      "status": "failed",
-      "error": "branch not found: cleave/0-readme-read",
-      "branch": "cleave/0-readme-read",
+      "status": "completed",
+      "branch": "cleave/0-fail-probe",
       "backend": "native",
       "executeModel": "anthropic:claude-sonnet-4-6",
-      "durationSecs": 11.001895834
+      "durationSecs": 15.113058542
     }
   ],
   "plan": {
     "children": [
       {
         "depends_on": [],
-        "description": "Read README.md at the repository root and report the first heading found. Do not edit files.",
-        "label": "readme-read",
+        "description": "List the top-level files in the repo and write a brief summary. Make no edits.",
+        "label": "fail-probe",
         "scope": [
           "README.md"
         ]
       }
     ],
-    "rationale": "Minimal cleave smoke test of native tool surface by delegating a single file read."
+    "rationale": "Smoke test stderr tail capture on non-zero child exit (rc.9)"
   }
 }

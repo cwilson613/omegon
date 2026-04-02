@@ -235,27 +235,47 @@ pub fn route(req: &CapabilityRequest, inventory: &ProviderInventory) -> Vec<Prov
 /// Default model for a provider at a given tier.
 fn default_model_for_provider(provider_id: &str, tier: CapabilityTier) -> String {
     match (provider_id, tier) {
-        ("anthropic", CapabilityTier::Max) => "claude-sonnet-4-20250514".to_string(),
-        ("anthropic", CapabilityTier::Frontier) => "claude-sonnet-4-20250514".to_string(),
-        ("anthropic", CapabilityTier::Mid) => "claude-haiku-3-5-20241022".to_string(),
-        ("anthropic", CapabilityTier::Leaf) => "claude-haiku-3-5-20241022".to_string(),
+        ("anthropic", CapabilityTier::Max) => "claude-opus-4-6".to_string(),
+        ("anthropic", CapabilityTier::Frontier) => "claude-sonnet-4-6".to_string(),
+        ("anthropic", _) => "claude-haiku-4-5-20251001".to_string(),
         ("openai", CapabilityTier::Max) => "o3".to_string(),
-        ("openai", CapabilityTier::Frontier) => "gpt-4.1".to_string(),
-        ("openai", CapabilityTier::Mid) => "gpt-4.1-mini".to_string(),
-        ("openai", CapabilityTier::Leaf) => "gpt-4.1-nano".to_string(),
-        ("openai-codex", CapabilityTier::Max | CapabilityTier::Frontier) => "gpt-5.4".to_string(),
-        ("openai-codex", CapabilityTier::Mid | CapabilityTier::Leaf) => {
-            "gpt-5.4-mini".to_string()
-        }
+        ("openai", CapabilityTier::Frontier) => "gpt-5.4".to_string(),
+        ("openai", CapabilityTier::Mid) => "o4-mini".to_string(),
+        ("openai", _) => "gpt-4.1".to_string(),
+        ("openai-codex", CapabilityTier::Mid | CapabilityTier::Leaf) => "gpt-5.4-mini".to_string(),
+        ("openai-codex", _) => "gpt-5.4".to_string(),
         ("groq", _) => "llama-3.3-70b-versatile".to_string(),
         ("xai", _) => "grok-3-mini-fast".to_string(),
         ("mistral", _) => "devstral-small-2505".to_string(),
         ("cerebras", _) => "llama-3.3-70b".to_string(),
-        ("openrouter", CapabilityTier::Max) => "anthropic/claude-sonnet-4-20250514".to_string(),
-        ("openrouter", _) => "anthropic/claude-haiku-3-5-20241022".to_string(),
+        ("openrouter", CapabilityTier::Max) => "anthropic/claude-opus-4-6".to_string(),
+        ("openrouter", CapabilityTier::Frontier) => "anthropic/claude-sonnet-4-6".to_string(),
+        ("openrouter", _) => "anthropic/claude-haiku-4-5-20251001".to_string(),
         ("huggingface", _) => "Qwen/Qwen3-32B".to_string(),
         ("ollama", _) => "qwen3:32b".to_string(),
         _ => "auto".to_string(),
+    }
+}
+
+/// Infer the capability tier of a fully-qualified model string ("provider:model").
+/// Used by the orchestrator to determine how much headroom children get relative
+/// to the parent model — children are capped to parent tier to avoid accidentally
+/// routing a leaf-scoped task to a more expensive model than the one that launched the run.
+pub fn infer_model_tier(model_str: &str) -> CapabilityTier {
+    let (provider, model) = model_str.split_once(':').unwrap_or(("", model_str));
+    match (provider, model) {
+        ("anthropic", m) if m.contains("opus") => CapabilityTier::Max,
+        ("anthropic", m) if m.contains("sonnet") => CapabilityTier::Frontier,
+        ("anthropic", _) => CapabilityTier::Leaf, // haiku and unknowns
+        ("openai", "o3") => CapabilityTier::Max,
+        ("openai", "gpt-5.4") => CapabilityTier::Frontier,
+        ("openai", "o4-mini") | ("openai", "gpt-4.1") => CapabilityTier::Mid,
+        ("openai", m) if m.contains("nano") || m.contains("mini") => CapabilityTier::Leaf,
+        ("openai", _) => CapabilityTier::Frontier,
+        ("openai-codex", m) if m.contains("mini") => CapabilityTier::Mid,
+        ("openai-codex", _) => CapabilityTier::Max,
+        ("ollama", _) | ("local", _) => CapabilityTier::Mid,
+        _ => CapabilityTier::Frontier, // unknown providers assumed capable
     }
 }
 
