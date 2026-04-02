@@ -43,13 +43,12 @@ jobs:
       # Assemble container build context
 
       - name: Deploy to Cloudflare Pages
+        run: |
+          npx wrangler@latest pages project create omegon-styrene-io --production-branch main 2>&1 || true
+          npx wrangler@latest pages deploy site/dist --project-name omegon-styrene-io --commit-dirty=true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          npm install -g wrangler
-          wrangler pages project create omegon-styrene-io --production-branch main 2>&1 || true
-          wrangler pages deploy site/dist --project-name omegon-styrene-io --commit-dirty=true
 
       - name: Prepare container build context
         run: |
