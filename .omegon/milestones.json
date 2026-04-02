@@ -320,9 +320,9 @@
     "nodes": [],
     "frozen": false,
     "opened": "2026-04-01T23:29:18Z",
-    "last_rc": "2026-04-02T00:39:58Z",
-    "rc_version": "0.15.7-rc.2",
-    "rc_count": 2,
+    "last_rc": "2026-04-02T00:41:26Z",
+    "rc_version": "0.15.7-rc.3",
+    "rc_count": 3,
     "released": null,
     "notes": [
       "feat(footer): add session cost estimate to engine block",
