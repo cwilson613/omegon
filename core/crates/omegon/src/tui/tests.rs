@@ -879,6 +879,17 @@ fn slash_exit_returns_quit() {
 }
 
 #[test]
+fn slash_context_compress_alias_requests_compaction() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let result = app.handle_slash_command("/context compress", &tx);
+    assert!(!matches!(result, SlashResult::NotACommand));
+    if let SlashResult::Display(text) = result {
+        assert!(text.contains("compaction"), "should confirm compaction request: {text}");
+    }
+}
+
+#[test]
 fn slash_compact_returns_handled() {
     let mut app = test_app();
     let tx = test_tx();

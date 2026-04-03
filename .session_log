@@ -1,0 +1,35 @@
+# Session Log
+
+Append-only record of development sessions. Read recent entries for context.
+
+## 2026-04-03 — main (18t 1505tc 3m11s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  a1e5a33b refactor(session-log): move to .omegon/agent-journal.md
+  206f23d5 fix(tests): use machine-neutral cwd fixture in footer snapshot test
+  077d6527 fix(ci): push homebrew formula update from detached HEAD
+## 2026-04-03 — main (51t 1558tc 5m50s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  a1e5a33b refactor(session-log): move to .omegon/agent-journal.md
+  206f23d5 fix(tests): use machine-neutral cwd fixture in footer snapshot test
+  077d6527 fix(ci): push homebrew formula update from detached HEAD
+

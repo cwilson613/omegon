@@ -2646,9 +2646,9 @@ impl App {
                             let _ = tx.try_send(TuiCommand::ContextStatus);
                             SlashResult::Handled
                         }
-                        "compact" => {
+                        "compact" | "compress" => {
                             let _ = tx.try_send(TuiCommand::ContextCompact);
-                            SlashResult::Display("Compacting context…".into())
+                            SlashResult::Display("Requesting context compaction…".into())
                         }
                         "clear" => {
                             let _ = tx.try_send(TuiCommand::ContextClear);
@@ -2668,7 +2668,7 @@ impl App {
                             } else {
                                 SlashResult::Display(format!(
                                     "Unknown context option: {sub}.\n\
-                                     Use: /context [status|compact|clear|<class>]\n\
+                                     Use: /context [status|compact|compress|clear|<class>]\n\
                                      Classes: squad, maniple, clan, legion"
                                 ))
                             }
@@ -2678,8 +2678,8 @@ impl App {
             }
 
             "compact" => {
-                let _ = tx.try_send(TuiCommand::Compact);
-                SlashResult::Display("Compacting conversation now…".into())
+                let _ = tx.try_send(TuiCommand::ContextCompact);
+                SlashResult::Display("Requesting context compaction…".into())
             }
 
             "clear" => {

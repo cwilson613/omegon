@@ -722,7 +722,7 @@ async fn stream_with_retry(
                 .unwrap_or("transient upstream failure");
             let _ = events.send(AgentEvent::SystemNotification {
                 message: format!(
-                    "⚠ {provider} degraded: {attempt} consecutive {kind_label} failures over {:.0}s — consider switching providers",
+                    "⚠ {provider} is seeing repeated transient upstream failures: {attempt} consecutive {kind_label} failures over {:.0}s — credentials still look valid; switch only if this persists",
                     elapsed.as_secs_f64()
                 ),
             });

@@ -1179,7 +1179,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     }
                 } else {
                     let _ = events_tx.send(AgentEvent::SystemNotification {
-                        message: "Nothing eligible to compact yet.".into(),
+                        message: "Nothing eligible to compact yet — compaction only summarizes older turns after the decay window.".into(),
                     });
                 }
             }
@@ -1253,7 +1253,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     }
                 } else {
                     let _ = events_tx.send(AgentEvent::SystemNotification {
-                        message: "Nothing to compress yet.".into(),
+                        message: "Nothing to compress yet — compaction only summarizes older turns after the decay window.".into(),
                     });
                 }
             }

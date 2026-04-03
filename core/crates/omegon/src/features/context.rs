@@ -11,6 +11,15 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
+fn dispatch_command(command_tx: &SharedCommandTx, command: TuiCommand) -> bool {
+    if let Ok(guard) = command_tx.lock()
+        && let Some(ref tx) = *guard
+    {
+        return tx.try_send(command).is_ok();
+    }
+    false
+}
+
 use crate::tui::TuiCommand;
 
 /// Shared context metrics — updated by main loop, read by ContextProvider
@@ -127,12 +136,7 @@ impl Feature for ContextProvider {
                     metrics.thinking_level
                 );
 
-                // Also dispatch to TUI
-                if let Ok(guard) = self.command_tx.lock() {
-                    if let Some(ref tx) = *guard {
-                        let _ = tx.try_send(TuiCommand::ContextStatus);
-                    }
-                }
+                let _ = dispatch_command(&self.command_tx, TuiCommand::ContextStatus);
 
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text { text: result_text }],
@@ -147,36 +151,62 @@ impl Feature for ContextProvider {
             }
 
             "context_compact" => {
-                // Dispatch to TUI
-                if let Ok(guard) = self.command_tx.lock() {
-                    if let Some(ref tx) = *guard {
-                        let _ = tx.try_send(TuiCommand::ContextCompact);
-                    }
-                }
+                let dispatched = dispatch_command(&self.command_tx, TuiCommand::ContextCompact);
+                let text = if dispatched {
+                    "Context compaction requested."
+                } else {
+                    "Context compaction is unavailable in this mode (no interactive session command channel)."
+                };
                 Ok(ToolResult {
-                    content: vec![ContentBlock::Text {
-                        text: "Compression initiated. This may take a moment...".into(),
-                    }],
-                    details: json!({}),
+                    content: vec![ContentBlock::Text { text: text.into() }],
+                    details: json!({ "dispatched": dispatched }),
                 })
             }
 
             "context_clear" => {
-                // Dispatch to TUI
-                if let Ok(guard) = self.command_tx.lock() {
-                    if let Some(ref tx) = *guard {
-                        let _ = tx.try_send(TuiCommand::ContextClear);
-                    }
-                }
+                let dispatched = dispatch_command(&self.command_tx, TuiCommand::ContextClear);
+                let text = if dispatched {
+                    "Context clear requested."
+                } else {
+                    "Context clear is unavailable in this mode (no interactive session command channel)."
+                };
                 Ok(ToolResult {
-                    content: vec![ContentBlock::Text {
-                        text: "Context clear requested. You will start fresh in the next turn.".into(),
-                    }],
-                    details: json!({}),
+                    content: vec![ContentBlock::Text { text: text.into() }],
+                    details: json!({ "dispatched": dispatched }),
                 })
             }
 
             _ => Err(anyhow::anyhow!("unknown context tool: {}", tool_name)),
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn compact_tool_reports_when_no_command_channel_is_available() {
+        let metrics = SharedContextMetrics::new();
+        let command_tx = new_shared_command_tx();
+        let provider = ContextProvider::new(metrics, command_tx);
+        let result = provider
+            .execute(
+                "context_compact",
+                "call-1",
+                json!({}),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .expect("tool result");
+
+        match &result.content[0] {
+            ContentBlock::Text { text } => {
+                assert!(text.contains("unavailable in this mode"), "unexpected text: {text}");
+            }
+            other => panic!("unexpected content block: {other:?}"),
+        }
+        assert_eq!(result.details["dispatched"], false);
     }
 }
