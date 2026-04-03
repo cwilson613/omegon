@@ -287,4 +287,19 @@ Append-only record of development sessions. Read recent entries for context.
   74ebbe55 refactor(loop): extract upstream error matrix into dedicated module
   3a0fb72b refactor(loop): make provider error mapping table-driven
   fe959eed refactor(loop): add provider-specific upstream error matrix overrides
+## 2026-04-03 — main (13t 1766tc 8m20s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  7ef90db1 chore(release): 0.15.9-rc.2
+  e4794215 test(tui): accept updated footer snapshot for 0.15.8
+  b3000f93 chore: bump version to 0.15.8
 
