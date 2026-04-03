@@ -137,4 +137,19 @@ Append-only record of development sessions. Read recent entries for context.
   c1ac4211 feat(ipc): surface degraded provider runtime state
   9f3d90a2 fix(status): separate provider auth from runtime degradation
   49f0f4f2 fix(context): report dispatch truthfully and soften upstream warnings
+## 2026-04-03 — main (12t 1643tc 3m4s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  8ea844f9 fix(status): require repeated failures before provider degradation
+  c1ac4211 feat(ipc): surface degraded provider runtime state
+  9f3d90a2 fix(status): separate provider auth from runtime degradation
 

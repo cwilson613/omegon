@@ -655,26 +655,31 @@ async fn stream_with_retry(
         };
 
         let err_msg = err.to_string();
-        let transient_kind = classify_transient_error(&err_msg);
+        let upstream_class = classify_upstream_error(&err_msg);
+        let transient_kind = upstream_class.transient_kind();
         let is_transient = transient_kind.is_some();
         let provider = config.model.split(':').next().unwrap_or("upstream").to_string();
         let model = config.model.clone();
 
         if !is_transient {
             if attempt > 1 {
-                tracing::error!("LLM error after {attempt} attempts: {err_msg}");
+                tracing::error!(
+                    class = upstream_class.label(),
+                    recovery = ?upstream_class.recovery_action(),
+                    "LLM error after {attempt} attempts: {err_msg}"
+                );
             }
             return Err(err);
         }
 
-        let kind_label = transient_kind
-            .map(TransientFailureKind::label)
-            .unwrap_or("transient upstream failure");
+        let kind_label = upstream_class.label();
         append_upstream_failure_log(&UpstreamFailureLogEntry {
             timestamp: chrono::Utc::now().to_rfc3339(),
             provider: provider.clone(),
             model: model.clone(),
             failure_kind: kind_label.to_string(),
+            internal_class: kind_label.to_string(),
+            recovery_action: upstream_class.recovery_action(),
             attempt,
             delay_ms: delay,
             message: err_msg.clone(),
@@ -780,10 +785,44 @@ pub fn is_upstream_exhausted(e: &anyhow::Error) -> bool {
     e.to_string().starts_with("upstream exhausted:")
 }
 
-/// Heuristic: is this error message transient (worth retrying)?
+/// Explicit internal representation of upstream failures.
 ///
-/// Matches known transient error patterns. HTTP status codes use word-boundary
-/// matching to avoid false positives (e.g. "model gpt-500" shouldn't match).
+/// This is the harness-facing contract: classify unstable upstream prose into
+/// stable Omegon semantics before deciding whether to retry, compact, repair
+/// conversation state, request re-auth, or stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UpstreamErrorClass {
+    RateLimited,
+    ProviderOverloaded,
+    Upstream5xx,
+    Timeout,
+    StalledStream,
+    NetworkConnect,
+    NetworkReset,
+    Dns,
+    DecodeBody,
+    BridgeDropped,
+    ContextOverflow,
+    MalformedHistory,
+    SessionExpired,
+    AuthInvalid,
+    QuotaExceeded,
+    BadRequest,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum RecoveryAction {
+    RetrySameProvider,
+    FailoverPreferred,
+    CompactContext,
+    RepairConversation,
+    Reauthenticate,
+    Fatal,
+}
+
+/// Retryable transient subset used by the bounded backoff loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TransientFailureKind {
     RateLimited,
@@ -796,7 +835,6 @@ enum TransientFailureKind {
     Dns,
     DecodeBody,
     BridgeDropped,
-    GenericTransient,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -805,9 +843,75 @@ struct UpstreamFailureLogEntry {
     provider: String,
     model: String,
     failure_kind: String,
+    internal_class: String,
+    recovery_action: RecoveryAction,
     attempt: u32,
     delay_ms: u64,
     message: String,
+}
+
+impl UpstreamErrorClass {
+    fn label(self) -> &'static str {
+        match self {
+            Self::RateLimited => "rate-limited",
+            Self::ProviderOverloaded => "provider overloaded",
+            Self::Upstream5xx => "upstream 5xx",
+            Self::Timeout => "timeout",
+            Self::StalledStream => "stalled stream",
+            Self::NetworkConnect => "connection failure",
+            Self::NetworkReset => "connection reset",
+            Self::Dns => "dns failure",
+            Self::DecodeBody => "unreadable response body",
+            Self::BridgeDropped => "bridge dropped stream",
+            Self::ContextOverflow => "context overflow",
+            Self::MalformedHistory => "malformed conversation state",
+            Self::SessionExpired => "session expired",
+            Self::AuthInvalid => "authentication failed",
+            Self::QuotaExceeded => "quota exceeded",
+            Self::BadRequest => "invalid request",
+            Self::Unknown => "unknown upstream failure",
+        }
+    }
+
+    fn recovery_action(self) -> RecoveryAction {
+        match self {
+            Self::RateLimited | Self::ProviderOverloaded => RecoveryAction::FailoverPreferred,
+            Self::Upstream5xx
+            | Self::Timeout
+            | Self::StalledStream
+            | Self::NetworkConnect
+            | Self::NetworkReset
+            | Self::Dns
+            | Self::DecodeBody
+            | Self::BridgeDropped => RecoveryAction::RetrySameProvider,
+            Self::ContextOverflow => RecoveryAction::CompactContext,
+            Self::MalformedHistory => RecoveryAction::RepairConversation,
+            Self::SessionExpired | Self::AuthInvalid => RecoveryAction::Reauthenticate,
+            Self::QuotaExceeded | Self::BadRequest | Self::Unknown => RecoveryAction::Fatal,
+        }
+    }
+
+    fn transient_kind(self) -> Option<TransientFailureKind> {
+        match self {
+            Self::RateLimited => Some(TransientFailureKind::RateLimited),
+            Self::ProviderOverloaded => Some(TransientFailureKind::ProviderOverloaded),
+            Self::Upstream5xx => Some(TransientFailureKind::Upstream5xx),
+            Self::Timeout => Some(TransientFailureKind::Timeout),
+            Self::StalledStream => Some(TransientFailureKind::StalledStream),
+            Self::NetworkConnect => Some(TransientFailureKind::NetworkConnect),
+            Self::NetworkReset => Some(TransientFailureKind::NetworkReset),
+            Self::Dns => Some(TransientFailureKind::Dns),
+            Self::DecodeBody => Some(TransientFailureKind::DecodeBody),
+            Self::BridgeDropped => Some(TransientFailureKind::BridgeDropped),
+            Self::ContextOverflow
+            | Self::MalformedHistory
+            | Self::SessionExpired
+            | Self::AuthInvalid
+            | Self::QuotaExceeded
+            | Self::BadRequest
+            | Self::Unknown => None,
+        }
+    }
 }
 
 impl TransientFailureKind {
@@ -823,7 +927,6 @@ impl TransientFailureKind {
             Self::Dns => "dns failure",
             Self::DecodeBody => "unreadable response body",
             Self::BridgeDropped => "bridge dropped stream",
-            Self::GenericTransient => "transient upstream failure",
         }
     }
 }
@@ -875,62 +978,77 @@ fn append_upstream_failure_log(entry: &UpstreamFailureLogEntry) {
     let _ = writeln!(file, "{line}");
 }
 
-fn classify_transient_error(msg: &str) -> Option<TransientFailureKind> {
+fn classify_upstream_error(msg: &str) -> UpstreamErrorClass {
     let lower = msg.to_lowercase();
 
-    // Context overflow and malformed history errors are NOT transient —
-    // they need structural repair (compaction/decay), not blind retries.
-    if is_context_overflow(&lower) || is_malformed_history(&lower) {
-        return None;
+    if is_context_overflow(&lower) {
+        return UpstreamErrorClass::ContextOverflow;
     }
-
+    if is_malformed_history(&lower) {
+        return UpstreamErrorClass::MalformedHistory;
+    }
+    if lower.contains("session expired")
+        || lower.contains("session has expired")
+        || lower.contains("out of session")
+        || lower.contains("out-of-session")
+        || lower.contains("please log in again")
+    {
+        return UpstreamErrorClass::SessionExpired;
+    }
+    if lower.contains("invalid api key")
+        || lower.contains("unauthorized")
+        || contains_word(&lower, "401")
+        || lower.contains("forbidden")
+        || contains_word(&lower, "403")
+        || lower.contains("authentication")
+    {
+        return UpstreamErrorClass::AuthInvalid;
+    }
+    if lower.contains("quota")
+        || lower.contains("insufficient credits")
+        || lower.contains("billing")
+        || lower.contains("usage limit")
+    {
+        return UpstreamErrorClass::QuotaExceeded;
+    }
     if lower.contains("rate limit")
         || lower.contains("rate_limit")
         || lower.contains("too many requests")
         || contains_word(&lower, "429")
     {
-        return Some(TransientFailureKind::RateLimited);
+        return UpstreamErrorClass::RateLimited;
     }
-
     if lower.contains("overloaded") || lower.contains("capacity") || contains_word(&lower, "529") {
-        return Some(TransientFailureKind::ProviderOverloaded);
+        return UpstreamErrorClass::ProviderOverloaded;
     }
-
     if lower.contains("stream idle for") || lower.contains("connection may be stalled") {
-        return Some(TransientFailureKind::StalledStream);
+        return UpstreamErrorClass::StalledStream;
     }
-
     if lower.contains("timeout") || lower.contains("timed out") {
-        return Some(TransientFailureKind::Timeout);
+        return UpstreamErrorClass::Timeout;
     }
-
     if lower.contains("connection refused") || lower.contains("connection closed") {
-        return Some(TransientFailureKind::NetworkConnect);
+        return UpstreamErrorClass::NetworkConnect;
     }
-
     if lower.contains("connection reset")
         || lower.contains("reset by peer")
         || lower.contains("broken pipe")
         || lower.contains("unexpected eof")
     {
-        return Some(TransientFailureKind::NetworkReset);
+        return UpstreamErrorClass::NetworkReset;
     }
-
     if lower.contains("dns error") || lower.contains("name resolution") {
-        return Some(TransientFailureKind::Dns);
+        return UpstreamErrorClass::Dns;
     }
-
     if lower.contains("error decoding response body")
         || lower.contains("decode response body")
         || lower.contains("failed to decode response body")
     {
-        return Some(TransientFailureKind::DecodeBody);
+        return UpstreamErrorClass::DecodeBody;
     }
-
     if lower.contains("stream ended without") || lower.contains("bridge may have crashed") {
-        return Some(TransientFailureKind::BridgeDropped);
+        return UpstreamErrorClass::BridgeDropped;
     }
-
     if lower.contains("server_error")
         || lower.contains("temporarily")
         || lower.contains("try again")
@@ -938,18 +1056,22 @@ fn classify_transient_error(msg: &str) -> Option<TransientFailureKind> {
         || lower.contains("bad gateway")
         || lower.contains("internal server error")
     {
-        return Some(TransientFailureKind::Upstream5xx);
+        return UpstreamErrorClass::Upstream5xx;
     }
-
-    // HTTP status codes — require word boundary (space, punctuation, or start/end)
-    // to avoid matching model names like "gpt-500" or version strings
     for code in ["500", "502", "503"] {
         if contains_word(&lower, code) {
-            return Some(TransientFailureKind::Upstream5xx);
+            return UpstreamErrorClass::Upstream5xx;
         }
     }
+    if contains_word(&lower, "400") || lower.contains("invalid request") || lower.contains("bad request") {
+        return UpstreamErrorClass::BadRequest;
+    }
 
-    None
+    UpstreamErrorClass::Unknown
+}
+
+fn classify_transient_error(msg: &str) -> Option<TransientFailureKind> {
+    classify_upstream_error(msg).transient_kind()
 }
 
 fn is_transient_error(msg: &str) -> bool {
@@ -1672,44 +1794,103 @@ mod tests {
     #[test]
     fn transient_error_classification_is_specific() {
         assert_eq!(
+            classify_upstream_error("429 Too Many Requests: rate limit exceeded"),
+            UpstreamErrorClass::RateLimited
+        );
+        assert_eq!(
             classify_transient_error("429 Too Many Requests: rate limit exceeded"),
             Some(TransientFailureKind::RateLimited)
+        );
+        assert_eq!(
+            classify_upstream_error("error 529: capacity exceeded"),
+            UpstreamErrorClass::ProviderOverloaded
         );
         assert_eq!(
             classify_transient_error("error 529: capacity exceeded"),
             Some(TransientFailureKind::ProviderOverloaded)
         );
         assert_eq!(
+            classify_upstream_error("LLM stream idle for 30s — connection may be stalled"),
+            UpstreamErrorClass::StalledStream
+        );
+        assert_eq!(
             classify_transient_error("LLM stream idle for 30s — connection may be stalled"),
             Some(TransientFailureKind::StalledStream)
         );
         assert_eq!(
-            classify_transient_error("connection refused (os error 111)"),
-            Some(TransientFailureKind::NetworkConnect)
+            classify_upstream_error("connection refused (os error 111)"),
+            UpstreamErrorClass::NetworkConnect
         );
         assert_eq!(
-            classify_transient_error("connection reset by peer"),
-            Some(TransientFailureKind::NetworkReset)
+            classify_upstream_error("connection reset by peer"),
+            UpstreamErrorClass::NetworkReset
         );
         assert_eq!(
-            classify_transient_error("dns error: failed to lookup address"),
-            Some(TransientFailureKind::Dns)
+            classify_upstream_error("dns error: failed to lookup address"),
+            UpstreamErrorClass::Dns
         );
         assert_eq!(
-            classify_transient_error("error decoding response body: expected value at line 1 column 1"),
-            Some(TransientFailureKind::DecodeBody)
+            classify_upstream_error("error decoding response body: expected value at line 1 column 1"),
+            UpstreamErrorClass::DecodeBody
         );
         assert_eq!(
-            classify_transient_error(
+            classify_upstream_error(
                 "LLM stream ended without a completion event — the bridge may have crashed"
             ),
-            Some(TransientFailureKind::BridgeDropped)
+            UpstreamErrorClass::BridgeDropped
         );
         assert_eq!(
-            classify_transient_error("503 Service Unavailable"),
-            Some(TransientFailureKind::Upstream5xx)
+            classify_upstream_error("503 Service Unavailable"),
+            UpstreamErrorClass::Upstream5xx
         );
-        assert_eq!(classify_transient_error("401 Unauthorized"), None);
+        assert_eq!(
+            classify_upstream_error("401 Unauthorized"),
+            UpstreamErrorClass::AuthInvalid
+        );
+    }
+
+    #[test]
+    fn non_transient_upstream_errors_map_to_explicit_internal_classes() {
+        assert_eq!(
+            classify_upstream_error("session expired, please log in again"),
+            UpstreamErrorClass::SessionExpired
+        );
+        assert_eq!(
+            classify_upstream_error("400 Bad Request: invalid_request_error"),
+            UpstreamErrorClass::BadRequest
+        );
+        assert_eq!(
+            classify_upstream_error("quota exceeded for current billing period"),
+            UpstreamErrorClass::QuotaExceeded
+        );
+        assert_eq!(
+            classify_upstream_error("maximum context length exceeded"),
+            UpstreamErrorClass::ContextOverflow
+        );
+        assert_eq!(
+            classify_upstream_error("thinking.signature: Field required"),
+            UpstreamErrorClass::MalformedHistory
+        );
+        assert_eq!(
+            classify_upstream_error("session expired, please log in again").recovery_action(),
+            RecoveryAction::Reauthenticate
+        );
+        assert_eq!(
+            classify_upstream_error("400 Bad Request: invalid_request_error").recovery_action(),
+            RecoveryAction::Fatal
+        );
+        assert_eq!(
+            classify_upstream_error("maximum context length exceeded").recovery_action(),
+            RecoveryAction::CompactContext
+        );
+        assert_eq!(
+            classify_transient_error("400 Bad Request: invalid_request_error"),
+            None
+        );
+        assert_eq!(
+            classify_transient_error("session expired, please log in again"),
+            None
+        );
     }
 
     #[test]
@@ -1775,6 +1956,8 @@ mod tests {
             provider: "anthropic".into(),
             model: "anthropic:claude-sonnet-4-6".into(),
             failure_kind: "rate-limited".into(),
+            internal_class: "rate-limited".into(),
+            recovery_action: RecoveryAction::FailoverPreferred,
             attempt: 3,
             delay_ms: 1500,
             message: "429 Too Many Requests".into(),
