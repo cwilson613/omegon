@@ -831,9 +831,15 @@ impl TransientFailureKind {
 impl TransientFailureKind {
     fn operator_detail(self, provider: &str, err_msg: &str) -> String {
         match self {
-            Self::DecodeBody => format!(
-                "{provider} returned an unreadable response body"
-            ),
+            Self::DecodeBody => format!("{provider} returned an unreadable response body"),
+            Self::BridgeDropped => {
+                format!("{provider} dropped the response stream before completion")
+            }
+            Self::NetworkReset => format!("connection to {provider} was reset mid-stream"),
+            Self::NetworkConnect => format!("could not connect to {provider}"),
+            Self::Dns => format!("could not resolve {provider} endpoint"),
+            Self::Timeout => format!("{provider} did not respond before the timeout"),
+            Self::StalledStream => format!("{provider} stream stopped producing output"),
             _ => crate::util::truncate_str(err_msg, 300).to_string(),
         }
     }
@@ -1724,6 +1730,40 @@ mod tests {
             "error decoding response body: expected value at line 1 column 1",
         );
         assert_eq!(detail, "openai returned an unreadable response body");
+    }
+
+    #[test]
+    fn bridge_drop_operator_detail_hides_crash_jargon() {
+        let detail = TransientFailureKind::BridgeDropped.operator_detail(
+            "anthropic",
+            "LLM stream ended without a completion event — the bridge may have crashed",
+        );
+        assert_eq!(detail, "anthropic dropped the response stream before completion");
+    }
+
+    #[test]
+    fn network_operator_details_are_operator_facing() {
+        assert_eq!(
+            TransientFailureKind::NetworkReset.operator_detail(
+                "openrouter",
+                "connection reset by peer"
+            ),
+            "connection to openrouter was reset mid-stream"
+        );
+        assert_eq!(
+            TransientFailureKind::Dns.operator_detail(
+                "anthropic",
+                "dns error: failed to lookup address"
+            ),
+            "could not resolve anthropic endpoint"
+        );
+        assert_eq!(
+            TransientFailureKind::StalledStream.operator_detail(
+                "openai",
+                "LLM stream idle for 30s — connection may be stalled"
+            ),
+            "openai stream stopped producing output"
+        );
     }
 
     #[test]
