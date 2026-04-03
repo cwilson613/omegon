@@ -3,7 +3,7 @@
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
-## [0.15.7] - unreleased
+## [0.15.7] - 2026-04-03
 
 ### Fixed
 
