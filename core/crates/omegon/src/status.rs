@@ -214,6 +214,8 @@ struct RecentUpstreamFailure {
     timestamp: String,
 }
 
+const PROVIDER_RUNTIME_DEGRADED_THRESHOLD: usize = 3;
+
 impl HarnessStatus {
     /// One-line footer summary for TUI.
     /// Example: "⚙ SysEng │ ♪ Concise │ 🔓 3 secrets │ MCP:2 │ Squad │ Medium"
@@ -261,19 +263,7 @@ impl HarnessStatus {
                 .iter()
                 .filter(|entry| entry.provider == key)
                 .collect();
-            if matches.is_empty() {
-                provider.runtime_status = Some(ProviderRuntimeStatus::Healthy);
-                provider.recent_failure_count = Some(0);
-                provider.last_failure_kind = None;
-                provider.last_failure_at = None;
-                continue;
-            }
-
-            let last = matches[0];
-            provider.runtime_status = Some(ProviderRuntimeStatus::Degraded);
-            provider.recent_failure_count = Some(matches.len() as u32);
-            provider.last_failure_kind = Some(last.failure_kind.clone());
-            provider.last_failure_at = Some(last.timestamp.clone());
+            apply_provider_runtime_health(provider, &matches);
         }
     }
 
@@ -533,6 +523,26 @@ fn recent_upstream_failures() -> Vec<RecentUpstreamFailure> {
         });
     }
     recent
+}
+
+fn apply_provider_runtime_health(
+    provider: &mut ProviderStatus,
+    matches: &[&RecentUpstreamFailure],
+) {
+    provider.recent_failure_count = Some(matches.len() as u32);
+    if let Some(last) = matches.first() {
+        provider.last_failure_kind = Some(last.failure_kind.clone());
+        provider.last_failure_at = Some(last.timestamp.clone());
+    } else {
+        provider.last_failure_kind = None;
+        provider.last_failure_at = None;
+    }
+
+    provider.runtime_status = if matches.len() >= PROVIDER_RUNTIME_DEGRADED_THRESHOLD {
+        Some(ProviderRuntimeStatus::Degraded)
+    } else {
+        Some(ProviderRuntimeStatus::Healthy)
+    };
 }
 
 /// Detect container runtime (podman/docker).
@@ -806,5 +816,71 @@ mod tests {
     fn inference_kind_display() {
         assert_eq!(InferenceKind::Native.to_string(), "native");
         assert_eq!(InferenceKind::External.to_string(), "external");
+    }
+
+    #[test]
+    fn provider_runtime_health_requires_threshold_to_mark_degraded() {
+        let mut provider = ProviderStatus {
+            name: "openai".into(),
+            authenticated: true,
+            auth_method: Some("oauth".into()),
+            model: Some("gpt-5".into()),
+            runtime_status: None,
+            recent_failure_count: None,
+            last_failure_kind: None,
+            last_failure_at: None,
+        };
+        let recent = vec![
+            RecentUpstreamFailure {
+                provider: "openai".into(),
+                failure_kind: "timeout".into(),
+                timestamp: "2026-04-03T12:00:00Z".into(),
+            },
+            RecentUpstreamFailure {
+                provider: "openai".into(),
+                failure_kind: "timeout".into(),
+                timestamp: "2026-04-03T12:00:01Z".into(),
+            },
+        ];
+        let refs: Vec<&RecentUpstreamFailure> = recent.iter().collect();
+        apply_provider_runtime_health(&mut provider, &refs);
+        assert_eq!(provider.runtime_status, Some(ProviderRuntimeStatus::Healthy));
+        assert_eq!(provider.recent_failure_count, Some(2));
+        assert_eq!(provider.last_failure_kind.as_deref(), Some("timeout"));
+    }
+
+    #[test]
+    fn provider_runtime_health_marks_degraded_at_threshold() {
+        let mut provider = ProviderStatus {
+            name: "openai".into(),
+            authenticated: true,
+            auth_method: Some("oauth".into()),
+            model: Some("gpt-5".into()),
+            runtime_status: None,
+            recent_failure_count: None,
+            last_failure_kind: None,
+            last_failure_at: None,
+        };
+        let recent = vec![
+            RecentUpstreamFailure {
+                provider: "openai".into(),
+                failure_kind: "timeout".into(),
+                timestamp: "2026-04-03T12:00:02Z".into(),
+            },
+            RecentUpstreamFailure {
+                provider: "openai".into(),
+                failure_kind: "timeout".into(),
+                timestamp: "2026-04-03T12:00:01Z".into(),
+            },
+            RecentUpstreamFailure {
+                provider: "openai".into(),
+                failure_kind: "timeout".into(),
+                timestamp: "2026-04-03T12:00:00Z".into(),
+            },
+        ];
+        let refs: Vec<&RecentUpstreamFailure> = recent.iter().collect();
+        apply_provider_runtime_health(&mut provider, &refs);
+        assert_eq!(provider.runtime_status, Some(ProviderRuntimeStatus::Degraded));
+        assert_eq!(provider.recent_failure_count, Some(3));
     }
 }
