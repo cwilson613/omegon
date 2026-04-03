@@ -18,9 +18,43 @@ pub async fn execute(
 ) -> Result<ToolResult> {
     let start = Instant::now();
 
+    // Static blocklist: commands that are known to require interactive input.
+    // This is best-effort — programs can prompt from anywhere — but catches
+    // the common footguns before they wedge the process.
+    static INTERACTIVE_PREFIXES: &[&str] = &[
+        "sudo ", "sudo\t",
+        "ssh ", "ssh\t",
+        "passwd",
+        "su ", "su\t",
+        "kinit",
+    ];
+    let trimmed = command.trim_start();
+    for prefix in INTERACTIVE_PREFIXES {
+        if trimmed.starts_with(prefix) || trimmed == prefix.trim() {
+            return Ok(ToolResult {
+                content: vec![ContentBlock::Text {
+                    text: format!(
+                        "Blocked: `{}` requires interactive input (password/passphrase) \
+                         which the agent cannot provide.\n\n\
+                         Ask the operator to run this command in their terminal, \
+                         then retry the dependent step.",
+                        trimmed.split_whitespace().next().unwrap_or(trimmed)
+                    ),
+                }],
+                details: serde_json::json!({
+                    "exitCode": -1,
+                    "durationMs": 0,
+                    "blocked": true,
+                    "reason": "interactive_input_required",
+                }),
+            });
+        }
+    }
+
     let mut cmd = Command::new("bash");
     cmd.args(["-c", command])
         .current_dir(cwd)
+        .stdin(std::process::Stdio::null())  // /dev/null — commands needing input fail fast
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
@@ -291,6 +325,58 @@ mod tests {
     #[test]
     fn strip_terminal_noise_empty_input() {
         assert_eq!(strip_terminal_noise(""), "");
+    }
+
+    #[tokio::test]
+    async fn blocks_sudo() {
+        let cancel = CancellationToken::new();
+        let result = execute("sudo chown user file", Path::new("."), None, cancel)
+            .await
+            .unwrap();
+        let text = result.content[0].as_text().unwrap();
+        assert!(text.contains("Blocked"), "should block sudo: {text}");
+        assert_eq!(result.details["blocked"], true);
+        assert_eq!(result.details["reason"], "interactive_input_required");
+    }
+
+    #[tokio::test]
+    async fn blocks_sudo_with_leading_whitespace() {
+        let cancel = CancellationToken::new();
+        let result = execute("  sudo rm -rf /", Path::new("."), None, cancel)
+            .await
+            .unwrap();
+        assert_eq!(result.details["blocked"], true);
+    }
+
+    #[tokio::test]
+    async fn blocks_ssh() {
+        let cancel = CancellationToken::new();
+        let result = execute("ssh user@host", Path::new("."), None, cancel)
+            .await
+            .unwrap();
+        assert_eq!(result.details["blocked"], true);
+    }
+
+    #[tokio::test]
+    async fn does_not_block_echo_sudo() {
+        let cancel = CancellationToken::new();
+        let result = execute("echo sudo is great", Path::new("."), None, cancel)
+            .await
+            .unwrap();
+        assert_eq!(result.details["exitCode"], 0);
+        assert!(result.details.get("blocked").is_none());
+    }
+
+    #[tokio::test]
+    async fn stdin_is_null_so_read_fails() {
+        let cancel = CancellationToken::new();
+        // `read` from stdin should get immediate EOF, not hang
+        let result = execute("read -t 1 VAR; echo \"got: $VAR\"", Path::new("."), Some(5), cancel)
+            .await
+            .unwrap();
+        // Should complete quickly (not timeout), read gets EOF
+        let text = result.content[0].as_text().unwrap();
+        assert!(text.contains("got:"), "read should get EOF, not hang: {text}");
     }
 
     #[tokio::test]
