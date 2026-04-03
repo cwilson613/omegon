@@ -315,15 +315,15 @@
     "last_rc": "2026-04-01T16:03:17Z"
   },
   "0.15.7": {
-    "status": "rc",
+    "status": "released",
     "channel": "stable",
     "nodes": [],
-    "frozen": false,
+    "frozen": true,
     "opened": "2026-04-01T23:29:18Z",
     "last_rc": "2026-04-03T01:13:11Z",
     "rc_version": "0.15.7-rc.19",
     "rc_count": 18,
-    "released": null,
+    "released": "2026-04-03T01:29:50Z",
     "notes": [
       "feat(cleave): cancel-bounded transient retry, smoke harness, fallback env fix",
       "feat(cleave): per-child model routing, upstream-exhaustion detection, and cross-provider fallback",
