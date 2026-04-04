@@ -321,6 +321,21 @@ fn parse_rate_limit_snapshot(
         get(name).and_then(|v| v.trim().trim_end_matches('%').parse::<f32>().ok())
     };
     let parse_u64 = |name: &str| get(name).and_then(|v| v.trim().parse::<u64>().ok());
+    let parse_duration_secs = |name: &str| {
+        get(name).and_then(|v| {
+            let trimmed = v.trim();
+            if let Some(ms) = trimmed.strip_suffix("ms") {
+                ms.trim()
+                    .parse::<u64>()
+                    .ok()
+                    .map(|millis| millis.div_ceil(1000))
+            } else if let Some(secs) = trimmed.strip_suffix('s') {
+                secs.trim().parse::<u64>().ok()
+            } else {
+                trimmed.parse::<u64>().ok()
+            }
+        })
+    };
 
     let snapshot = omegon_traits::ProviderTelemetrySnapshot {
         provider: provider.to_string(),
@@ -330,10 +345,19 @@ fn parse_rate_limit_snapshot(
         requests_remaining: parse_u64("x-ratelimit-remaining-requests")
             .or_else(|| parse_u64("ratelimit-remaining-requests")),
         tokens_remaining: parse_u64("x-ratelimit-remaining-tokens")
-            .or_else(|| parse_u64("ratelimit-remaining-tokens")),
-        retry_after_secs: parse_u64("retry-after"),
+            .or_else(|| parse_u64("ratelimit-remaining-tokens"))
+            .or_else(|| parse_u64("x-ratelimit-remaining-tokens-usage-based"))
+            .or_else(|| parse_u64("ratelimit-remaining-tokens-usage-based")),
+        retry_after_secs: parse_duration_secs("retry-after")
+            .or_else(|| parse_duration_secs("x-ratelimit-reset-requests"))
+            .or_else(|| parse_duration_secs("ratelimit-reset-requests"))
+            .or_else(|| parse_duration_secs("x-ratelimit-reset-tokens"))
+            .or_else(|| parse_duration_secs("ratelimit-reset-tokens"))
+            .or_else(|| parse_duration_secs("x-ratelimit-reset-tokens-usage-based"))
+            .or_else(|| parse_duration_secs("ratelimit-reset-tokens-usage-based")),
         request_id: get("x-request-id")
             .or_else(|| get("request-id"))
+            .or_else(|| get("x-openai-request-id"))
             .map(ToOwned::to_owned),
     };
 
@@ -2059,6 +2083,34 @@ mod tests {
         assert_eq!(snapshot.unified_5h_utilization_pct, Some(42.0));
         assert_eq!(snapshot.unified_7d_utilization_pct, Some(64.0));
         assert_eq!(snapshot.retry_after_secs, Some(17));
+    }
+
+    #[test]
+    fn parse_rate_limit_snapshot_extracts_openai_reset_headers() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "x-ratelimit-remaining-requests",
+            reqwest::header::HeaderValue::from_static("4999"),
+        );
+        headers.insert(
+            "x-ratelimit-remaining-tokens-usage-based",
+            reqwest::header::HeaderValue::from_static("159976"),
+        );
+        headers.insert(
+            "x-ratelimit-reset-tokens",
+            reqwest::header::HeaderValue::from_static("12ms"),
+        );
+        headers.insert(
+            "x-openai-request-id",
+            reqwest::header::HeaderValue::from_static("req_123"),
+        );
+
+        let snapshot = parse_rate_limit_snapshot("openai-codex", &headers).expect("snapshot");
+        assert_eq!(snapshot.provider, "openai-codex");
+        assert_eq!(snapshot.requests_remaining, Some(4999));
+        assert_eq!(snapshot.tokens_remaining, Some(159976));
+        assert_eq!(snapshot.retry_after_secs, Some(1));
+        assert_eq!(snapshot.request_id.as_deref(), Some("req_123"));
     }
 
     #[test]

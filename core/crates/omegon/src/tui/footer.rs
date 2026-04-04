@@ -237,6 +237,12 @@ impl FooterData {
                 capitalize(&self.thinking_level)
             );
             let state_line = context_text;
+            let session_line = format_session_text(
+                &self.model_id,
+                self.turn,
+                self.session_input_tokens,
+                self.session_output_tokens,
+            );
 
             push_row(&mut lines, "provider", provider_text, t.border_dim(), t.fg(), true);
             if let Some(provider) = provider_runtime
@@ -277,6 +283,16 @@ impl FooterData {
                 widgets::percent_color(self.context_percent.min(100.0), t),
                 false,
             );
+            if self.turn > 0 || self.session_input_tokens > 0 || self.session_output_tokens > 0 {
+                push_row(
+                    &mut lines,
+                    "session",
+                    session_line,
+                    t.border_dim(),
+                    t.muted(),
+                    false,
+                );
+            }
             if let Some(quota_line) = format_provider_telemetry_line(&self.provider_telemetry) {
                 push_row(
                     &mut lines,
@@ -1201,6 +1217,27 @@ mod tests {
         assert!(text.contains("quota"), "got {text}");
         assert!(text.contains("req 42"), "got {text}");
         assert!(text.contains("tok 12k") || text.contains("tok 12K"), "got {text}");
+    }
+
+    #[test]
+    fn left_panel_renders_session_stats_when_present() {
+        let data = FooterData {
+            model_id: "openai-codex:gpt-5.4".into(),
+            model_provider: "openai-codex".into(),
+            provider_connected: true,
+            is_oauth: true,
+            thinking_level: "medium".into(),
+            model_tier: "victory".into(),
+            turn: 9,
+            session_input_tokens: 12_000,
+            session_output_tokens: 3_000,
+            ..Default::default()
+        };
+        let text = render_left_panel_text(&data, 72, 9);
+
+        assert!(text.contains("session"), "got {text}");
+        assert!(text.contains("T9"), "got {text}");
+        assert!(text.contains("¤12k/¤3k"), "got {text}");
     }
 
     #[test]
