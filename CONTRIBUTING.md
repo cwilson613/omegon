@@ -236,6 +236,8 @@ just release     # 0.15.3-rc.2 → 0.15.3 (stable)
 just publish     # push to GitHub, trigger CI
 ```
 
+Package publishing is CI-owned. `just publish` pushes the release refs and verifies the local install path; downstream package surfaces such as Homebrew update from the published GitHub release artifacts rather than from workstation-side scripts.
+
 ### Milestone tracking
 
 `.omegon/milestones.json` is automatically maintained by `just rc` and `just release` via `scripts/milestone-update.sh`. Each milestone tracks:

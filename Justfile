@@ -664,11 +664,7 @@ publish:
     echo ""
     just smoke
 
-    # ── 6. Update Homebrew tap ───────────────────────────────
-    echo ""
-    just brew-tap
-
-    # ── 7. Summary ────────────────────────────────────────────
+    # ── 6. Summary ────────────────────────────────────────────
     echo ""
     echo "╭──────────────────────────────────╮"
     echo "│  ✓ Published ${VERSION}          │"
@@ -677,7 +673,7 @@ publish:
     echo "  Binary:   $(which omegon) → $BINARY"
     echo "  Signing:  $SIGN_STATUS"
     echo "  Docs:     $PAGES pages built → CI deploying to omegon.styrene.dev"
-    echo "  Brew:     styrene-lab/homebrew-tap updated → brew upgrade omegon"
+    echo "  Packages: downstream packaging automation runs from published release artifacts"
     echo "  Release:  github.com/styrene-lab/omegon/releases/tag/$TAG"
     echo ""
     echo "  Monitor CI: gh run list --limit 3"

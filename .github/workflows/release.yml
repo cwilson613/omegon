@@ -167,6 +167,16 @@ jobs:
           cat *.sha256 > checksums.sha256
           cat checksums.sha256
 
+      - name: Generate release manifest
+        run: |
+          python3 scripts/release_manifest.py generate \
+            --tag "${RELEASE_TAG}" \
+            --checksums artifacts/checksums.sha256 \
+            --output artifacts/release-manifest.json \
+            --repo "${{ github.repository }}" \
+            --commit "${{ github.sha }}"
+          cat artifacts/release-manifest.json
+
       # ─── SBOM ─────────────────────────────────────────────────
       - name: Install Rust toolchain (for cargo-cyclonedx)
         if: ${{ !contains(env.RELEASE_TAG, '-nightly.') }}
@@ -255,6 +265,7 @@ jobs:
             artifacts/omegon-*.tar.gz.sig \
             artifacts/omegon-*.tar.gz.pem \
             artifacts/checksums.sha256
+            artifacts/release-manifest.json
 
       - name: Create stable/rc GitHub Release
         if: ${{ !contains(env.RELEASE_TAG, '-nightly.') }}
@@ -273,6 +284,7 @@ jobs:
             artifacts/omegon-*.tar.gz.sig
             artifacts/omegon-*.tar.gz.pem
             artifacts/checksums.sha256
+            artifacts/release-manifest.json
             artifacts/omegon-sbom.cdx.json
             artifacts/omegon-sbom.cdx.json.sig
             artifacts/omegon-sbom.cdx.json.pem
