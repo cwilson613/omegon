@@ -331,6 +331,13 @@ fn format_turn_summary(summary: &TurnSummary) -> String {
         if let Some(rem) = telemetry.tokens_remaining {
             parts.push(format!("tok {}", rem));
         }
+        // Codex-specific
+        if let Some(pct) = telemetry.codex_primary_pct {
+            parts.push(format!("5h {}%", pct));
+        }
+        if let Some(ref name) = telemetry.codex_limit_name {
+            parts.push(name.clone());
+        }
     }
 
     parts.join(" · ")
@@ -597,11 +604,7 @@ mod tests {
                 provider: "anthropic".into(),
                 source: "response_headers".into(),
                 unified_5h_utilization_pct: Some(42.0),
-                unified_7d_utilization_pct: None,
-                requests_remaining: None,
-                tokens_remaining: None,
-                retry_after_secs: None,
-                request_id: None,
+                ..Default::default()
             }),
         });
 

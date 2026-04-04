@@ -337,6 +337,18 @@ fn parse_rate_limit_snapshot(
         })
     };
 
+    // ── ChatGPT Codex x-codex-* headers ─────────────────────────────────
+    let codex_active_limit = get("x-codex-active-limit").map(ToOwned::to_owned);
+    let codex_primary_pct = parse_u64("x-codex-primary-over-secondary-limit-percent")
+        .or_else(|| parse_u64("x-codex-bengalfox-primary-over-secondary-limit-percent"));
+    let codex_primary_reset_secs = parse_u64("x-codex-primary-reset-after-seconds")
+        .or_else(|| parse_u64("x-codex-bengalfox-primary-reset-after-seconds"));
+    let codex_secondary_reset_secs = parse_u64("x-codex-secondary-reset-after-seconds")
+        .or_else(|| parse_u64("x-codex-bengalfox-secondary-reset-after-seconds"));
+    let codex_credits_unlimited = get("x-codex-credits-unlimited")
+        .map(|v| v.eq_ignore_ascii_case("true"));
+    let codex_limit_name = get("x-codex-bengalfox-limit-name").map(ToOwned::to_owned);
+
     let snapshot = omegon_traits::ProviderTelemetrySnapshot {
         provider: provider.to_string(),
         source: "response_headers".into(),
@@ -358,7 +370,14 @@ fn parse_rate_limit_snapshot(
         request_id: get("x-request-id")
             .or_else(|| get("request-id"))
             .or_else(|| get("x-openai-request-id"))
+            .or_else(|| get("x-oai-request-id"))
             .map(ToOwned::to_owned),
+        codex_active_limit,
+        codex_primary_pct,
+        codex_primary_reset_secs,
+        codex_secondary_reset_secs,
+        codex_credits_unlimited,
+        codex_limit_name,
     };
 
     let has_any = snapshot.unified_5h_utilization_pct.is_some()
@@ -366,7 +385,8 @@ fn parse_rate_limit_snapshot(
         || snapshot.requests_remaining.is_some()
         || snapshot.tokens_remaining.is_some()
         || snapshot.retry_after_secs.is_some()
-        || snapshot.request_id.is_some();
+        || snapshot.request_id.is_some()
+        || snapshot.codex_active_limit.is_some();
     has_any.then_some(snapshot)
 }
 
@@ -2140,6 +2160,28 @@ mod tests {
         assert_eq!(snapshot.tokens_remaining, Some(159976));
         assert_eq!(snapshot.retry_after_secs, Some(1));
         assert_eq!(snapshot.request_id.as_deref(), Some("req_123"));
+    }
+
+    #[test]
+    fn parse_rate_limit_snapshot_extracts_codex_headers() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("x-codex-active-limit", reqwest::header::HeaderValue::from_static("codex"));
+        headers.insert("x-codex-primary-over-secondary-limit-percent", reqwest::header::HeaderValue::from_static("0"));
+        headers.insert("x-codex-primary-reset-after-seconds", reqwest::header::HeaderValue::from_static("13648"));
+        headers.insert("x-codex-secondary-reset-after-seconds", reqwest::header::HeaderValue::from_static("348644"));
+        headers.insert("x-codex-credits-unlimited", reqwest::header::HeaderValue::from_static("False"));
+        headers.insert("x-codex-bengalfox-limit-name", reqwest::header::HeaderValue::from_static("GPT-5.3-Codex-Spark"));
+        headers.insert("x-oai-request-id", reqwest::header::HeaderValue::from_static("abc-123"));
+
+        let snapshot = parse_rate_limit_snapshot("openai-codex", &headers).expect("snapshot");
+        assert_eq!(snapshot.provider, "openai-codex");
+        assert_eq!(snapshot.codex_active_limit.as_deref(), Some("codex"));
+        assert_eq!(snapshot.codex_primary_pct, Some(0));
+        assert_eq!(snapshot.codex_primary_reset_secs, Some(13648));
+        assert_eq!(snapshot.codex_secondary_reset_secs, Some(348644));
+        assert_eq!(snapshot.codex_credits_unlimited, Some(false));
+        assert_eq!(snapshot.codex_limit_name.as_deref(), Some("GPT-5.3-Codex-Spark"));
+        assert_eq!(snapshot.request_id.as_deref(), Some("abc-123"));
     }
 
     #[test]

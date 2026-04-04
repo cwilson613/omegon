@@ -865,17 +865,45 @@ fn format_session_text(model_id: &str, turn: u32, session_input_tokens: u64, ses
     parts.join(" ")
 }
 
+/// Format a human-readable duration from seconds (e.g. 13648 → "3h47m").
+fn format_duration_compact(secs: u64) -> String {
+    if secs < 60 {
+        return format!("{secs}s");
+    }
+    let mins = secs / 60;
+    if mins < 60 {
+        return format!("{mins}m");
+    }
+    let hours = mins / 60;
+    let rem_mins = mins % 60;
+    if hours < 24 {
+        if rem_mins > 0 {
+            return format!("{hours}h{rem_mins:02}m");
+        }
+        return format!("{hours}h");
+    }
+    let days = hours / 24;
+    let rem_hours = hours % 24;
+    if rem_hours > 0 {
+        format!("{days}d{rem_hours}h")
+    } else {
+        format!("{days}d")
+    }
+}
+
 fn format_provider_telemetry_line(
     telemetry: &Option<omegon_traits::ProviderTelemetrySnapshot>,
 ) -> Option<String> {
     let t = telemetry.as_ref()?;
     let mut parts = Vec::new();
+    // ── Anthropic ────────────────────────────────────────────────────
     if let Some(pct) = t.unified_5h_utilization_pct {
         parts.push(format!("5h {:.0}%", pct));
     }
     if let Some(pct) = t.unified_7d_utilization_pct {
         parts.push(format!("7d {:.0}%", pct));
     }
+    // ── OpenAI / generic ────────────────────────────────────────────
     if let Some(rem) = t.requests_remaining {
         parts.push(format!("req {}", rem));
     }
@@ -883,7 +911,20 @@ fn format_provider_telemetry_line(
         parts.push(format!("tok {}", widgets::format_tokens_compact(rem as usize)));
     }
     if let Some(secs) = t.retry_after_secs {
-        parts.push(format!("retry {}s", secs));
+        parts.push(format!("retry {}", format_duration_compact(secs)));
+    }
+    // ── ChatGPT Codex ───────────────────────────────────────────────
+    if let Some(pct) = t.codex_primary_pct {
+        parts.push(format!("5h {}%", pct));
+    }
+    if let Some(secs) = t.codex_primary_reset_secs {
+        parts.push(format!("↻ {}", format_duration_compact(secs)));
+    }
+    if let Some(secs) = t.codex_secondary_reset_secs {
+        parts.push(format!("7d↻ {}", format_duration_compact(secs)));
+    }
+    if let Some(ref name) = t.codex_limit_name {
+        parts.push(name.clone());
     }
     if parts.is_empty() {
         None
@@ -1056,15 +1097,43 @@ mod tests {
             source: "response_headers".into(),
             unified_5h_utilization_pct: Some(42.0),
             unified_7d_utilization_pct: Some(64.0),
-            requests_remaining: None,
-            tokens_remaining: None,
             retry_after_secs: Some(17),
-            request_id: None,
+            ..Default::default()
         }))
         .expect("telemetry line");
         assert!(text.contains("5h 42%"), "got {text}");
         assert!(text.contains("7d 64%"), "got {text}");
         assert!(text.contains("retry 17s"), "got {text}");
+    }
+
+    #[test]
+    fn provider_telemetry_line_formats_codex_headers() {
+        let text = format_provider_telemetry_line(&Some(omegon_traits::ProviderTelemetrySnapshot {
+            provider: "openai-codex".into(),
+            source: "response_headers".into(),
+            codex_primary_pct: Some(0),
+            codex_primary_reset_secs: Some(13648),
+            codex_secondary_reset_secs: Some(348644),
+            codex_limit_name: Some("GPT-5.3-Codex-Spark".into()),
+            ..Default::default()
+        }))
+        .expect("telemetry line");
+        assert!(text.contains("5h 0%"), "got {text}");
+        assert!(text.contains("↻ 3h47m"), "got {text}");
+        assert!(text.contains("7d↻ 4d"), "got {text}");
+        assert!(text.contains("GPT-5.3-Codex-Spark"), "got {text}");
+    }
+
+    #[test]
+    fn format_duration_compact_covers_ranges() {
+        assert_eq!(format_duration_compact(0), "0s");
+        assert_eq!(format_duration_compact(59), "59s");
+        assert_eq!(format_duration_compact(60), "1m");
+        assert_eq!(format_duration_compact(3599), "59m");
+        assert_eq!(format_duration_compact(3600), "1h");
+        assert_eq!(format_duration_compact(13648), "3h47m");
+        assert_eq!(format_duration_compact(86400), "1d");
+        assert_eq!(format_duration_compact(348644), "4d");
     }
 
     #[test]
@@ -1203,12 +1272,9 @@ mod tests {
             provider_telemetry: Some(omegon_traits::ProviderTelemetrySnapshot {
                 provider: "openai-codex".into(),
                 source: "response_headers".into(),
-                unified_5h_utilization_pct: None,
-                unified_7d_utilization_pct: None,
                 requests_remaining: Some(42),
                 tokens_remaining: Some(12_000),
-                retry_after_secs: None,
-                request_id: None,
+                ..Default::default()
             }),
             ..Default::default()
         };

@@ -448,10 +448,12 @@ pub enum IpcHealthState {
 pub struct ProviderTelemetrySnapshot {
     pub provider: String,
     pub source: String,
+    // ── Anthropic ────────────────────────────────────────────────────────
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unified_5h_utilization_pct: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unified_7d_utilization_pct: Option<f32>,
+    // ── OpenAI / generic ────────────────────────────────────────────────
     #[serde(skip_serializing_if = "Option::is_none")]
     pub requests_remaining: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -460,6 +462,25 @@ pub struct ProviderTelemetrySnapshot {
     pub retry_after_secs: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
+    // ── ChatGPT Codex (x-codex-* headers) ───────────────────────────────
+    /// Which limit family is active (e.g. "codex").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codex_active_limit: Option<String>,
+    /// Primary (5h) window usage as percent over the secondary (7d) limit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codex_primary_pct: Option<u64>,
+    /// Seconds until the primary (5h) window resets.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codex_primary_reset_secs: Option<u64>,
+    /// Seconds until the secondary (7d) window resets.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codex_secondary_reset_secs: Option<u64>,
+    /// Whether the account has unlimited credits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codex_credits_unlimited: Option<bool>,
+    /// Model-specific limit name (e.g. "GPT-5.3-Codex-Spark").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codex_limit_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
