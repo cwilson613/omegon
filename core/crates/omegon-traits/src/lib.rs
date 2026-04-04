@@ -304,7 +304,7 @@ pub struct IpcDesignTreeSnapshot {
     pub nodes: Vec<IpcNodeBrief>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IpcDesignCounts {
     pub total: usize,
     pub seed: usize,
@@ -316,16 +316,6 @@ pub struct IpcDesignCounts {
     pub blocked: usize,
     pub deferred: usize,
     pub open_questions: usize,
-}
-
-impl Default for IpcDesignCounts {
-    fn default() -> Self {
-        Self {
-            total: 0, seed: 0, exploring: 0, resolved: 0, decided: 0,
-            implementing: 0, implemented: 0, blocked: 0, deferred: 0,
-            open_questions: 0,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
