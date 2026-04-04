@@ -11,6 +11,10 @@ core/target/
 auth.json
 settings.json
 
+# Python bytecode
+__pycache__/
+*.pyc
+
 # OS
 .DS_Store
 

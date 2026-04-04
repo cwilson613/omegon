@@ -315,67 +315,15 @@ rc:
     echo "✓ ${NEW_VERSION} — tested, committed, tagged, built, pushed."
 
 # Release preflight: verify repo is releasable BEFORE any version mutation.
-# Checks: on main, clean tree, tests green (no snapshot auto-accept), docs/install
-# version matches current RC, CHANGELOG has an [Unreleased] or matching section.
+# Checks: on main, clean tree, release line is an RC, changelog target exists,
+# docs/install versioned examples are placeholders, and packaging automation is
+# consistently wired through the release manifest.
 # Called automatically by `just release`. Run manually: just preflight
 preflight:
     #!/usr/bin/env bash
     set -euo pipefail
     ./scripts/sync-jj-to-git.sh
-
-    FAIL=0
-
-    # 1. Must be on main
-    BRANCH=$(git branch --show-current)
-    if [ "$BRANCH" != "main" ]; then
-        echo "✗ preflight: must be on main (currently: $BRANCH)"
-        FAIL=1
-    fi
-
-    # 2. Working tree clean (core/ and milestones)
-    DIRTY=$(git status --porcelain -- core/ .omegon/milestones.json)
-    if [ -n "$DIRTY" ]; then
-        echo "✗ preflight: uncommitted changes:"
-        echo "$DIRTY"
-        FAIL=1
-    fi
-
-    # 3. Current version must be an RC
-    CURRENT=$(grep '^version = ' core/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-    if ! echo "$CURRENT" | grep -q '\-rc\.'; then
-        echo "✗ preflight: Cargo.toml version ($CURRENT) is not an RC — run 'just rc' first"
-        FAIL=1
-    fi
-
-    # 4. Tests must pass with NO snapshot auto-accept
-    echo "preflight: running tests..."
-    if ! (cd core && cargo test -p omegon 2>&1 | tee /tmp/omegon-preflight-test.log | tail -3); then
-        echo "✗ preflight: tests failed"
-        grep 'FAILED' /tmp/omegon-preflight-test.log || true
-        FAIL=1
-    fi
-
-    # 5. docs/install version examples must match the stable version we're about to cut
-    STABLE=$(echo "$CURRENT" | sed 's/-rc\.[0-9]*//')
-    INSTALL_VERSION=$(grep -o 'VERSION=[0-9.]*' site/src/pages/docs/install.astro | head -1 | sed 's/VERSION=//')
-    if [ "$INSTALL_VERSION" != "$STABLE" ]; then
-        echo "✗ preflight: site/docs/install.astro has VERSION=$INSTALL_VERSION, expected $STABLE"
-        FAIL=1
-    fi
-
-    # 6. CHANGELOG must mention the stable version or have [Unreleased]
-    if ! grep -qE "\[${STABLE}\]|\[Unreleased\]" CHANGELOG.md; then
-        echo "✗ preflight: CHANGELOG.md missing [$STABLE] or [Unreleased] section"
-        FAIL=1
-    fi
-
-    if [ "$FAIL" -eq 1 ]; then
-        echo ""
-        echo "✗ Preflight failed — fix the above before releasing."
-        exit 1
-    fi
-
-    echo "✓ Preflight passed — repo is releasable as $STABLE"
+    python3 scripts/release_preflight.py
 
 # Cut a stable release: strip -rc.N, test, commit, tag, build.
 release:

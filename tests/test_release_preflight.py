@@ -1,0 +1,94 @@
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts" / "release_preflight.py"
+
+
+class ReleasePreflightTests(unittest.TestCase):
+    def write_repo_fixture(self, root: Path, *, version: str, install_placeholder: bool = True, manifest_wired: bool = True) -> None:
+        (root / "core").mkdir(parents=True)
+        (root / "site" / "src" / "pages" / "docs").mkdir(parents=True)
+        (root / ".github" / "workflows").mkdir(parents=True)
+
+        (root / "core" / "Cargo.toml").write_text(f'[workspace.package]\nversion = "{version}"\n')
+        stable = version.split("-rc.", 1)[0] if "-rc." in version else version
+        (root / "CHANGELOG.md").write_text(f'# Changelog\n\n## [{stable}] - 2026-04-04\n')
+
+        install_lines = [
+            "VERSION=0.15.7 curl -fsSL https://omegon.styrene.dev/install.sh | sh\n",
+        ]
+        if install_placeholder:
+            install_lines.append("# Replace 0.15.7 with the release you actually want\n")
+            install_lines.append("# Replace 0.15.7 with the release you downloaded\n")
+        (root / "site" / "src" / "pages" / "docs" / "install.astro").write_text("".join(install_lines))
+
+        manifest_line = "release-manifest.json\n" if manifest_wired else "checksums.sha256\n"
+        (root / ".github" / "workflows" / "release.yml").write_text(manifest_line)
+        (root / ".github" / "workflows" / "homebrew.yml").write_text(manifest_line)
+
+    def init_git_repo(self, root: Path) -> None:
+        subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+        )
+
+    def run_script(self, repo_root: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["python3", str(SCRIPT), "--repo-root", str(repo_root)],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_preflight_passes_for_clean_rc_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir)
+            self.write_repo_fixture(repo_root, version="0.15.9-rc.14")
+            self.init_git_repo(repo_root)
+
+            result = self.run_script(repo_root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("0.15.9", result.stdout)
+
+    def test_preflight_fails_when_changelog_missing_target_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir)
+            self.write_repo_fixture(repo_root, version="0.15.9-rc.14")
+            (repo_root / "CHANGELOG.md").write_text("# Changelog\n\n## [0.15.8] - 2026-04-04\n")
+            self.init_git_repo(repo_root)
+
+            result = self.run_script(repo_root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("CHANGELOG.md is missing section [0.15.9]", result.stderr)
+
+    def test_preflight_fails_when_install_doc_is_not_placeholder_based(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir)
+            self.write_repo_fixture(repo_root, version="0.15.9-rc.14", install_placeholder=False)
+            self.init_git_repo(repo_root)
+
+            result = self.run_script(repo_root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("install.astro versioned examples are not marked as placeholders", result.stderr)
+
+    def test_preflight_fails_when_manifest_wiring_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir)
+            self.write_repo_fixture(repo_root, version="0.15.9-rc.14", manifest_wired=False)
+            self.init_git_repo(repo_root)
+
+            result = self.run_script(repo_root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("release-manifest.json", result.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()
