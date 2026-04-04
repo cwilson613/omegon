@@ -428,7 +428,9 @@ impl ToolCallAccum {
 /// Process an SSE byte stream line by line, calling `on_data` for each `data: ` payload.
 /// SSE idle timeout — if no chunk arrives within this window, assume the
 /// connection is stalled and bail so the retry loop can re-attempt.
-const SSE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+/// OpenAI's Codex CLI defaults to 300s (stream_idle_timeout_ms = 300000)
+/// because reasoning models can be silent for minutes before first token.
+const SSE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 async fn process_sse<F>(response: reqwest::Response, mut on_data: F) -> anyhow::Result<()>
 where

@@ -692,15 +692,15 @@ async fn stream_with_retry(
         // Three exhaustion paths:
         // - max_retries > 0 (cleave): hard cap on attempt count
         // - max_retries == 0 (TUI) + rate-limit: bail after 120s continuous
-        // - max_retries == 0 (TUI) + stall: bail after 4 min of cumulative stalls
-        //   (generous enough for reasoning models, strict enough to detect dead providers)
+        // - max_retries == 0 (TUI) + stall: bail after 10 min of cumulative stalls
+        //   (OpenAI's default stream idle is 5 min; 2× that covers a retry cycle)
         let elapsed = started.elapsed();
         let rate_limit_exhausted = config.max_retries == 0
             && matches!(transient_kind, Some(TransientFailureKind::RateLimited))
             && elapsed.as_secs() >= 120;
         let stall_exhausted = config.max_retries == 0
             && matches!(transient_kind, Some(TransientFailureKind::StalledStream))
-            && elapsed.as_secs() >= 240;
+            && elapsed.as_secs() >= 600;
         let attempt_exhausted = config.max_retries > 0 && attempt >= config.max_retries;
 
         if attempt_exhausted || rate_limit_exhausted || stall_exhausted {
@@ -810,9 +810,10 @@ async fn consume_llm_stream(
     const REPETITION_ABORT_THRESHOLD: usize = 30; // 30 of last 40 chunks identical → abort
 
     // Two-phase idle timeout:
-    // - Before first content: 120s (models like GPT reason for 30-90s with zero SSE bytes)
+    // - Before first content: 300s (OpenAI documents stream_idle_timeout_ms=300000
+    //   as their default — reasoning models can be silent for minutes)
     // - After first content: 30s (mid-stream silence is a genuine stall)
-    let initial_idle_timeout = std::time::Duration::from_secs(120);
+    let initial_idle_timeout = std::time::Duration::from_secs(300);
     let content_idle_timeout = std::time::Duration::from_secs(30);
     let received_content = std::cell::Cell::new(false);
     let idle_timeout = || if received_content.get() { content_idle_timeout } else { initial_idle_timeout };
@@ -1792,7 +1793,7 @@ mod tests {
     #[test]
     fn tui_mode_stall_exhaustion_fires_on_elapsed_time() {
         // TUI mode: max_retries == 0
-        // Stalls bail after 240s cumulative elapsed, not attempt count.
+        // Stalls bail after 600s cumulative elapsed (10 min), not attempt count.
         let config = LoopConfig {
             max_retries: 0,
             ..Default::default()
@@ -1800,19 +1801,19 @@ mod tests {
         let transient_kind = Some(crate::upstream_errors::TransientFailureKind::StalledStream);
 
         // Under threshold
-        for elapsed_secs in [30u64, 120, 239] {
+        for elapsed_secs in [30u64, 120, 300, 599] {
             let stall_exhausted = config.max_retries == 0
                 && matches!(transient_kind, Some(crate::upstream_errors::TransientFailureKind::StalledStream))
-                && elapsed_secs >= 240;
+                && elapsed_secs >= 600;
             assert!(!stall_exhausted, "{elapsed_secs}s should NOT exhaust");
         }
 
         // At threshold
-        let elapsed_secs = 240u64;
+        let elapsed_secs = 600u64;
         let stall_exhausted = config.max_retries == 0
             && matches!(transient_kind, Some(crate::upstream_errors::TransientFailureKind::StalledStream))
-            && elapsed_secs >= 240;
-        assert!(stall_exhausted, "240s should trigger stall exhaustion");
+            && elapsed_secs >= 600;
+        assert!(stall_exhausted, "600s should trigger stall exhaustion");
     }
 
     #[test]
@@ -1823,10 +1824,10 @@ mod tests {
         };
         let transient_kind = Some(crate::upstream_errors::TransientFailureKind::RateLimited);
 
-        let elapsed_secs = 300u64;
+        let elapsed_secs = 700u64;
         let stall_exhausted = config.max_retries == 0
             && matches!(transient_kind, Some(crate::upstream_errors::TransientFailureKind::StalledStream))
-            && elapsed_secs >= 240;
+            && elapsed_secs >= 600;
         assert!(!stall_exhausted, "rate-limit failures should not use stall path");
     }
 
