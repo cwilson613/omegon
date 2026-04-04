@@ -22,6 +22,11 @@ pub struct ImageAttachment {
     pub data: String,
     /// MIME type (image/png, image/jpeg, etc.)
     pub media_type: String,
+    /// Original filesystem path when the attachment came from a local file.
+    /// Preserved so the agent can redisplay the exact artifact via the
+    /// existing view/display pipeline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
 }
 
 /// A message in the conversation — Omegon's format, not any provider's.

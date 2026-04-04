@@ -1,30 +1,30 @@
 ---
 task_id: 1
-label: paste-flow
-siblings: [0:segment-render, 2:markdown-tables]
+label: display-plumbing
+siblings: [0:conversation-model]
 ---
 
-# Task 1: paste-flow
+# Task 1: display-plumbing
 
 ## Root Directive
 
-> UX QoL pass for TUI message/tool-call segments: replace assistant title with omegon, tighten segment content spacing and remove extra blank lines after output, preserve multiline paste formatting in editor and outgoing operator message rendering, and fix markdown table rendering for assistant messages.
+> Implement ability for the agent to display previously attached images back to the operator using the existing filesystem-backed view/display pipeline in the TUI/chat flow.
 
 ## Mission
 
-Inspect input editor paste handling and outgoing operator message rendering for multiline text. Fix newline preservation so pasted multiline text is preserved both in-editor and when rendered as a sent operator segment. Add regression tests.
+Inspect and implement the TUI/tool plumbing that reuses the existing image display/render pipeline to redisplay an attachment from a stored filesystem path, including tests for the trigger path and rendering behavior.
 
 ## Scope
 
 - `core/crates/omegon/src/tui/mod.rs`
+- `core/crates/omegon/src/tools/view.rs`
 - `core/crates/omegon/src/tui/tests.rs`
 
-**Depends on:** none (independent)
+**Depends on:** conversation-model
 
 ## Siblings
 
-- **segment-render**: Inspect TUI segment rendering for assistant/tool-call headers and spacing; identify where the assistant title is set, where segment vertical padding is introduced, and where trailing blank lines appear after rendered content. Implement fixes in rendering code and add tests.
-- **markdown-tables**: Inspect assistant markdown rendering path with emphasis on table rendering. Fix markdown table parsing/rendering so assistant tables display correctly in TUI segments, and add regression tests.
+- **conversation-model**: Inspect and implement the conversation/model changes needed to preserve and expose attachment file paths for redisplay from prior operator messages, including tests covering selection/export or lookup behavior.
 
 ## Dependency Versions
 

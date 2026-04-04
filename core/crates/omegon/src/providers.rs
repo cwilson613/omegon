@@ -2049,6 +2049,7 @@ mod tests {
             images: vec![crate::bridge::ImageAttachment {
                 data: "abc123".into(),
                 media_type: "image/png".into(),
+                source_path: Some("/tmp/anthropic.png".into()),
             }],
         }];
         let wire = AnthropicClient::build_messages(&messages);
@@ -2102,6 +2103,7 @@ mod tests {
             images: vec![crate::bridge::ImageAttachment {
                 data: "abc123".into(),
                 media_type: "image/png".into(),
+                source_path: Some("/tmp/openai.png".into()),
             }],
         }];
         let wire = OpenAIClient::build_wire_messages("system", &messages);
@@ -2119,6 +2121,7 @@ mod tests {
             images: vec![crate::bridge::ImageAttachment {
                 data: "abc123".into(),
                 media_type: "image/png".into(),
+                source_path: Some("/tmp/codex.png".into()),
             }],
         }];
         let input = CodexClient::build_input(&messages);
@@ -2136,6 +2139,7 @@ mod tests {
             images: vec![crate::bridge::ImageAttachment {
                 data: "abc123".into(),
                 media_type: "image/png".into(),
+                source_path: Some("/tmp/matrix.png".into()),
             }],
         };
 

@@ -428,6 +428,30 @@ impl ConversationState {
         self.canonical.push(AgentMessage::User { text, images, turn });
     }
 
+    fn llm_user_content_with_attachment_manifest(
+        text: &str,
+        images: &[crate::bridge::ImageAttachment],
+    ) -> String {
+        let mut lines = Vec::new();
+        for (idx, image) in images.iter().enumerate() {
+            if let Some(path) = image.source_path.as_deref() {
+                lines.push(format!("- [image{idx}] {path}"));
+            }
+        }
+        if lines.is_empty() {
+            return text.to_string();
+        }
+        let manifest = format!(
+            "[Attachment files]\n{}\n\nUse these paths if you need to redisplay an attachment with the existing view/display pipeline.",
+            lines.join("\n")
+        );
+        if text.trim().is_empty() {
+            manifest
+        } else {
+            format!("{text}\n\n{manifest}")
+        }
+    }
+
     pub fn push_assistant(&mut self, msg: AssistantMessage) {
         let turn = self.intent.stats.turns;
         // Reference tracking: scan the assistant's text for paths and identifiers
@@ -687,7 +711,7 @@ impl ConversationState {
             }
             // User messages are small — don't decay
             AgentMessage::User { text, images, .. } => LlmMessage::User {
-                content: text.clone(),
+                content: Self::llm_user_content_with_attachment_manifest(text, images),
                 images: images.clone(),
             },
         }
@@ -938,7 +962,7 @@ impl ConversationState {
     fn to_llm_message(&self, msg: &AgentMessage) -> LlmMessage {
         match msg {
             AgentMessage::User { text, images, .. } => LlmMessage::User {
-                content: text.clone(),
+                content: Self::llm_user_content_with_attachment_manifest(text, images),
                 images: images.clone(),
             },
             AgentMessage::Assistant(a, _) => LlmMessage::Assistant {
@@ -1924,6 +1948,7 @@ mod tests {
                 images: vec![crate::bridge::ImageAttachment {
                     data: "aaa".into(),
                     media_type: "image/png".into(),
+                    source_path: Some("/tmp/hello.png".into()),
                 }],
             },
             LlmMessage::User {
@@ -1931,6 +1956,7 @@ mod tests {
                 images: vec![crate::bridge::ImageAttachment {
                     data: "bbb".into(),
                     media_type: "image/jpeg".into(),
+                    source_path: Some("/tmp/world.jpg".into()),
                 }],
             },
         ];
@@ -1953,15 +1979,19 @@ mod tests {
             vec![crate::bridge::ImageAttachment {
                 data: "abc123".into(),
                 media_type: "image/png".into(),
+                source_path: Some("/tmp/describe-this.png".into()),
             }],
         );
 
         let view = conv.build_llm_view();
         assert_eq!(view.len(), 1);
         if let LlmMessage::User { content, images } = &view[0] {
-            assert_eq!(content, "describe this");
+            assert!(content.contains("describe this"));
+            assert!(content.contains("[Attachment files]"));
+            assert!(content.contains("[image0] /tmp/describe-this.png"));
             assert_eq!(images.len(), 1);
             assert_eq!(images[0].media_type, "image/png");
+            assert_eq!(images[0].source_path.as_deref(), Some("/tmp/describe-this.png"));
         } else {
             panic!("expected user message");
         }
@@ -1975,6 +2005,7 @@ mod tests {
             vec![crate::bridge::ImageAttachment {
                 data: "abc123".into(),
                 media_type: "image/png".into(),
+                source_path: Some("/tmp/saved-image.png".into()),
             }],
         );
 
@@ -1985,9 +2016,11 @@ mod tests {
         let _ = std::fs::remove_file(&tmp);
 
         if let LlmMessage::User { content, images } = &view[0] {
-            assert_eq!(content, "describe this");
+            assert!(content.contains("describe this"));
+            assert!(content.contains("[image0] /tmp/saved-image.png"));
             assert_eq!(images.len(), 1);
             assert_eq!(images[0].media_type, "image/png");
+            assert_eq!(images[0].source_path.as_deref(), Some("/tmp/saved-image.png"));
         } else {
             panic!("expected user message");
         }

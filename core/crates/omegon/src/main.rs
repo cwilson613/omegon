@@ -1680,6 +1680,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                         images.push(crate::bridge::ImageAttachment {
                             data: b64,
                             media_type: media_type.to_string(),
+                            source_path: Some(path.display().to_string()),
                         });
                     }
                 }

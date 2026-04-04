@@ -1,30 +1,30 @@
 ---
 task_id: 0
-label: segment-render
-siblings: [1:paste-flow, 2:markdown-tables]
+label: conversation-model
+siblings: [1:display-plumbing]
 ---
 
-# Task 0: segment-render
+# Task 0: conversation-model
 
 ## Root Directive
 
-> UX QoL pass for TUI message/tool-call segments: replace assistant title with omegon, tighten segment content spacing and remove extra blank lines after output, preserve multiline paste formatting in editor and outgoing operator message rendering, and fix markdown table rendering for assistant messages.
+> Implement ability for the agent to display previously attached images back to the operator using the existing filesystem-backed view/display pipeline in the TUI/chat flow.
 
 ## Mission
 
-Inspect TUI segment rendering for assistant/tool-call headers and spacing; identify where the assistant title is set, where segment vertical padding is introduced, and where trailing blank lines appear after rendered content. Implement fixes in rendering code and add tests.
+Inspect and implement the conversation/model changes needed to preserve and expose attachment file paths for redisplay from prior operator messages, including tests covering selection/export or lookup behavior.
 
 ## Scope
 
-- `core/crates/omegon/src/tui/mod.rs`
+- `core/crates/omegon/src/tui/conversation.rs`
+- `core/crates/omegon/src/tui/segments.rs`
 - `core/crates/omegon/src/tui/tests.rs`
 
 **Depends on:** none (independent)
 
 ## Siblings
 
-- **paste-flow**: Inspect input editor paste handling and outgoing operator message rendering for multiline text. Fix newline preservation so pasted multiline text is preserved both in-editor and when rendered as a sent operator segment. Add regression tests.
-- **markdown-tables**: Inspect assistant markdown rendering path with emphasis on table rendering. Fix markdown table parsing/rendering so assistant tables display correctly in TUI segments, and add regression tests.
+- **display-plumbing**: Inspect and implement the TUI/tool plumbing that reuses the existing image display/render pipeline to redisplay an attachment from a stored filesystem path, including tests for the trigger path and rendering behavior.
 
 ## Dependency Versions
 
