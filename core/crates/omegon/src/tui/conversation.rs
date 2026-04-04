@@ -549,6 +549,26 @@ mod tests {
     }
 
     #[test]
+    fn attachment_placeholders_without_text_render_cleanly() {
+        let mut cv = ConversationView::new();
+        cv.push_user_with_attachments(
+            "",
+            &[
+                std::path::PathBuf::from("/tmp/paste.png"),
+                std::path::PathBuf::from("/tmp/spec.pdf"),
+            ],
+        );
+        assert_eq!(cv.segments.len(), 1);
+        assert!(matches!(
+            &cv.segments[0],
+            Segment {
+                content: SegmentContent::UserPrompt { text },
+                ..
+            } if text == "[image0] [pdf1]"
+        ));
+    }
+
+    #[test]
     fn streaming_creates_assistant_segment() {
         let mut cv = ConversationView::new();
         cv.append_streaming("Hello ");

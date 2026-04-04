@@ -174,11 +174,11 @@ pub struct App {
     /// Web dashboard server address (if running).
     web_server_addr: Option<std::net::SocketAddr>,
     /// Prompt queued while agent was busy — sent on next AgentEnd.
-    queued_prompt: Option<String>,
+    queued_prompt: Option<(String, Vec<std::path::PathBuf>)>,
     /// Inline operator-facing transient events (replaces floating toasts).
     operator_events: std::collections::VecDeque<OperatorEvent>,
-    /// Pending image attachment from clipboard paste.
-    pending_image: Option<std::path::PathBuf>,
+    /// Pending operator attachments from clipboard paste, applied to the next prompt.
+    pending_attachments: Vec<std::path::PathBuf>,
     /// Previous harness status for diffing on HarnessStatusChanged.
     previous_harness_status: Option<crate::status::HarnessStatus>,
     /// Capability tier detected at startup by systems check probes.
@@ -316,7 +316,7 @@ impl App {
             web_server_addr: None,
             queued_prompt: None,
             operator_events: std::collections::VecDeque::new(),
-            pending_image: None,
+            pending_attachments: Vec::new(),
             previous_harness_status: None,
             capability_tier: None,
             tutorial: None,
@@ -1013,7 +1013,7 @@ impl App {
                         let lesson = tut.current_lesson().clone();
                         let status = tut.status_line();
                         self.tutorial = Some(tut);
-                        self.queue_prompt(lesson.content);
+                        self.queue_prompt(lesson.content, Vec::new());
                         return SlashResult::Display(format!(
                             "{status}\n\nLesson queued. The agent will begin when ready."
                         ));
@@ -1056,7 +1056,7 @@ impl App {
             if tut.advance() {
                 let lesson = tut.current_lesson().clone();
                 let status = tut.status_line();
-                self.queue_prompt(lesson.content);
+                self.queue_prompt(lesson.content, Vec::new());
                 SlashResult::Display(format!("{status}\n\nLesson queued."))
             } else {
                 SlashResult::Display(
@@ -1084,7 +1084,7 @@ impl App {
             if tut.go_back() {
                 let lesson = tut.current_lesson().clone();
                 let status = tut.status_line();
-                self.queue_prompt(lesson.content);
+                self.queue_prompt(lesson.content, Vec::new());
                 SlashResult::Display(format!("{status}\n\nLesson queued."))
             } else {
                 SlashResult::Display("Already at the first lesson.".into())
@@ -1308,15 +1308,20 @@ impl App {
         }
     }
 
-    fn queue_prompt(&mut self, text: String) {
-        if let Some(ref prev) = self.queued_prompt {
+    fn queue_prompt(&mut self, text: String, attachments: Vec<std::path::PathBuf>) {
+        if let Some((ref prev, _)) = self.queued_prompt {
             self.conversation.push_system(&format!(
                 "⏳ Replaced queued: {}",
                 &prev[..prev.len().min(40)]
             ));
         }
-        self.conversation.push_system(&format!("⏳ Queued: {text}"));
-        self.queued_prompt = Some(text);
+        let preview = if attachments.is_empty() {
+            text.clone()
+        } else {
+            format!("{} (+{} attachment{})", text, attachments.len(), if attachments.len() == 1 { "" } else { "s" })
+        };
+        self.conversation.push_system(&format!("⏳ Queued: {preview}"));
+        self.queued_prompt = Some((text, attachments));
     }
 
     fn interrupt(&self) -> bool {
@@ -2024,7 +2029,7 @@ impl App {
                 "📎 Image pasted — send a message to include it",
                 ratatui_toaster::ToastType::Info,
             );
-            self.pending_image = Some(path);
+            self.pending_attachments.push(path);
         }
         // No feedback on failure — the user might just be pressing Ctrl+V
         // for a normal text paste that crossterm handles separately.
@@ -4645,7 +4650,7 @@ pub async fn run_tui(
 
     // Queue initial prompt if provided (--initial-prompt / --initial-prompt-file)
     if let Some(prompt) = config.initial_prompt {
-        app.queue_prompt(prompt);
+        app.queue_prompt(prompt, Vec::new());
     }
 
     // Start tutorial overlay if --tutorial flag was passed (e.g. from demo exec)
@@ -4982,7 +4987,7 @@ pub async fn run_tui(
                                                         .send(TuiCommand::UserPrompt(prompt))
                                                         .await;
                                                 } else {
-                                                    app.queue_prompt(prompt);
+                                                    app.queue_prompt(prompt, Vec::new());
                                                 }
                                             }
                                             if should_open_dash {
@@ -5004,7 +5009,7 @@ pub async fn run_tui(
                                                         .send(TuiCommand::UserPrompt(prompt))
                                                         .await;
                                                 } else {
-                                                    app.queue_prompt(prompt);
+                                                    app.queue_prompt(prompt, Vec::new());
                                                 }
                                             }
                                             // If already sent, Tab does nothing — wait for agent
@@ -5268,7 +5273,7 @@ pub async fn run_tui(
                                         SlashResult::NotACommand => {
                                             // Not a slash command (no / prefix) — send as prompt
                                             if app.agent_active {
-                                                app.queue_prompt(text.clone());
+                                                app.queue_prompt(text.clone(), Vec::new());
                                             } else {
                                                 app.conversation.push_user(&text);
                                                 app.history.push(text.clone());
@@ -5282,24 +5287,28 @@ pub async fn run_tui(
                                     }
                                 } else if app.agent_active {
                                     // Agent busy — queue the prompt
-                                    app.queue_prompt(text.clone());
+                                    let attachments = std::mem::take(&mut app.pending_attachments);
+                                    app.queue_prompt(text.clone(), attachments);
                                     // Notify tutorial overlay of user input
                                     if let Some(ref mut overlay) = app.tutorial_overlay {
                                         overlay.check_any_input();
                                     }
                                 } else {
                                     // Agent idle — send immediately
-                                    app.conversation.push_user(&text);
+                                    let attachments = std::mem::take(&mut app.pending_attachments);
+                                    if attachments.is_empty() {
+                                        app.conversation.push_user(&text);
+                                    } else {
+                                        app.conversation.push_user_with_attachments(&text, &attachments);
+                                    }
                                     app.history.push(text.clone());
                                     app.history_idx = None;
                                     app.agent_active = true;
-                                    if let Some(img) = app.pending_image.take() {
-                                        app.conversation.push_user_with_attachments(&text, &[img.clone()]);
+                                    if !attachments.is_empty() {
                                         let _ = command_tx
-                                            .send(TuiCommand::UserPromptWithImages(text, vec![img]))
+                                            .send(TuiCommand::UserPromptWithImages(text, attachments))
                                             .await;
                                     } else {
-                                        app.conversation.push_user(&text);
                                         let _ = command_tx.send(TuiCommand::UserPrompt(text)).await;
                                     }
                                     // Notify tutorial overlay of user input
@@ -5409,12 +5418,22 @@ pub async fn run_tui(
 
         // Drain queued prompt after agent finishes (but not if quitting)
         if !app.agent_active && !app.should_quit && app.queued_prompt.is_some() {
-            let text = app.queued_prompt.take().unwrap();
-            app.conversation.push_user(&text);
+            let (text, attachments) = app.queued_prompt.take().unwrap();
+            if attachments.is_empty() {
+                app.conversation.push_user(&text);
+            } else {
+                app.conversation.push_user_with_attachments(&text, &attachments);
+            }
             app.history.push(text.clone());
             app.history_idx = None;
             app.agent_active = true;
-            let _ = command_tx.send(TuiCommand::UserPrompt(text)).await;
+            if attachments.is_empty() {
+                let _ = command_tx.send(TuiCommand::UserPrompt(text)).await;
+            } else {
+                let _ = command_tx
+                    .send(TuiCommand::UserPromptWithImages(text, attachments))
+                    .await;
+            }
         }
 
         if app.should_quit {
