@@ -315,8 +315,6 @@ impl UpstreamErrorClass {
             | Self::QuotaExceeded
             | Self::BadRequest
             | Self::DegenerateOutput
-            | Self::ResponseIncomplete
-            | Self::ResponseCancelled
             | Self::Unknown => None,
         }
     }

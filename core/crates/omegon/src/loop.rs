@@ -689,20 +689,26 @@ async fn stream_with_retry(
 
         // Soft exhaustion: bail after N consecutive transient failures.
         //
-        // Two modes:
+        // Three exhaustion paths:
         // - max_retries > 0 (cleave): hard cap on attempt count
-        // - max_retries == 0 (TUI): no attempt cap, but rate-limit failures
-        //   escalate to terminal after 120s of continuous rate-limiting,
-        //   because that's a session/quota exhaustion, not a transient burst.
+        // - max_retries == 0 (TUI) + rate-limit: bail after 120s continuous
+        // - max_retries == 0 (TUI) + stall: bail after 4 consecutive stalls
+        //   (each stall is 30s idle, so 4 = ~2 min of dead air — enough to
+        //   distinguish transient hiccups from a genuinely down provider)
         let elapsed = started.elapsed();
         let rate_limit_exhausted = config.max_retries == 0
             && matches!(transient_kind, Some(TransientFailureKind::RateLimited))
             && elapsed.as_secs() >= 120;
+        let stall_exhausted = config.max_retries == 0
+            && matches!(transient_kind, Some(TransientFailureKind::StalledStream))
+            && attempt >= 4;
         let attempt_exhausted = config.max_retries > 0 && attempt >= config.max_retries;
 
-        if attempt_exhausted || rate_limit_exhausted {
+        if attempt_exhausted || rate_limit_exhausted || stall_exhausted {
             let reason = if rate_limit_exhausted {
                 "session rate-limit exhaustion"
+            } else if stall_exhausted {
+                "stream stall exhaustion"
             } else {
                 "upstream exhausted"
             };
@@ -712,11 +718,15 @@ async fn stream_with_retry(
                 kind = kind_label,
                 "{reason}: {err_msg}"
             );
+            let advice = if stall_exhausted {
+                "The provider's stream is unresponsive. Switch provider with /model."
+            } else {
+                "This looks like a session or quota limit, not a transient issue. \
+                 Switch provider with /model or wait for your quota to reset."
+            };
             let _ = events.send(AgentEvent::SystemNotification {
                 message: format!(
-                    "🛑 {provider} {reason}: {attempt} consecutive {kind_label} failures over {:.0}s. \
-                     This looks like a session or quota limit, not a transient issue. \
-                     Switch provider with /model or wait for your quota to reset.",
+                    "🛑 {provider} {reason}: {attempt} consecutive {kind_label} failures over {:.0}s. {advice}",
                     elapsed.as_secs_f64()
                 ),
             });
@@ -1763,6 +1773,64 @@ mod tests {
             }
             assert!(delay <= cap_ms, "attempt {attempt} exceeded cap: {delay}");
         }
+    }
+
+    #[test]
+    fn tui_mode_stall_exhaustion_fires_at_4() {
+        // TUI mode: max_retries == 0
+        // Stalls should bail after 4 consecutive attempts, not retry forever.
+        let config = LoopConfig {
+            max_retries: 0,
+            ..Default::default()
+        };
+        let transient_kind = Some(crate::upstream_errors::TransientFailureKind::StalledStream);
+
+        for attempt in 1..=3 {
+            let stall_exhausted = config.max_retries == 0
+                && matches!(transient_kind, Some(crate::upstream_errors::TransientFailureKind::StalledStream))
+                && attempt >= 4;
+            assert!(!stall_exhausted, "attempt {attempt} should NOT exhaust");
+        }
+
+        let attempt = 4u32;
+        let stall_exhausted = config.max_retries == 0
+            && matches!(transient_kind, Some(crate::upstream_errors::TransientFailureKind::StalledStream))
+            && attempt >= 4;
+        assert!(stall_exhausted, "attempt 4 should trigger stall exhaustion");
+    }
+
+    #[test]
+    fn tui_mode_rate_limit_does_not_trigger_stall_exhaustion() {
+        let config = LoopConfig {
+            max_retries: 0,
+            ..Default::default()
+        };
+        let transient_kind = Some(crate::upstream_errors::TransientFailureKind::RateLimited);
+
+        let attempt = 10u32;
+        let stall_exhausted = config.max_retries == 0
+            && matches!(transient_kind, Some(crate::upstream_errors::TransientFailureKind::StalledStream))
+            && attempt >= 4;
+        assert!(!stall_exhausted, "rate-limit failures should not use stall path");
+    }
+
+    #[test]
+    fn cleave_mode_uses_attempt_cap_not_stall_cap() {
+        // Cleave mode: max_retries == 8
+        // The generic attempt cap should fire, not the stall-specific one.
+        let config = LoopConfig {
+            max_retries: 8,
+            ..Default::default()
+        };
+        let attempt = 8u32;
+        let attempt_exhausted = config.max_retries > 0 && attempt >= config.max_retries;
+        assert!(attempt_exhausted, "cleave should use attempt cap");
+
+        let transient_kind = Some(crate::upstream_errors::TransientFailureKind::StalledStream);
+        let stall_exhausted = config.max_retries == 0
+            && matches!(transient_kind, Some(crate::upstream_errors::TransientFailureKind::StalledStream))
+            && attempt >= 4;
+        assert!(!stall_exhausted, "stall_exhausted should not fire in cleave mode (max_retries > 0)");
     }
 
     // ── Mutation detection ─────────────────────────────────────────────
