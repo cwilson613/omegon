@@ -692,16 +692,15 @@ async fn stream_with_retry(
         // Three exhaustion paths:
         // - max_retries > 0 (cleave): hard cap on attempt count
         // - max_retries == 0 (TUI) + rate-limit: bail after 120s continuous
-        // - max_retries == 0 (TUI) + stall: bail after 4 consecutive stalls
-        //   (each stall is 30s idle, so 4 = ~2 min of dead air — enough to
-        //   distinguish transient hiccups from a genuinely down provider)
+        // - max_retries == 0 (TUI) + stall: bail after 4 min of cumulative stalls
+        //   (generous enough for reasoning models, strict enough to detect dead providers)
         let elapsed = started.elapsed();
         let rate_limit_exhausted = config.max_retries == 0
             && matches!(transient_kind, Some(TransientFailureKind::RateLimited))
             && elapsed.as_secs() >= 120;
         let stall_exhausted = config.max_retries == 0
             && matches!(transient_kind, Some(TransientFailureKind::StalledStream))
-            && attempt >= 4;
+            && elapsed.as_secs() >= 240;
         let attempt_exhausted = config.max_retries > 0 && attempt >= config.max_retries;
 
         if attempt_exhausted || rate_limit_exhausted || stall_exhausted {
@@ -810,20 +809,31 @@ async fn consume_llm_stream(
     const REPETITION_WINDOW_SIZE: usize = 40;
     const REPETITION_ABORT_THRESHOLD: usize = 30; // 30 of last 40 chunks identical → abort
 
-    let stream_idle_timeout = std::time::Duration::from_secs(30);
-    while let Some(event) = match tokio::time::timeout(stream_idle_timeout, rx.recv()).await {
+    // Two-phase idle timeout:
+    // - Before first content: 120s (models like GPT reason for 30-90s with zero SSE bytes)
+    // - After first content: 30s (mid-stream silence is a genuine stall)
+    let initial_idle_timeout = std::time::Duration::from_secs(120);
+    let content_idle_timeout = std::time::Duration::from_secs(30);
+    let received_content = std::cell::Cell::new(false);
+    let idle_timeout = || if received_content.get() { content_idle_timeout } else { initial_idle_timeout };
+    while let Some(event) = match tokio::time::timeout(idle_timeout(), rx.recv()).await {
         Ok(event) => event,
         Err(_) => {
             let _ = events.send(AgentEvent::MessageAbort);
             anyhow::bail!(
                 "LLM stream idle for {}s — connection may be stalled",
-                stream_idle_timeout.as_secs()
+                idle_timeout().as_secs()
             );
         }
     } {
         match event {
-            LlmEvent::Start => {} // Initial partial message — ignored
-            LlmEvent::TextStart => {}
+            LlmEvent::Start => {
+                // Heartbeat — any server activity proves connection is alive.
+                // Does NOT count as "content" for timeout phase transition.
+            }
+            LlmEvent::TextStart => {
+                received_content.set(true);
+            }
             LlmEvent::TextDelta { delta } => {
                 let _ = events.send(AgentEvent::MessageChunk {
                     text: delta.clone(),
@@ -868,7 +878,9 @@ async fn consume_llm_stream(
             LlmEvent::TextEnd => {
                 text_parts.push(String::new());
             }
-            LlmEvent::ThinkingStart => {}
+            LlmEvent::ThinkingStart => {
+                received_content.set(true);
+            }
             LlmEvent::ThinkingDelta { delta } => {
                 let _ = events.send(AgentEvent::ThinkingChunk {
                     text: delta.clone(),
@@ -882,7 +894,9 @@ async fn consume_llm_stream(
             LlmEvent::ThinkingEnd => {
                 thinking_parts.push(String::new());
             }
-            LlmEvent::ToolCallStart => {}
+            LlmEvent::ToolCallStart => {
+                received_content.set(true);
+            }
             LlmEvent::ToolCallDelta { .. } => {
                 // Deltas accumulated by the bridge — complete tool call in ToolCallEnd
             }
@@ -1776,27 +1790,29 @@ mod tests {
     }
 
     #[test]
-    fn tui_mode_stall_exhaustion_fires_at_4() {
+    fn tui_mode_stall_exhaustion_fires_on_elapsed_time() {
         // TUI mode: max_retries == 0
-        // Stalls should bail after 4 consecutive attempts, not retry forever.
+        // Stalls bail after 240s cumulative elapsed, not attempt count.
         let config = LoopConfig {
             max_retries: 0,
             ..Default::default()
         };
         let transient_kind = Some(crate::upstream_errors::TransientFailureKind::StalledStream);
 
-        for attempt in 1..=3 {
+        // Under threshold
+        for elapsed_secs in [30u64, 120, 239] {
             let stall_exhausted = config.max_retries == 0
                 && matches!(transient_kind, Some(crate::upstream_errors::TransientFailureKind::StalledStream))
-                && attempt >= 4;
-            assert!(!stall_exhausted, "attempt {attempt} should NOT exhaust");
+                && elapsed_secs >= 240;
+            assert!(!stall_exhausted, "{elapsed_secs}s should NOT exhaust");
         }
 
-        let attempt = 4u32;
+        // At threshold
+        let elapsed_secs = 240u64;
         let stall_exhausted = config.max_retries == 0
             && matches!(transient_kind, Some(crate::upstream_errors::TransientFailureKind::StalledStream))
-            && attempt >= 4;
-        assert!(stall_exhausted, "attempt 4 should trigger stall exhaustion");
+            && elapsed_secs >= 240;
+        assert!(stall_exhausted, "240s should trigger stall exhaustion");
     }
 
     #[test]
@@ -1807,10 +1823,10 @@ mod tests {
         };
         let transient_kind = Some(crate::upstream_errors::TransientFailureKind::RateLimited);
 
-        let attempt = 10u32;
+        let elapsed_secs = 300u64;
         let stall_exhausted = config.max_retries == 0
             && matches!(transient_kind, Some(crate::upstream_errors::TransientFailureKind::StalledStream))
-            && attempt >= 4;
+            && elapsed_secs >= 240;
         assert!(!stall_exhausted, "rate-limit failures should not use stall path");
     }
 
