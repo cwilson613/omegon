@@ -420,14 +420,16 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 8,
+    "rc_count": 9,
     "notes": [
       "feat(session-log): record provider telemetry per turn",
+      "feat(telemetry): parse ChatGPT Codex x-codex-* quota headers into provider telemetry",
       "feat(telemetry): scaffold provider usage snapshot events",
       "feat(telemetry): surface provider quota snapshots in footer",
       "fix(agent): hide attachment redisplay hints from user messages",
       "fix(multimodal): preserve attachment source paths for redisplay",
       "fix(multimodal): store user attachments in canonical conversation state",
+      "fix(providers): log codex response headers when telemetry is absent",
       "fix(release): derive Homebrew updates from published release manifest",
       "fix(release): harden signing detection and brew push flow",
       "fix(release): script preflight checks and ignore python bytecode",
@@ -438,7 +440,7 @@
       "fix(tui): support queued prompts with attachment lists",
       "fix(tui): unify tool result block backgrounds"
     ],
-    "rc_version": "0.15.10-rc.9",
-    "last_rc": "2026-04-04T17:26:42Z"
+    "rc_version": "0.15.10-rc.10",
+    "last_rc": "2026-04-04T18:49:59Z"
   }
 }
