@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 3,
+    "rc_count": 4,
     "notes": [
       "fix(agent): hide attachment redisplay hints from user messages",
       "fix(multimodal): preserve attachment source paths for redisplay",
@@ -429,9 +429,10 @@
       "fix(release): harden signing detection and brew push flow",
       "fix(release): script preflight checks and ignore python bytecode",
       "fix(tui): render operator attachments as inline placeholders",
-      "fix(tui): support queued prompts with attachment lists"
+      "fix(tui): support queued prompts with attachment lists",
+      "fix(tui): unify tool result block backgrounds"
     ],
-    "rc_version": "0.15.10-rc.4",
-    "last_rc": "2026-04-04T14:38:03Z"
+    "rc_version": "0.15.10-rc.5",
+    "last_rc": "2026-04-04T15:08:58Z"
   }
 }
