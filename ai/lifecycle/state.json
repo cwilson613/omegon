@@ -632,6 +632,21 @@
       "bound_change": null,
       "created_at": "2026-04-04T01:45:15Z",
       "updated_at": "2026-04-04T01:52:25Z"
+    },
+    {
+      "id": "site-docs-polish-0-15-10",
+      "title": "Site/docs polish for 0.15.10 — reconcile public docs with current product reality",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-04-04T19:22:33Z",
+      "updated_at": "2026-04-04T19:23:15Z"
     }
   ],
   "changes": [],
@@ -1426,6 +1441,24 @@
       "entity_id": "idea-layer",
       "from_state": "exploring",
       "to_state": "resolved",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-04-04T19:22:33Z",
+      "entity_type": "node",
+      "entity_id": "site-docs-polish-0-15-10",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-04-04T19:23:15Z",
+      "entity_type": "node",
+      "entity_id": "site-docs-polish-0-15-10",
+      "from_state": "seed",
+      "to_state": "exploring",
       "reason": null,
       "forced": false
     }

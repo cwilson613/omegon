@@ -1,55 +1,107 @@
 ---
 import Docs from "../../layouts/Docs.astro";
 ---
-<Docs title="Tutorial" description="Interactive overlay tutorial that guides you through Omegon's features.">
+<Docs title="Tutorial" description="Interactive overlay tutorial with a hands-on current-project path and a scripted demo path.">
   <h1>Tutorial</h1>
 
-  <h2>Overlay Tutorial</h2>
   <p>
-    The primary tutorial is a game-style overlay that renders on top of the TUI and guides
-    you through features step by step. Launch it with:
+    <code>/tutorial</code> is not a static help page in disguise. It is an interactive overlay that
+    guides you through Omegon by driving real work in either your current project or a prepared demo.
+    The overlay advances step-by-step, highlights relevant UI regions, and can trigger agent actions
+    automatically when a step calls for it.
   </p>
-  <pre><code>/tutorial</code></pre>
+
+  <h2>Two Tutorial Modes</h2>
+  <table>
+    <thead><tr><th>Command</th><th>What It Does</th><th>Best For</th></tr></thead>
+    <tbody>
+      <tr><td><code>/tutorial</code></td><td>Runs the adaptive hands-on path in your current project</td><td>Learning Omegon against your real codebase</td></tr>
+      <tr><td><code>/tutorial demo</code></td><td>Runs the scripted showcase flow in the prepared demo project</td><td>Seeing the full design → spec → cleave workflow on a safe example</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Hands-On Mode: Your Project</h2>
   <p>
-    The overlay highlights relevant UI elements, explains what they do, and prompts you to
-    try each feature. Steps include:
+    The default tutorial path uses the repository you already have open. It is meant to create real
+    value, not just explain concepts.
   </p>
   <ol>
-    <li><strong>Welcome</strong> — choose "Start Fresh" (new project) or "My Project" (existing project auto-advances)</li>
-    <li><strong>Editor</strong> — type prompts in the wrapped multiline editor, use <code>Shift+Enter</code> for newline insertion, and rely on the visible cursor for exact position</li>
-    <li><strong>Tool Cards</strong> — how agent tool calls render, expand with <code>Ctrl+O</code></li>
-    <li><strong>Model Selection</strong> — <code>/model</code> to switch providers and models</li>
-    <li><strong>Thinking Levels</strong> — <code>/think</code> to control reasoning depth</li>
-    <li><strong>Project Memory</strong> — how facts persist, <code>/memory</code> for stats</li>
-    <li><strong>Web Dashboard</strong> — <code>/dash</code> opens the live browser dashboard</li>
-    <li><strong>Sessions</strong> — auto-save, resume orientation, and session-log-backed narrative continuity</li>
+    <li><strong>Orientation</strong> — quick cockpit tour of the conversation view, footer, and dashboard surfaces</li>
+    <li><strong>Read your code</strong> — the agent reads the project and stores a small set of durable memory facts</li>
+    <li><strong>Design notes</strong> — the agent explores an existing design node or creates a first architecture node if none exist</li>
+    <li><strong>Write a spec</strong> — the agent proposes one focused improvement and creates an OpenSpec change with scenarios</li>
+    <li><strong>Open the dashboard</strong> — the tutorial opens the live web dashboard automatically during the dashboard step</li>
+    <li><strong>Next steps</strong> — you leave with real project context, not a throwaway walkthrough</li>
   </ol>
+  <p>
+    This means <strong>the tutorial can read files, store memory, create design-tree nodes, and create
+    OpenSpec artifacts in your project</strong>. That is intentional.
+  </p>
+
+  <h2>Demo Mode: Full Showcase</h2>
+  <p>
+    The demo path is the showpiece. Instead of adapting to whatever project you happen to be in, it runs
+    against a prepared sprint-board repo with seeded bugs and lifecycle artifacts.
+  </p>
+  <ol>
+    <li><strong>Read the broken app</strong> — Omegon inspects the code and stores memory</li>
+    <li><strong>Make a design decision</strong> — it explores an open question and records the outcome in the design tree</li>
+    <li><strong>Read the fix plan</strong> — it explains the OpenSpec change and task split</li>
+    <li><strong>Run <code>/cleave</code></strong> — you trigger the parallel fix step from the tutorial</li>
+    <li><strong>Verify and launch</strong> — the tutorial validates the result and opens the fixed app</li>
+    <li><strong>Open the dashboard</strong> — the dashboard step launches automatically</li>
+  </ol>
+  <p>
+    Use this path when you want to see the full Omegon story end-to-end without risking changes in your own repo.
+  </p>
+
+  <h2>How Tutorial Steps Advance</h2>
+  <ul>
+    <li><strong>Tab</strong> advances passive explanation steps</li>
+    <li><strong>Some steps auto-prompt the agent</strong> and wait while work completes</li>
+    <li><strong>Some steps wait for a real action</strong>, such as a specific slash command in demo mode</li>
+    <li><strong>Esc</strong> dismisses the overlay</li>
+    <li><strong>Shift+Tab</strong> moves backward through prior overlay steps</li>
+  </ul>
+  <p>
+    The dashboard step is worth calling out explicitly: the overlay opens the web dashboard for you.
+    It is no longer a “now type <code>/dash</code>” instruction.
+  </p>
+
+  <h2>Commands You Actually Need</h2>
+  <pre><code># Start the current-project tutorial
+/tutorial
+
+# Start the prepared showcase demo
+/tutorial demo
+
+# Check whether a tutorial is active and where you are in it
+/tutorial status
+
+# Reset tutorial progress/state
+/tutorial reset
+
+# Start Omegon with the tutorial overlay active
+omegon --tutorial</code></pre>
 
   <h2>First-Run Behavior</h2>
   <p>
-    On first launch, Omegon starts with the tutorial overlay active (unless <code>--no-splash</code>
-    is passed). You can also launch it explicitly at any time.
+    Omegon can start with the tutorial overlay already active. You can also enter the tutorial explicitly
+    at any point in a normal session.
   </p>
-  <pre><code># Start Omegon in tutorial mode
-omegon --tutorial
-
-# Launch tutorial from within a session
-/tutorial
-
-# Check tutorial progress
-/tutorial status
-
-# Reset tutorial state
-/tutorial reset</code></pre>
-
-  <h2>Legacy Lessons</h2>
   <p>
-    The older lesson-based tutorial (sequential text lessons with <code>/next</code> and
-    <code>/prev</code> navigation) is still available:
+    If you dismiss it, that is not destructive — you can start it again later with <code>/tutorial</code>
+    or jump straight to the showcase flow with <code>/tutorial demo</code>.
   </p>
-  <pre><code>/tutorial lessons</code></pre>
+
+  <h2>What the Tutorial Is Not</h2>
+  <ul>
+    <li>It is <strong>not</strong> a static lesson reader</li>
+    <li>It is <strong>not</strong> just a UI tour</li>
+    <li>It is <strong>not</strong> sandboxed from your project in current-project mode</li>
+  </ul>
   <p>
-    The overlay tutorial is the recommended path for new users. Legacy lessons are preserved
-    for users who prefer a text-only walkthrough.
+    The value of the system is that it performs the actual Omegon workflow: read code, store memory,
+    track design, define specs, and expose live status surfaces while it works.
   </p>
 </Docs>
