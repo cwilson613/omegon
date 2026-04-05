@@ -7,6 +7,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use serde::Serialize;
+use crate::status::HarnessStatus;
 
 use super::{ControlPlaneState, WebState};
 use crate::lifecycle::types::*;
@@ -18,6 +19,7 @@ pub struct StateSnapshot {
     pub openspec: OpenSpecSnapshot,
     pub cleave: CleaveSnapshot,
     pub session: SessionSnapshot,
+    pub harness: Option<HarnessStatus>,
 }
 
 #[derive(Serialize)]
@@ -407,11 +409,18 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
         }
     };
 
+    let harness = state
+        .handles
+        .harness
+        .as_ref()
+        .and_then(|h| h.lock().ok().map(|guard| guard.clone()));
+
     StateSnapshot {
         design,
         openspec,
         cleave,
         session,
+        harness,
     }
 }
 
@@ -420,6 +429,7 @@ mod tests {
     use super::*;
     use crate::tui::dashboard::DashboardHandles;
     use crate::web::{ControlPlaneState, WebAuthState, WebStartupInfo};
+    use std::sync::{Arc, Mutex};
 
     fn test_state() -> WebState {
         WebState {
@@ -454,6 +464,29 @@ mod tests {
         assert!(snap.design.focused.is_none());
         assert!(snap.openspec.changes.is_empty());
         assert!(!snap.cleave.active);
+        assert!(snap.harness.is_none());
+    }
+
+    #[test]
+    fn snapshot_includes_harness_when_available() {
+        let mut state = test_state();
+        state.handles = DashboardHandles {
+            harness: Some(Arc::new(Mutex::new(crate::status::HarnessStatus {
+                thinking_level: "high".into(),
+                capability_tier: "victory".into(),
+                memory_available: true,
+                cleave_available: true,
+                ..Default::default()
+            }))),
+            ..Default::default()
+        };
+
+        let snap = build_snapshot(&state);
+        let harness = snap.harness.expect("harness snapshot");
+        assert_eq!(harness.thinking_level, "high");
+        assert_eq!(harness.capability_tier, "victory");
+        assert!(harness.memory_available);
+        assert!(harness.cleave_available);
     }
 
     #[tokio::test]

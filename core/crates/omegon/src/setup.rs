@@ -603,7 +603,7 @@ impl AgentSetup {
             session_secret_env,
             resume_info,
             startup_snapshot,
-            initial_harness_status,
+            initial_harness_status: initial_harness_status.clone(),
             extension_widgets,
             widget_receivers,
             dashboard_handles: crate::tui::dashboard::DashboardHandles {
@@ -612,7 +612,9 @@ impl AgentSetup {
                 session: std::sync::Arc::new(std::sync::Mutex::new(
                     crate::tui::dashboard::SharedSessionStats::default(),
                 )),
-                harness: None, // Will be set by the TUI when harness events are received
+                harness: Some(std::sync::Arc::new(std::sync::Mutex::new(
+                    initial_harness_status.clone(),
+                ))),
             },
         })
     }

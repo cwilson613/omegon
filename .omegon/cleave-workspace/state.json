@@ -1,0 +1,102 @@
+{
+  "runId": "clv-plgvlneo-plgv",
+  "directive": "Implement backend contract updates so Omegon's embedded control plane is the canonical Auspex interface before any /dash -> /auspex docs migration. Audit and close the concrete HTTP/WebSocket contract gaps between core/crates/omegon/src/web/* and Auspex's current client expectations, add tests, and leave a concise migration note grounded in the resulting contract.",
+  "repoPath": "/Users/cwilson/workspace/black-meridian/omegon",
+  "workspacePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace",
+  "children": [
+    {
+      "childId": 0,
+      "label": "state-contract",
+      "description": "Audit and implement /api/state and /api/startup contract changes needed for Auspex compatibility. Focus on core/crates/omegon/src/web/api.rs and related state/startup structs so the snapshot includes the fields Auspex currently expects (including harness/dispatcher if the backend can supply them), and add/adjust tests for the serialized snapshot shape.",
+      "scope": [
+        "core/crates/omegon/src/web/api.rs",
+        "core/crates/omegon/src/web/mod.rs",
+        "core/crates/omegon/src/status.rs",
+        "core/crates/omegon-traits/src/lib.rs"
+      ],
+      "dependsOn": [],
+      "status": "completed",
+      "branch": "cleave/0-state-contract",
+      "backend": "native",
+      "executeModel": "openai-codex:gpt-5.4",
+      "durationSecs": 489.7212075
+    },
+    {
+      "childId": 1,
+      "label": "ws-contract",
+      "description": "Audit and implement WebSocket event contract changes needed for Auspex compatibility. Focus on core/crates/omegon/src/web/ws.rs plus any upstream event types it serializes so streamed events expose the fields Auspex expects or can safely ignore, especially turn-end/session/harness updates and state snapshot refresh semantics. Add tests for event serialization.",
+      "scope": [
+        "core/crates/omegon/src/web/ws.rs",
+        "core/crates/omegon-traits/src/lib.rs",
+        "core/crates/omegon/src/loop.rs"
+      ],
+      "dependsOn": [],
+      "status": "completed",
+      "branch": "cleave/1-ws-contract",
+      "backend": "native",
+      "executeModel": "openai-codex:gpt-5.4",
+      "durationSecs": 490.984394541
+    },
+    {
+      "childId": 2,
+      "label": "validate-note",
+      "description": "After the contract changes land, validate the resulting control-plane surface against the current Auspex client expectations and write a concise migration note documenting the canonical backend fields/events now guaranteed for Auspex. Keep this note in Omegon docs near the control-plane/Auspex contract docs and ensure tests/builds cover the touched code.",
+      "scope": [
+        "docs/auspex-ipc-contract.md",
+        "docs/conversation-rendering-engine.md",
+        "core/crates/omegon/src/web/api.rs",
+        "core/crates/omegon/src/web/ws.rs"
+      ],
+      "dependsOn": [
+        "state-contract",
+        "ws-contract"
+      ],
+      "status": "completed",
+      "branch": "cleave/2-validate-note",
+      "backend": "native",
+      "executeModel": "openai-codex:gpt-5.4",
+      "durationSecs": 358.224415083
+    }
+  ],
+  "plan": {
+    "children": [
+      {
+        "depends_on": [],
+        "description": "Audit and implement /api/state and /api/startup contract changes needed for Auspex compatibility. Focus on core/crates/omegon/src/web/api.rs and related state/startup structs so the snapshot includes the fields Auspex currently expects (including harness/dispatcher if the backend can supply them), and add/adjust tests for the serialized snapshot shape.",
+        "label": "state-contract",
+        "scope": [
+          "core/crates/omegon/src/web/api.rs",
+          "core/crates/omegon/src/web/mod.rs",
+          "core/crates/omegon/src/status.rs",
+          "core/crates/omegon-traits/src/lib.rs"
+        ]
+      },
+      {
+        "depends_on": [],
+        "description": "Audit and implement WebSocket event contract changes needed for Auspex compatibility. Focus on core/crates/omegon/src/web/ws.rs plus any upstream event types it serializes so streamed events expose the fields Auspex expects or can safely ignore, especially turn-end/session/harness updates and state snapshot refresh semantics. Add tests for event serialization.",
+        "label": "ws-contract",
+        "scope": [
+          "core/crates/omegon/src/web/ws.rs",
+          "core/crates/omegon-traits/src/lib.rs",
+          "core/crates/omegon/src/loop.rs"
+        ]
+      },
+      {
+        "depends_on": [
+          "state-contract",
+          "ws-contract"
+        ],
+        "description": "After the contract changes land, validate the resulting control-plane surface against the current Auspex client expectations and write a concise migration note documenting the canonical backend fields/events now guaranteed for Auspex. Keep this note in Omegon docs near the control-plane/Auspex contract docs and ensure tests/builds cover the touched code.",
+        "label": "validate-note",
+        "scope": [
+          "docs/auspex-ipc-contract.md",
+          "docs/conversation-rendering-engine.md",
+          "core/crates/omegon/src/web/api.rs",
+          "core/crates/omegon/src/web/ws.rs"
+        ]
+      }
+    ],
+    "default_model": "openai-codex:gpt-5.4",
+    "rationale": "The contract break naturally separates into snapshot shape, streaming/event shape, and final validation/documentation. That minimizes merge overlap while keeping each child aligned to one interface surface instead of arbitrary file-layer splits."
+  }
+}
