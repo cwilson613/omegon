@@ -8,6 +8,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use serde::Serialize;
 use crate::status::HarnessStatus;
+use omegon_traits::OmegonInstanceDescriptor;
 
 use super::{ControlPlaneState, WebState};
 use crate::lifecycle::types::*;
@@ -15,6 +16,7 @@ use crate::lifecycle::types::*;
 /// Full agent state snapshot — the canonical shape for web consumers.
 #[derive(Serialize)]
 pub struct StateSnapshot {
+    pub instance: OmegonInstanceDescriptor,
     pub design: DesignSnapshot,
     pub openspec: OpenSpecSnapshot,
     pub cleave: CleaveSnapshot,
@@ -415,7 +417,66 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
         .as_ref()
         .and_then(|h| h.lock().ok().map(|guard| guard.clone()));
 
+    let instance = state
+        .startup_info
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().and_then(|startup| startup.instance.clone()))
+        .unwrap_or_else(|| {
+            let cwd = std::env::current_dir()
+                .ok()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default();
+            let session = omegon_traits::IpcSessionSnapshot {
+                cwd: cwd.clone(),
+                pid: std::process::id(),
+                started_at: chrono::Utc::now().to_rfc3339(),
+                turns: session.turns,
+                tool_calls: session.tool_calls,
+                compactions: session.compactions,
+                busy: false,
+                git_branch: harness.as_ref().and_then(|h| h.git_branch.clone()),
+                git_detached: harness.as_ref().is_some_and(|h| h.git_detached),
+                session_id: None,
+            };
+            let harness_projection = omegon_traits::IpcHarnessSnapshot {
+                context_class: harness.as_ref().map(|h| h.context_class.clone()).unwrap_or_else(|| "Squad".into()),
+                thinking_level: harness.as_ref().map(|h| h.thinking_level.clone()).unwrap_or_else(|| "Medium".into()),
+                capability_tier: harness.as_ref().map(|h| h.capability_tier.clone()).unwrap_or_else(|| "victory".into()),
+                memory_available: harness.as_ref().is_some_and(|h| h.memory_available),
+                cleave_available: harness.as_ref().is_some_and(|h| h.cleave_available),
+                memory_warning: harness.as_ref().and_then(|h| h.memory_warning.clone()),
+                memory: omegon_traits::IpcMemorySnapshot {
+                    active_facts: harness.as_ref().map(|h| h.memory.active_facts).unwrap_or(0),
+                    project_facts: harness.as_ref().map(|h| h.memory.project_facts).unwrap_or(0),
+                    working_facts: harness.as_ref().map(|h| h.memory.working_facts).unwrap_or(0),
+                    episodes: harness.as_ref().map(|h| h.memory.episodes).unwrap_or(0),
+                },
+                providers: vec![],
+                mcp_server_count: harness.as_ref().map(|h| h.mcp_servers.iter().filter(|s| s.connected).count()).unwrap_or(0),
+                mcp_tool_count: harness.as_ref().map(|h| h.mcp_tool_count()).unwrap_or(0),
+                active_persona: harness.as_ref().and_then(|h| h.active_persona.as_ref().map(|p| p.name.clone())),
+                active_tone: harness.as_ref().and_then(|h| h.active_tone.as_ref().map(|t| t.name.clone())),
+                active_delegate_count: harness.as_ref().map(|h| h.active_delegates.len()).unwrap_or(0),
+            };
+            let health = omegon_traits::IpcHealthSnapshot {
+                state: omegon_traits::IpcHealthState::Ready,
+                memory_ok: harness_projection.memory_available || harness_projection.memory_warning.is_none(),
+                provider_ok: harness.as_ref().is_some_and(|h| h.providers.iter().any(|p| p.authenticated)),
+                checked_at: chrono::Utc::now().to_rfc3339(),
+            };
+            crate::ipc::snapshot::project_instance_descriptor(
+                &state.handles,
+                &cwd,
+                &session,
+                &harness_projection,
+                &health,
+                "web-compat",
+            )
+        });
+
     StateSnapshot {
+        instance,
         design,
         openspec,
         cleave,
@@ -450,6 +511,7 @@ mod tests {
                 auth_mode: "ephemeral-bearer".into(),
                 auth_source: "generated".into(),
                 control_plane_state: ControlPlaneState::Ready,
+                instance: None,
             }))),
             control_plane_state: std::sync::Arc::new(std::sync::Mutex::new(
                 ControlPlaneState::Ready,
@@ -465,6 +527,7 @@ mod tests {
         assert!(snap.openspec.changes.is_empty());
         assert!(!snap.cleave.active);
         assert!(snap.harness.is_none());
+        assert_eq!(snap.instance.identity.instance_id, "web-compat");
     }
 
     #[test]
@@ -498,6 +561,7 @@ mod tests {
         assert_eq!(payload.health_url, "http://127.0.0.1:7842/api/healthz");
         assert_eq!(payload.ready_url, "http://127.0.0.1:7842/api/readyz");
         assert_eq!(payload.auth_mode, "ephemeral-bearer");
+        assert!(payload.instance.is_none());
     }
 
     #[tokio::test]

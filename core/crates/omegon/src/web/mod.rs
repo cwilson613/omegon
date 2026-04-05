@@ -25,6 +25,9 @@ use crate::tui::dashboard::DashboardHandles;
 pub use auth::{
     WEB_AUTH_SECRET_NAME, WebAuthSource, WebAuthState,
 };
+use omegon_traits::{
+    IpcHealthSnapshot, IpcHealthState, IpcHarnessSnapshot, IpcMemorySnapshot,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -49,6 +52,113 @@ pub struct WebStartupInfo {
     pub auth_mode: String,
     pub auth_source: String,
     pub control_plane_state: ControlPlaneState,
+    pub instance: Option<omegon_traits::OmegonInstanceDescriptor>,
+}
+
+fn project_web_instance(
+    handles: &DashboardHandles,
+    startup: &WebStartupInfo,
+) -> omegon_traits::OmegonInstanceDescriptor {
+    let harness_projection = handles
+        .harness
+        .as_ref()
+        .and_then(|lock| lock.lock().ok())
+        .map(|h| IpcHarnessSnapshot {
+            context_class: h.context_class.clone(),
+            thinking_level: h.thinking_level.clone(),
+            capability_tier: h.capability_tier.clone(),
+            memory_available: h.memory_available,
+            cleave_available: h.cleave_available,
+            memory_warning: h.memory_warning.clone(),
+            memory: IpcMemorySnapshot {
+                active_facts: h.memory.active_facts,
+                project_facts: h.memory.project_facts,
+                working_facts: h.memory.working_facts,
+                episodes: h.memory.episodes,
+            },
+            providers: vec![],
+            mcp_server_count: h.mcp_servers.iter().filter(|s| s.connected).count(),
+            mcp_tool_count: h.mcp_tool_count(),
+            active_persona: h.active_persona.as_ref().map(|p| p.name.clone()),
+            active_tone: h.active_tone.as_ref().map(|t| t.name.clone()),
+            active_delegate_count: h.active_delegates.len(),
+        })
+        .unwrap_or(IpcHarnessSnapshot {
+            context_class: "Squad".into(),
+            thinking_level: "Medium".into(),
+            capability_tier: "victory".into(),
+            memory_available: false,
+            cleave_available: false,
+            memory_warning: None,
+            memory: IpcMemorySnapshot { active_facts: 0, project_facts: 0, working_facts: 0, episodes: 0 },
+            providers: vec![],
+            mcp_server_count: 0,
+            mcp_tool_count: 0,
+            active_persona: None,
+            active_tone: None,
+            active_delegate_count: 0,
+        });
+
+    let (git_branch, git_detached) = handles
+        .harness
+        .as_ref()
+        .and_then(|lock| lock.lock().ok())
+        .map(|h| (h.git_branch.clone(), h.git_detached))
+        .unwrap_or((None, false));
+
+    let cwd = std::env::current_dir()
+        .ok()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+
+    let health = IpcHealthSnapshot {
+        state: match startup.control_plane_state {
+            ControlPlaneState::Ready => IpcHealthState::Ready,
+            ControlPlaneState::Degraded => IpcHealthState::Degraded,
+            ControlPlaneState::Starting => IpcHealthState::Starting,
+            ControlPlaneState::Failed => IpcHealthState::Failed,
+        },
+        memory_ok: harness_projection.memory_available || harness_projection.memory_warning.is_none(),
+        provider_ok: handles
+            .harness
+            .as_ref()
+            .and_then(|lock| lock.lock().ok())
+            .is_some_and(|h| h.providers.iter().any(|p| p.authenticated)),
+        checked_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    let session = omegon_traits::IpcSessionSnapshot {
+        cwd: cwd.clone(),
+        pid: std::process::id(),
+        started_at: chrono::Utc::now().to_rfc3339(),
+        turns: 0,
+        tool_calls: 0,
+        compactions: 0,
+        busy: false,
+        git_branch,
+        git_detached,
+        session_id: None,
+    };
+
+    let mut instance = crate::ipc::snapshot::project_instance_descriptor(
+        handles,
+        &cwd,
+        &session,
+        &harness_projection,
+        &health,
+        startup
+            .instance
+            .as_ref()
+            .map(|instance| instance.identity.instance_id.as_str())
+            .unwrap_or("web-compat"),
+    );
+    instance.control_plane.http_base = Some(startup.http_base.clone());
+    instance.control_plane.startup_url = Some(startup.startup_url.clone());
+    instance.control_plane.state_url = Some(startup.state_url.clone());
+    instance.control_plane.ws_url = Some(startup.ws_url.clone());
+    instance.control_plane.auth_mode = Some(startup.auth_mode.clone());
+    instance.control_plane.auth_source = Some(startup.auth_source.clone());
+    instance
 }
 
 /// Shared state accessible to all web handlers.
@@ -129,6 +239,7 @@ pub async fn start_server_with_options(
     let auth_source = state.web_auth.source_name().to_string();
     let startup_info = state.startup_info.clone();
     let control_plane_state = state.control_plane_state.clone();
+    let app_state_handles = state.handles.clone();
 
     let app = Router::new()
         .route("/api/state", axum::routing::get(api::get_state))
@@ -158,7 +269,7 @@ pub async fn start_server_with_options(
     };
     let bound = listener.local_addr()?;
 
-    let startup = WebStartupInfo {
+    let mut startup = WebStartupInfo {
         schema_version: 2,
         addr: bound.to_string(),
         http_base: format!("http://{bound}"),
@@ -171,7 +282,9 @@ pub async fn start_server_with_options(
         auth_mode: auth_mode.to_string(),
         auth_source,
         control_plane_state: ControlPlaneState::Ready,
+        instance: None,
     };
+    startup.instance = Some(project_web_instance(&app_state_handles, &startup));
     if let Ok(mut slot) = startup_info.lock() {
         *slot = Some(startup.clone());
     }
@@ -283,6 +396,7 @@ mod tests {
             auth_mode: state.web_auth.mode_name().into(),
             auth_source: state.web_auth.source_name().into(),
             control_plane_state: ControlPlaneState::Ready,
+            instance: None,
         };
 
         assert_eq!(startup.token, "token-123");

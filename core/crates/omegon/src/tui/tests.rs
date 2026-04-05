@@ -1532,6 +1532,7 @@ fn web_dashboard_started_event_updates_cached_addr() {
         auth_mode: "ephemeral-bearer".into(),
         auth_source: "generated".into(),
         control_plane_state: crate::web::ControlPlaneState::Ready,
+        instance: None,
     };
 
     app.handle_agent_event(AgentEvent::WebDashboardStarted {

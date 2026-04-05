@@ -3084,6 +3084,7 @@ impl App {
                                 auth_mode: "unknown".into(),
                                 auth_source: "tui-cached".into(),
                                 control_plane_state: crate::web::ControlPlaneState::Ready,
+                                instance: None,
                             };
                             match launch_auspex_with_startup(&startup) {
                                 Ok(target) => SlashResult::Display(format!(

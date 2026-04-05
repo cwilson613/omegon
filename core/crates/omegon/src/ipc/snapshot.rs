@@ -213,13 +213,12 @@ fn project_cleave(handles: &DashboardHandles) -> IpcCleaveSnapshot {
     }
 }
 
-fn project_instance(
+pub fn project_instance_descriptor(
     handles: &DashboardHandles,
     cwd: &str,
     session: &IpcSessionSnapshot,
     harness: &IpcHarnessSnapshot,
     health: &IpcHealthSnapshot,
-    omegon_version: &str,
     server_instance_id: &str,
 ) -> OmegonInstanceDescriptor {
     let host = std::env::var("HOSTNAME")
@@ -289,6 +288,18 @@ fn project_instance(
             capability_tier: Some(harness.capability_tier.clone()),
         },
     }
+}
+
+fn project_instance(
+    handles: &DashboardHandles,
+    cwd: &str,
+    session: &IpcSessionSnapshot,
+    harness: &IpcHarnessSnapshot,
+    health: &IpcHealthSnapshot,
+    _omegon_version: &str,
+    server_instance_id: &str,
+) -> OmegonInstanceDescriptor {
+    project_instance_descriptor(handles, cwd, session, harness, health, server_instance_id)
 }
 
 fn workspace_id_from_cwd(cwd: &str) -> String {
