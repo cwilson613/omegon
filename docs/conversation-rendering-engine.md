@@ -17,7 +17,7 @@ related:
 
 ## Overview
 
-Own the terminal-side conversation rendering architecture: segment-based rendering, markdown/text layout, tool cards, inline image rendering, display artifacts, and operator-facing visual presentation inside Omegon. This node explicitly excludes the broader browser-based project intelligence portal and auspex-hosted dashboard concerns, which should live outside this rendering-engine scope.
+Own the terminal-side conversation rendering architecture: segment-based rendering, markdown/text layout, tool cards, inline image rendering, display artifacts, and operator-facing visual presentation inside Omegon. This node explicitly excludes the broader browser-based project-intelligence portal and Auspex-hosted browser concerns, which should live outside this rendering-engine scope.
 
 ## Research
 
@@ -25,7 +25,7 @@ Own the terminal-side conversation rendering architecture: segment-based renderi
 
 Boundary cleanup conclusion:
 - `conversation-rendering-engine` owns terminal-side conversation rendering inside Omegon: segment architecture, inline images, display artifacts, and operator-facing visual presentation in the TUI conversation stream.
-- `embedded-web-dashboard` and `native-plan-mode` remain Omegon-local because they are specifically about the built-in `/dash` surface served from the omegon binary.
+- `embedded-web-dashboard` and the Omegon-local parts of `native-plan-mode` remain Omegon-local because they are specifically about the built-in `/dash` compatibility surface served from the omegon binary.
 - `markdown-viewport` should remain the browser/project-intelligence portal epic derived from mdserve/Auspex, not be repurposed as the terminal rendering umbrella.
 - `pikit-auspex-extension`, `mdserve-lifecycle-backend`, `mdserve-dioxus-frontend`, and `mdserve-nix-distribution` belong with the browser/Auspex track, not under terminal conversation rendering.
 
@@ -43,13 +43,13 @@ Boundary cleanup conclusion:
 
 **Rationale:** The existing `markdown-viewport` node is not actually about terminal rendering; its content is a browser-based project intelligence portal derived from mdserve/Auspex. Repurposing it as the terminal rendering parent would reintroduce the same category error. Keep it as the browser portal epic and carve terminal rendering into its own parent.
 
-### Decision: `embedded-web-dashboard` stays Omegon-local, separate from Auspex/mdserve
+### Decision: `embedded-web-dashboard` stays Omegon-local as a compatibility surface, separate from Auspex/mdserve
 
 **Status:** decided
 
-**Rationale:** `embedded-web-dashboard` is specifically the lightweight localhost UI served from the omegon binary for live in-process session state. It is not the same thing as the broader mdserve/Auspex intelligence portal, even though both are browser surfaces. Keep it under Omegon-local design ownership rather than folding it into the external portal track.
+**Rationale:** `embedded-web-dashboard` is specifically the localhost UI served from the omegon binary for live in-process session state. It is not the same thing as the broader mdserve/Auspex intelligence portal, even though both are browser surfaces. Auspex should be documented as the primary browser surface; `/dash` remains Omegon-local for compatibility, debug, and in-process workflows. Keep that local surface under Omegon design ownership rather than folding it into the external portal track.
 
-### Decision: Auspex backend guarantees live in IPC; `/dash` remains a local browser protocol
+### Decision: Auspex backend guarantees live in IPC; `/dash` remains a local compatibility browser protocol
 
 **Status:** decided
 
@@ -62,7 +62,7 @@ Validated against the current code:
 - `core/crates/omegon/src/web/ws.rs` accepts only `user_prompt`, `slash_command`, `cancel`, and `request_snapshot` commands.
 - `core/crates/omegon/src/web/api.rs` still builds a dashboard-focused snapshot rather than the full IPC `IpcStateSnapshot`.
 
-Conclusion: browser `/dash` consumers should be documented as using a local Omegon dashboard protocol, while Auspex itself should anchor on IPC for canonical backend guarantees.
+Conclusion: browser `/dash` consumers should be documented as using a local Omegon compatibility/debug protocol, while Auspex itself should anchor on IPC for canonical backend guarantees and primary browser UX framing.
 
 ### Decision: Terminal rendering work moves under `conversation-rendering-engine`
 

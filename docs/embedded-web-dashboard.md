@@ -1,23 +1,23 @@
 ---
 id: embedded-web-dashboard
-title: Embedded web dashboard — lightweight localhost UI served from the omegon binary
+title: Embedded web dashboard — Omegon-local browser compatibility surface served from the binary
 status: implemented
 parent: markdown-viewport
 tags: [dashboard, web, axum, ratatui, architecture]
 open_questions: []
 ---
 
-# Embedded web dashboard — lightweight localhost UI served from the omegon binary
+# Embedded web dashboard — Omegon-local browser compatibility surface served from the binary
 
 ## Overview
 
-The TUI dashboard panel is constrained to ~36 columns of text. For complex lifecycle operations — dependency graph traversal, spec-to-task traceability, multi-change OpenSpec funnels, cleave timeline inspection — we need a richer interactive surface. The question is how to serve it from the omegon binary without introducing a heavy build pipeline or separate process.
+The TUI dashboard panel is constrained to ~36 columns of text. For complex lifecycle operations — dependency graph traversal, spec-to-task traceability, multi-change OpenSpec funnels, cleave timeline inspection — operators need a richer browser surface. Auspex is the primary browser experience for that role. This document covers the narrower question of how Omegon still serves an in-process localhost compatibility surface from the binary without introducing a heavy build pipeline or separate process.
 
 ## Research
 
-### Scope note — embedded dashboard versus browser portal
+### Scope note — embedded compatibility surface versus Auspex browser portal
 
-This node is the Omegon-local `/dash` surface served from the omegon binary. It should not be conflated with the broader browser/project-intelligence portal tracked by `markdown-viewport`.
+This node is the Omegon-local `/dash` surface served from the omegon binary. It is a local compatibility/debug browser surface, not the primary browser portal. Auspex owns the primary browser/project-intelligence experience tracked by `markdown-viewport`.
 
 ### Approach survey — 6 options evaluated
 
@@ -169,10 +169,10 @@ force-graph.js is already proven, small, and handles our node count. The funnel 
 **Status:** decided
 **Rationale:** force-graph.js (50KB) is already proven in the mdserve fork, handles our 139-node design tree easily, and provides interactive pan/zoom/select. The OpenSpec pipeline funnel and cleave execution timeline are linear/parallel structures that don't need graph layout — hand-rolled SVG with simple positioning is cleaner and zero-dependency.
 
-### Decision: /dash open starts the web server, /dash raises the TUI panel — two surfaces, one data model
+### Decision: Auspex is the primary browser surface; `/dash open` remains the Omegon-local compatibility path and `/dash` raises the TUI panel
 
 **Status:** decided
-**Rationale:** The TUI dashboard panel (right side, 36 cols) shows ambient status — focused node, active changes, cleave progress, session stats. /dash toggles between compact (no panel) and raised (panel visible). /dash open starts the embedded axum server on localhost and opens the default browser — this gives the full interactive view with design tree graph, OpenSpec funnel, cleave timeline, and dependency exploration. Both surfaces read the same data. The TUI panel is for glancing; the browser is for working.
+**Rationale:** The TUI dashboard panel (right side, 36 cols) shows ambient status — focused node, active changes, cleave progress, session stats. `/dash` toggles between compact (no panel) and raised (panel visible). `/dash open` starts the embedded axum server on localhost and opens the default browser as a local compatibility/debug surface. The primary browser workflow should move to Auspex, but both browser surfaces can read the same underlying lifecycle data. The TUI panel is for glancing; the browser is for deeper inspection.
 
 ### Decision: WebSocket protocol is the full agent interface — bidirectional events + commands
 

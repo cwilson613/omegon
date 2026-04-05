@@ -19,14 +19,14 @@ Auspex should implement against this document and the Rust types in
 `omegon-traits`. If they disagree, the Rust types are authoritative.
 
 This contract is intentionally **not** the embedded HTTP/WebSocket surface.
-HTTP/WebSocket remains available for browser/debug/dashboard use. Auspex-native
-integration targets this IPC layer exclusively.
+HTTP/WebSocket remains available for browser/debug/local-compatibility use.
+Auspex-native integration targets this IPC layer exclusively.
 
 ## Migration note for legacy `/dash` consumers
 
 If an existing Auspex-adjacent consumer still speaks to Omegon's embedded web
-surface, treat that surface as a temporary browser/debug transport, not the
-canonical Auspex backend contract.
+surface, treat that surface as a temporary local browser/debug transport, not
+the canonical Auspex backend contract.
 
 Today the canonical guarantees for Auspex are the IPC types above plus the Rust
 implementations in `core/crates/omegon/src/ipc/*`.
@@ -37,25 +37,26 @@ intentionally narrower and UI-oriented:
 - `GET /api/state` currently exposes `design`, `openspec`, `cleave`, and
   `session` only; it does **not** expose the IPC-level `harness` or `health`
   sections.
-- `GET /api/startup` is discovery metadata for the embedded localhost dashboard
-  (`schema_version`, URLs, auth token/mode/source, control-plane state), not an
-  Auspex session handshake.
+- `GET /api/startup` is discovery metadata for the embedded localhost browser
+  compatibility surface (`schema_version`, URLs, auth token/mode/source,
+  control-plane state), not an Auspex session handshake.
 - `WS /ws` currently emits legacy snake_case event names via a `type` field
   (for example `turn_start`, `turn_end`, `tool_end`, `harness_status_changed`,
   `context_updated`) and sends `state_snapshot` frames on attach or explicit
   snapshot request.
 - The web socket command set is limited to `user_prompt`, `slash_command`, and
-  `cancel`, with `request_snapshot` as a dashboard refresh helper.
+  `cancel`, with `request_snapshot` as a local browser refresh helper.
 
 Migration guidance:
 
 1. New Auspex integrations should attach over the native IPC contract, not the
    embedded `/dash` HTTP/WebSocket endpoints.
 2. Existing `/dash`-style consumers may continue to use the web surface as a
-   compatibility/debug channel, but they should not assume IPC field parity.
-3. The `/dash` → Auspex documentation migration should move canonical backend
-   guarantees into the IPC contract and treat the web surface as a separate,
-   Omegon-local browser protocol.
+   local compatibility/debug channel, but they should not assume IPC field
+   parity.
+3. Documentation should frame Auspex as the primary browser surface, with the
+   embedded web surface treated as a separate Omegon-local compatibility
+   protocol.
 
 ---
 
