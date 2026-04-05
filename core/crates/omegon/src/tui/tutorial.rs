@@ -127,8 +127,8 @@ const STEP_COCKPIT: Step = Step {
 };
 
 const STEP_WEB_DASHBOARD: Step = Step {
-    title: "Auspex Browser View",
-    body: "Opening Auspex in your browser.\n\nIt mirrors the right panel in a full web page \u{2014}\ndesign notes, specs, and a live feed of what\u{2019}s\nhappening here.\n\nSame data, no polling, instant updates.\nUse /dashboard as the primary command; /dash\nstill works as the compatibility command.",
+    title: "Auspex Browser",
+    body: "Opening Auspex in your browser.\n\nIt shows everything from the right panel\nin a full web page — design notes, specs,\nand a live feed of what’s happening here.\n\nSame data, no polling, instant updates.\n/dash remains the compatibility path until\n/auspex becomes the primary command.",
     anchor: Anchor::Center,
     trigger: Trigger::Tab,
     highlight: None,
@@ -241,7 +241,7 @@ pub const STEPS_ORIENTATION: &[Step] = &[
     },
     Step {
         title: "Design Notes",
-        body: "The sidebar tracks architecture decisions\nas living design nodes:\n\n  seed \u{2192} exploring \u{2192} decided \u{2192} implemented\n\nOmegon explores open questions, records\nresearch, and commits decisions with\nrationale. View any time in Auspex with\n/dashboard; /dash still works for compatibility.\n\n(Requires API key or Codex to activate.)",
+        body: "The sidebar tracks architecture decisions\nas living design nodes:\n\n  seed → exploring → decided → implemented\n\nOmegon explores open questions, records\nresearch, and commits decisions with\nrationale. View them in Auspex; /dash\nremains the local compatibility path.\n\n(Requires API key or Codex to activate.)",
         anchor: Anchor::Center,
         trigger: Trigger::Tab,
         highlight: Some(Highlight::Dashboard),
@@ -1321,31 +1321,25 @@ mod tests {
 
     #[test]
     fn auspex_browser_step_exists_in_both_modes() {
-        // The tutorial auto-opens the browser view when advancing to the
-        // Auspex step. Verify the step title exists.
+        // The tutorial auto-opens Auspex when advancing to the
+        // browser step. Verify the step title exists.
         let tut = Tutorial::new();
-        let has_dash = tut
-            .steps()
-            .iter()
-            .any(|s| s.title == "Auspex Browser View");
-        assert!(has_dash, "hands-on mode must have an Auspex browser step");
+        let has_dash = tut.steps().iter().any(|s| s.title == "Auspex Browser");
+        assert!(has_dash, "hands-on mode must have an Auspex Browser step");
 
         let demo = Tutorial::new_demo(true);
-        let has_dash = demo
-            .steps()
-            .iter()
-            .any(|s| s.title == "Auspex Browser View");
-        assert!(has_dash, "demo mode must have an Auspex browser step");
+        let has_dash = demo.steps().iter().any(|s| s.title == "Auspex Browser");
+        assert!(has_dash, "demo mode must have an Auspex Browser step");
     }
 
     #[test]
-    fn auspex_browser_step_mentions_dashboard_primary_and_dash_compatibility() {
+    fn auspex_browser_step_mentions_dash_as_compatibility_path() {
         let step = STEPS_ORIENTATION
             .iter()
-            .find(|s| s.title == "Auspex Browser View")
+            .find(|s| s.title == "Auspex Browser")
             .expect("orientation mode must include the Auspex browser step");
-        assert!(step.body.contains("/dashboard as the primary command"));
-        assert!(step.body.contains("/dash\nstill works as the compatibility command"));
+        assert!(step.body.contains("/dash"));
+        assert!(step.body.contains("compatibility path") || step.body.contains("compatibility"));
     }
 
     #[test]

@@ -1449,7 +1449,7 @@ fn slash_command_aliases_dispatch_correctly() {
     let mut app = test_app();
     let tx = test_tx();
 
-    // /dashboard should resolve (alias for /dash open)
+    // /dashboard should resolve as the compatibility alias for /dash open
     let result = app.handle_slash_command("/dashboard", &tx);
     assert!(
         !matches!(result, SlashResult::NotACommand),

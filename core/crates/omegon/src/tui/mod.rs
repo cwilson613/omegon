@@ -83,7 +83,7 @@ pub enum TuiCommand {
     ContextClear,
     /// List saved sessions.
     ListSessions,
-    /// Start the web dashboard server.
+    /// Start the local browser surface server used by Auspex compatibility flows.
     StartWebDashboard,
     /// Discard the current session and start fresh (saves current first).
     NewSession,
@@ -2255,7 +2255,7 @@ impl App {
             "import from other tools",
             &["auto", "claude-code", "pi", "codex", "cursor", "aider"],
         ),
-        ("dash", "open Auspex browser view (/dash compatibility command)", &["status"]),
+        ("dash", "open Auspex in browser (/dash compatibility path)", &["status"]),
         (
             "secrets",
             "manage stored secrets",
@@ -2297,7 +2297,7 @@ impl App {
             &["freeze", "status"],
         ),
         ("splash", "replay splash animation", &[]),
-        ("dashboard", "open Auspex browser view (alias for /dash)", &[]),
+        ("dashboard", "open Auspex browser surface (alias for /dash)", &[]),
         (
             "note",
             "capture a note for later (persists across sessions)",
@@ -2325,7 +2325,7 @@ impl App {
         }
 
         // Notify the tutorial overlay that a slash command was executed.
-        // This advances Command-triggered steps (e.g. compatibility commands during the Auspex step).
+        // This advances Command-triggered steps (e.g. /dash on the Auspex browser step).
         if let Some(ref mut overlay) = self.tutorial_overlay {
             overlay.check_command(cmd);
         }
@@ -2959,16 +2959,14 @@ impl App {
                 if let Some(addr) = self.web_server_addr {
                     let url = format!("http://{addr}");
                     if args == "status" {
-                        SlashResult::Display(format!(
-                            "Auspex browser view running at {url} (/dash compatibility command)"
-                        ))
+                        SlashResult::Display(format!("Auspex compatibility view running at {url}"))
                     } else {
                         open_browser(&url);
-                        SlashResult::Display(format!("Opening Auspex browser view at {url}"))
+                        SlashResult::Display(format!("Auspex compatibility view at {url}"))
                     }
                 } else {
                     let _ = tx.try_send(TuiCommand::StartWebDashboard);
-                    SlashResult::Display("Starting Auspex browser view…".into())
+                    SlashResult::Display("Starting Auspex browser surface…".into())
                 }
             }
 
@@ -5572,13 +5570,14 @@ mod auspex_copy_tests {
             .iter()
             .find(|(name, _, _)| *name == "dash")
             .expect("/dash command must exist");
-        assert!(dash.1.contains("Auspex browser view"));
+        assert!(dash.1.contains("Auspex"));
         assert!(dash.1.contains("compatibility"));
 
         let dashboard = App::COMMANDS
             .iter()
             .find(|(name, _, _)| *name == "dashboard")
             .expect("/dashboard command must exist");
-        assert!(dashboard.1.contains("Auspex browser view"));
+        assert!(dashboard.1.contains("Auspex"));
+        assert!(dashboard.1.contains("alias for /dash"));
     }
 }

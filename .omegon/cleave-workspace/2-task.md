@@ -1,32 +1,31 @@
 ---
 task_id: 2
-label: validate-note
-siblings: [0:state-contract, 1:ws-contract]
+label: tests-validate
+siblings: [0:docs-copy, 1:tui-copy]
 ---
 
-# Task 2: validate-note
+# Task 2: tests-validate
 
 ## Root Directive
 
-> Implement backend contract updates so Omegon's embedded control plane is the canonical Auspex interface before any /dash -> /auspex docs migration. Audit and close the concrete HTTP/WebSocket contract gaps between core/crates/omegon/src/web/* and Auspex's current client expectations, add tests, and leave a concise migration note grounded in the resulting contract.
+> Migrate Omegon docs and in-product copy from /dash framing to /auspex framing, without changing command behavior yet. Update design/docs/tutorial/help text so Auspex is presented as the primary browser surface and /dash remains only compatibility/local context where necessary. Reconcile tests affected by copy changes and validate the touched Rust code/docs.
 
 ## Mission
 
-After the contract changes land, validate the resulting control-plane surface against the current Auspex client expectations and write a concise migration note documenting the canonical backend fields/events now guaranteed for Auspex. Keep this note in Omegon docs near the control-plane/Auspex contract docs and ensure tests/builds cover the touched code.
+After docs and TUI copy changes land, reconcile any affected tests/comments and run targeted validation for the touched Rust TUI surfaces. Update only test expectations or comments made stale by the copy migration; do not change command behavior.
 
 ## Scope
 
-- `docs/auspex-ipc-contract.md`
-- `docs/conversation-rendering-engine.md`
-- `core/crates/omegon/src/web/api.rs`
-- `core/crates/omegon/src/web/ws.rs`
+- `core/crates/omegon/src/tui/tests.rs`
+- `core/crates/omegon/src/tui/mod.rs`
+- `core/crates/omegon/src/tui/tutorial.rs`
 
-**Depends on:** state-contract, ws-contract
+**Depends on:** tui-copy
 
 ## Siblings
 
-- **state-contract**: Audit and implement /api/state and /api/startup contract changes needed for Auspex compatibility. Focus on core/crates/omegon/src/web/api.rs and related state/startup structs so the snapshot includes the fields Auspex currently expects (including harness/dispatcher if the backend can supply them), and add/adjust tests for the serialized snapshot shape.
-- **ws-contract**: Audit and implement WebSocket event contract changes needed for Auspex compatibility. Focus on core/crates/omegon/src/web/ws.rs plus any upstream event types it serializes so streamed events expose the fields Auspex expects or can safely ignore, especially turn-end/session/harness updates and state snapshot refresh semantics. Add tests for event serialization.
+- **docs-copy**: Update long-lived docs that currently frame the browser experience around `/dash` or the embedded web dashboard. Rewrite them to present Auspex as the primary browser surface, while keeping any necessary historical/local compatibility notes. Focus on docs/embedded-web-dashboard.md, docs/display-tool-artifacts.md, docs/native-plan-mode.md, docs/conversation-rendering-engine.md, and other directly relevant docs that mention `/dash` as the primary browser path.
+- **tui-copy**: Update in-product copy in the TUI/tutorial/help surfaces so operator-facing text points to Auspex as the primary browser UI, while leaving current `/dash` command behavior intact as compatibility wording. Focus on core/crates/omegon/src/tui/mod.rs, core/crates/omegon/src/tui/tutorial.rs, and nearby help/command descriptions only.
 
 ## Dependency Versions
 
