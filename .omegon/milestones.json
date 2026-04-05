@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 12,
+    "rc_count": 13,
     "notes": [
       "feat(compliance): enforce Anthropic subscription ToS interactive-only boundary",
       "feat(compliance): subscription-aware cleave fallback routing",
@@ -431,14 +431,18 @@
       "feat(telemetry): surface provider quota snapshots in footer",
       "feat(tutorial): add tutorial gate and orientation mode",
       "fix(agent): hide attachment redisplay hints from user messages",
+      "fix(compliance): warn instead of blocking Anthropic subscription automation",
+      "fix(context): sync compact status with authoritative snapshot",
       "fix(footer): split model row into model + tier to prevent overflow",
       "fix(multimodal): preserve attachment source paths for redisplay",
       "fix(multimodal): store user attachments in canonical conversation state",
       "fix(providers): cache Ollama probe result and tighten TCP timeout",
+      "fix(providers): classify subscription routes conservatively",
       "fix(providers): log codex response headers when telemetry is absent",
       "fix(release): derive Homebrew updates from published release manifest",
       "fix(release): harden signing detection and brew push flow",
       "fix(release): script preflight checks and ignore python bytecode",
+      "fix(telemetry): format provider usage by active backend",
       "fix(tui): render operator attachments as inline placeholders",
       "fix(tui): render tool result markdown tables",
       "fix(tui): show provider telemetry in split footer",
@@ -447,7 +451,7 @@
       "fix(tui): unify tool result block backgrounds",
       "fix(tutorial): restore Tutorial::with_context() as gate-free constructor"
     ],
-    "rc_version": "0.15.10-rc.13",
-    "last_rc": "2026-04-05T13:28:26Z"
+    "rc_version": "0.15.10-rc.14",
+    "last_rc": "2026-04-05T16:32:05Z"
   }
 }

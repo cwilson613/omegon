@@ -1306,17 +1306,21 @@ mod tests {
             provider_telemetry: Some(omegon_traits::ProviderTelemetrySnapshot {
                 provider: "openai-codex".into(),
                 source: "response_headers".into(),
-                requests_remaining: Some(42),
-                tokens_remaining: Some(12_000),
+                codex_limit_name: Some("GPT-5.3-Codex-Spark".into()),
+                codex_active_limit: Some("codex".into()),
+                codex_primary_pct: Some(0),
+                codex_primary_reset_secs: Some(13_648),
+                codex_secondary_reset_secs: Some(348_644),
+                codex_credits_unlimited: Some(false),
                 ..Default::default()
             }),
             ..Default::default()
         };
-        let text = render_left_panel_text(&data, 72, 9);
+        let text = render_left_panel_text(&data, 96, 10);
 
         assert!(text.contains("quota"), "got {text}");
-        assert!(text.contains("req 42"), "got {text}");
-        assert!(text.contains("tok 12k") || text.contains("tok 12K"), "got {text}");
+        assert!(text.contains("GPT-5.3-Codex-Spark"), "got {text}");
+        assert!(text.contains("primary 0%"), "got {text}");
     }
 
     #[test]
