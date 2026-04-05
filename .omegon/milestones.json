@@ -420,15 +420,20 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 9,
+    "rc_count": 10,
     "notes": [
+      "feat(compliance): enforce Anthropic subscription ToS interactive-only boundary",
+      "feat(compliance): subscription-aware cleave fallback routing",
+      "feat(docs): Write user-facing documentation about Anthropic subscription ToS compliance. Two deliverables: (1) A new markdown doc at docs/anthropic-subscription-tos.md covering: what the restriction is (exact ToS quote), which Omegon entry points are allowed vs blocked, the interactive-vs-automated distinction, what to do if you need automation (get an API key), and how this compares to other providers (GitHub Copilot has no such restriction). Include a clear table: TUI mode=allowed, --initial-prompt=allowed, --prompt/--prompt-file=blocked, --smoke=blocked, /cleave=blocked. Include the exact Anthropic ToS URL. Make it factual and non-alarmist — this is a clear boundary that Omegon enforces for the operator's protection. (2) A new Astro page at site/src/pages/docs/providers.astro covering all provider auth modes: Anthropic API key (unrestricted), Anthropic OAuth/subscription (interactive TUI only), OpenAI API key, Codex OAuth, Ollama (local, unrestricted), GitHub Models (official PAT, coming soon), Copilot seat (coming soon). For each: how to configure, what's allowed, any restrictions. Follow the structure and style of existing pages like site/src/pages/docs/quickstart.astro or site/src/pages/docs/security.astro. Files: docs/anthropic-subscription-tos.md, site/src/pages/docs/providers.astro",
       "feat(session-log): record provider telemetry per turn",
       "feat(telemetry): parse ChatGPT Codex x-codex-* quota headers into provider telemetry",
       "feat(telemetry): scaffold provider usage snapshot events",
       "feat(telemetry): surface provider quota snapshots in footer",
+      "feat(tutorial): add tutorial gate and orientation mode",
       "fix(agent): hide attachment redisplay hints from user messages",
       "fix(multimodal): preserve attachment source paths for redisplay",
       "fix(multimodal): store user attachments in canonical conversation state",
+      "fix(providers): cache Ollama probe result and tighten TCP timeout",
       "fix(providers): log codex response headers when telemetry is absent",
       "fix(release): derive Homebrew updates from published release manifest",
       "fix(release): harden signing detection and brew push flow",
@@ -438,9 +443,10 @@
       "fix(tui): show provider telemetry in split footer",
       "fix(tui): show session stats and broaden codex telemetry parsing",
       "fix(tui): support queued prompts with attachment lists",
-      "fix(tui): unify tool result block backgrounds"
+      "fix(tui): unify tool result block backgrounds",
+      "fix(tutorial): restore Tutorial::with_context() as gate-free constructor"
     ],
-    "rc_version": "0.15.10-rc.10",
-    "last_rc": "2026-04-04T18:49:59Z"
+    "rc_version": "0.15.10-rc.11",
+    "last_rc": "2026-04-05T13:16:25Z"
   }
 }
