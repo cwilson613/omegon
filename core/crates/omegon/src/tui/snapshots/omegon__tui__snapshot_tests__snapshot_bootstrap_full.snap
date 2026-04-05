@@ -1,12 +1,12 @@
 ---
 source: crates/omegon/src/tui/snapshot_tests.rs
-assertion_line: 317
+assertion_line: 550
 expression: output
 ---
 
   Ω  Omegon
 
-  ✓ Anthropic (Claude) (oauth)
+  ✓ Anthropic/Claude (oauth)
   ⚠ OpenAI API   (none)
   ✓ Ollama       1 model
   ✓ podman       5.3.1
