@@ -15,6 +15,7 @@
 //! All use unified navy→teal→amber CIE L* perceptual color ramp.
 
 use super::theme::Theme;
+use super::widgets::{truncate_str, visible_width};
 use crate::features::cleave::CleaveProgress;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};
@@ -1408,12 +1409,18 @@ impl InstrumentPanel {
             let mut x = inner.x;
             x = render_str_colored(indicator, x, y, inner.right(), panel_bg(t), buf, |_| ind_color);
             let short = tool_short_name(&tool.name);
-            let display_name = if short.chars().count() > name_w {
-                short.chars().take(name_w).collect::<String>()
-            } else {
-                short
-            };
+            let display_name = truncate_str(&short, name_w, "…");
             x = render_str_colored(&display_name, x, y, inner.right(), panel_bg(t), buf, |_| name_color);
+            while x < inner.x + 2 + visible_width(&display_name) as u16 {
+                if x >= inner.right() {
+                    break;
+                }
+                if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                    cell.set_char(' ');
+                    cell.set_bg(panel_bg(t));
+                }
+                x += 1;
+            }
             while x < inner.x + 2 + name_w as u16 {
                 if x >= inner.right() {
                     break;
@@ -1834,6 +1841,55 @@ mod tests {
             let right_border = &buf[(area.right() - 1, y)];
             assert_ne!(left_border.symbol(), "Ω", "left border leaked at row {y}");
             assert_ne!(right_border.symbol(), "Ω", "right border leaked at row {y}");
+        }
+    }
+
+    #[test]
+    fn render_tools_does_not_paint_past_panel_boundary() {
+        let mut panel = InstrumentPanel::default();
+        panel.tool_started("Read");
+        panel.update_telemetry(0.0, 200_000, None, false, "off", None, false, 0.0);
+        panel.tool_finished("Read", false);
+
+        let tools_area = Rect::new(20, 0, 28, 8);
+        let backend = ratatui::backend::TestBackend::new(60, 8);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let t = crate::tui::theme::Alpharius;
+
+        terminal
+            .draw(|f| {
+                let buf = f.buffer_mut();
+                for y in 0..8 {
+                    for x in 0..60 {
+                        if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                            cell.set_char(if x < tools_area.x { 'L' } else { 'R' });
+                            cell.set_fg(Color::White);
+                            cell.set_bg(Color::Black);
+                        }
+                    }
+                }
+                panel.render_tools_panel(tools_area, f, &t);
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        for y in 0..8 {
+            for x in 0..tools_area.x {
+                let cell = &buf[(x, y)];
+                assert_eq!(
+                    cell.symbol(),
+                    "L",
+                    "tools panel painted left of its boundary at ({x},{y})"
+                );
+            }
+            for x in tools_area.right()..60 {
+                let cell = &buf[(x, y)];
+                assert_eq!(
+                    cell.symbol(),
+                    "R",
+                    "tools panel painted right of its boundary at ({x},{y})"
+                );
+            }
         }
     }
 
