@@ -526,6 +526,10 @@ impl CleaveFeature {
         )
         .await?;
 
+        if should_cleanup_workspace(&result) {
+            cleanup_workspace_dir(&workspace)?;
+        }
+
         // Update progress to final state
         {
             let mut prog = self.progress.lock().unwrap();
@@ -808,6 +812,21 @@ fn text_result(text: &str) -> ToolResult {
     }
 }
 
+fn should_cleanup_workspace(result: &cleave::orchestrator::CleaveResult) -> bool {
+    result
+        .state
+        .children
+        .iter()
+        .all(|child| child.status == ChildStatus::Completed)
+}
+
+fn cleanup_workspace_dir(workspace: &std::path::Path) -> anyhow::Result<()> {
+    if workspace.exists() {
+        std::fs::remove_dir_all(workspace)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1012,6 +1031,67 @@ mod tests {
             text.contains("decision"),
             "should return assessment: {text}"
         );
+    }
+
+    #[test]
+    fn cleanup_workspace_dir_removes_existing_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path().join(".omegon/cleave-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(workspace.join("state.json"), "{}").unwrap();
+
+        cleanup_workspace_dir(&workspace).unwrap();
+
+        assert!(!workspace.exists());
+    }
+
+    #[test]
+    fn should_cleanup_workspace_only_when_all_children_completed() {
+        let mk_child = |status| crate::cleave::state::ChildState {
+            child_id: 0,
+            label: "alpha".into(),
+            description: "Do alpha work".into(),
+            scope: vec!["src/".into()],
+            depends_on: vec![],
+            status,
+            error: None,
+            branch: Some("cleave/0-alpha".into()),
+            worktree_path: None,
+            backend: "native".into(),
+            execute_model: None,
+            provider_id: None,
+            duration_secs: None,
+        };
+
+        let completed = cleave::orchestrator::CleaveResult {
+            state: crate::cleave::state::CleaveState {
+                run_id: "run-1".into(),
+                directive: "test".into(),
+                repo_path: "/tmp/repo".into(),
+                workspace_path: "/tmp/workspace".into(),
+                children: vec![mk_child(ChildStatus::Completed)],
+                plan: json!({}),
+                started_at: None,
+            },
+            merge_results: vec![],
+            duration_secs: 1.0,
+        };
+        assert!(should_cleanup_workspace(&completed));
+
+        let failed = cleave::orchestrator::CleaveResult {
+            state: crate::cleave::state::CleaveState {
+                run_id: "run-2".into(),
+                directive: "test".into(),
+                repo_path: "/tmp/repo".into(),
+                workspace_path: "/tmp/workspace".into(),
+                children: vec![mk_child(ChildStatus::Completed), mk_child(ChildStatus::Failed)],
+                plan: json!({}),
+                started_at: None,
+            },
+            merge_results: vec![],
+            duration_secs: 1.0,
+        };
+        assert!(!should_cleanup_workspace(&failed));
     }
 }
 
