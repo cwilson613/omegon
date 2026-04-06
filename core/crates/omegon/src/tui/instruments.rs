@@ -589,6 +589,17 @@ impl InstrumentPanel {
         }
     }
 
+    fn thinking_pulse_color(pulse: f64) -> Color {
+        let pulse = pulse.clamp(0.0, 1.0);
+        let base = (70.0, 126.0, 214.0);
+        let peak = (148.0, 196.0, 255.0);
+        Color::Rgb(
+            (base.0 + (peak.0 - base.0) * pulse) as u8,
+            (base.1 + (peak.1 - base.1) * pulse) as u8,
+            (base.2 + (peak.2 - base.2) * pulse) as u8,
+        )
+    }
+
     /// Update mind fact counts and memory context fraction.
     /// Record token counts from the provider's TurnEnd event.
     pub fn update_turn_tokens(&mut self, input: u32, output: u32, cache_read: u32) {
@@ -953,12 +964,7 @@ impl InstrumentPanel {
                         .clamp(0.0, 1.0);
                     let level = (pulse * 8.0).round() as usize;
                     let c = FILL[level.min(8)];
-                    let color = if pulse > 0.72 {
-                        Color::Rgb(198, 178, 255)
-                    } else {
-                        Self::band_color(ContextBand::Thinking)
-                    };
-                    (c, color)
+                    (c, Self::thinking_pulse_color(pulse))
                 }
                 // Tool churn animates on conversation band (tools are now part of conversation)
                 (ActivityMode::ToolChurn, ContextBand::Conversation) => {
@@ -1935,6 +1941,20 @@ mod tests {
         assert_eq!(breakdown[3].0, ContextBand::Tools);
         assert_eq!(breakdown[4].0, ContextBand::Thinking);
         assert_eq!(breakdown[5].0, ContextBand::Free);
+    }
+
+    #[test]
+    fn thinking_pulse_stays_in_blue_family() {
+        let low = InstrumentPanel::thinking_pulse_color(0.0);
+        let high = InstrumentPanel::thinking_pulse_color(1.0);
+        assert_eq!(low, InstrumentPanel::band_color(ContextBand::Thinking));
+        match high {
+            Color::Rgb(r, g, b) => {
+                assert!(b >= g && g >= r, "thinking highlight should remain blue-dominant: {r},{g},{b}");
+                assert!(b >= 214, "thinking highlight should brighten the blue channel: {r},{g},{b}");
+            }
+            other => panic!("unexpected thinking highlight color: {other:?}"),
+        }
     }
 
     #[test]
