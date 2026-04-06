@@ -2191,24 +2191,97 @@ impl OllamaCloudClient {
     }
 
     fn build_wire_messages(system_prompt: &str, messages: &[LlmMessage]) -> Vec<Value> {
-        let mut wire_msgs = vec![json!({"role": "system", "content": system_prompt})];
+        let mut wire_msgs = Vec::with_capacity(messages.len() + 1);
+        if !system_prompt.trim().is_empty() {
+            wire_msgs.push(json!({"role": "system", "content": system_prompt}));
+        }
         for m in messages {
             match m {
                 LlmMessage::User { content, .. } => {
                     wire_msgs.push(json!({"role": "user", "content": content}));
                 }
-                LlmMessage::Assistant { text, .. } => {
-                    let joined = text.join("");
-                    if !joined.is_empty() {
-                        wire_msgs.push(json!({"role": "assistant", "content": joined}));
+                LlmMessage::Assistant {
+                    text,
+                    thinking,
+                    tool_calls,
+                    ..
+                } => {
+                    let mut assistant = json!({
+                        "role": "assistant",
+                        "content": text.join("\n"),
+                    });
+                    if !thinking.is_empty() {
+                        assistant["thinking"] = Value::String(thinking.join("\n"));
                     }
+                    if !tool_calls.is_empty() {
+                        assistant["tool_calls"] = Value::Array(
+                            tool_calls
+                                .iter()
+                                .map(|tc| {
+                                    json!({
+                                        "function": {
+                                            "name": tc.name,
+                                            "arguments": if tc.arguments.is_object() {
+                                                tc.arguments.clone()
+                                            } else {
+                                                json!({})
+                                            }
+                                        }
+                                    })
+                                })
+                                .collect(),
+                        );
+                    }
+                    wire_msgs.push(assistant);
                 }
-                LlmMessage::ToolResult { content, .. } => {
-                    wire_msgs.push(json!({"role": "tool", "content": content}));
+                LlmMessage::ToolResult {
+                    tool_name,
+                    content,
+                    is_error,
+                    ..
+                } => {
+                    wire_msgs.push(json!({
+                        "role": "tool",
+                        "tool_name": tool_name,
+                        "content": content,
+                        "is_error": is_error,
+                    }));
                 }
             }
         }
         wire_msgs
+    }
+
+    fn parse_tool_calls(message: &Value) -> Vec<crate::bridge::WireToolCall> {
+        message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .map(|calls| {
+                calls
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, call)| {
+                        let function = call.get("function")?;
+                        let name = function.get("name")?.as_str()?.to_string();
+                        let arguments = function
+                            .get("arguments")
+                            .cloned()
+                            .filter(Value::is_object)
+                            .unwrap_or_else(|| json!({}));
+                        let id = call
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned)
+                            .unwrap_or_else(|| format!("ollama-call-{}", idx + 1));
+                        Some(crate::bridge::WireToolCall {
+                            id,
+                            name,
+                            arguments,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -2308,24 +2381,58 @@ impl LlmBridge for OllamaCloudClient {
 
         let provider_telemetry = parse_rate_limit_snapshot("ollama-cloud", response.headers());
         let payload: Value = response.json().await?;
-        let content = payload
-            .get("message")
-            .and_then(|m| m.get("content"))
+        let message = payload.get("message").cloned().unwrap_or_else(|| json!({}));
+        let content = message
+            .get("content")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
+        let thinking = message
+            .get("thinking")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let tool_calls = Self::parse_tool_calls(&message);
 
         let _ = tx.send(LlmEvent::Start).await;
+        if !thinking.is_empty() {
+            let _ = tx.send(LlmEvent::ThinkingStart).await;
+            let _ = tx
+                .send(LlmEvent::ThinkingDelta {
+                    delta: thinking.clone(),
+                })
+                .await;
+            let _ = tx.send(LlmEvent::ThinkingEnd).await;
+        }
         let _ = tx.send(LlmEvent::TextStart).await;
         if !content.is_empty() {
             let _ = tx.send(LlmEvent::TextDelta { delta: content.clone() }).await;
         }
         let _ = tx.send(LlmEvent::TextEnd).await;
+        for tool_call in &tool_calls {
+            let _ = tx.send(LlmEvent::ToolCallStart).await;
+            let _ = tx
+                .send(LlmEvent::ToolCallEnd {
+                    tool_call: tool_call.clone(),
+                })
+                .await;
+        }
         let _ = tx
             .send(LlmEvent::Done {
-                message: json!({"role": "assistant", "content": content}),
-                input_tokens: 0,
-                output_tokens: 0,
+                message: json!({
+                    "text": content,
+                    "thinking": thinking,
+                    "tool_calls": tool_calls,
+                    "raw": payload,
+                }),
+                input_tokens: payload
+                    .get("prompt_eval_count")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                output_tokens: payload
+                    .get("eval_count")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
                 cache_read_tokens: 0,
                 provider_telemetry,
             })
@@ -2953,6 +3060,54 @@ mod tests {
         assert_eq!(wire[0]["content"], "system");
         assert_eq!(wire[1]["role"], "user");
         assert_eq!(wire[1]["content"], "hello");
+    }
+
+    #[test]
+    fn ollama_cloud_parses_native_tool_calls() {
+        let message = json!({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "bash",
+                        "arguments": {"command": "pwd"}
+                    }
+                }
+            ]
+        });
+
+        let tool_calls = OllamaCloudClient::parse_tool_calls(&message);
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "bash");
+        assert_eq!(tool_calls[0].arguments, json!({"command": "pwd"}));
+        assert_eq!(tool_calls[0].id, "ollama-call-1");
+    }
+
+    #[test]
+    fn ollama_cloud_wire_messages_preserve_assistant_thinking_and_tool_calls() {
+        let wire = OllamaCloudClient::build_wire_messages(
+            "system",
+            &[LlmMessage::Assistant {
+                text: vec!["I'll inspect the repo.".into()],
+                thinking: vec!["Need to check status first.".into()],
+                tool_calls: vec![crate::bridge::WireToolCall {
+                    id: "tc1".into(),
+                    name: "bash".into(),
+                    arguments: json!({"command": "git status --short"}),
+                }],
+                raw: None,
+            }],
+        );
+
+        assert_eq!(wire[1]["role"], "assistant");
+        assert_eq!(wire[1]["content"], "I'll inspect the repo.");
+        assert_eq!(wire[1]["thinking"], "Need to check status first.");
+        assert_eq!(wire[1]["tool_calls"][0]["function"]["name"], "bash");
+        assert_eq!(
+            wire[1]["tool_calls"][0]["function"]["arguments"],
+            json!({"command": "git status --short"})
+        );
     }
 
     #[test]
