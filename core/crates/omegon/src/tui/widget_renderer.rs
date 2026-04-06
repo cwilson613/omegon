@@ -213,8 +213,6 @@ fn render_json_fallback(frame: &mut Frame, area: Rect, data: &Value, label: &str
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_timeline_rendering() {
         let data = serde_json::json!({
