@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use omegon_traits::{ContentBlock, Feature, ToolDefinition, ToolResult};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 fn dispatch_command(command_tx: &SharedCommandTx, command: TuiCommand) -> bool {
     if let Ok(guard) = command_tx.lock()
@@ -18,6 +18,29 @@ fn dispatch_command(command_tx: &SharedCommandTx, command: TuiCommand) -> bool {
         return tx.try_send(command).is_ok();
     }
     false
+}
+
+async fn run_context_slash(
+    command_tx: &SharedCommandTx,
+    args: &str,
+) -> anyhow::Result<Option<omegon_traits::SlashCommandResponse>> {
+    let (reply_tx, reply_rx) = oneshot::channel();
+    if !dispatch_command(
+        command_tx,
+        TuiCommand::RunSlashCommand {
+            name: "context".into(),
+            args: args.into(),
+            respond_to: Some(reply_tx),
+        },
+    ) {
+        return Ok(None);
+    }
+
+    Ok(Some(
+        reply_rx
+            .await
+            .map_err(|_| anyhow::anyhow!("context slash executor dropped response"))?,
+    ))
 }
 
 use crate::tui::TuiCommand;
@@ -160,28 +183,44 @@ impl Feature for ContextProvider {
             }
 
             "context_compact" => {
-                let dispatched = dispatch_command(&self.command_tx, TuiCommand::ContextCompact);
-                let text = if dispatched {
-                    "Context compaction requested."
+                let response = run_context_slash(&self.command_tx, "compact").await?;
+                let (text, accepted, dispatched) = if let Some(response) = response {
+                    (
+                        response.output.unwrap_or_else(|| "Context compaction completed.".into()),
+                        response.accepted,
+                        true,
+                    )
                 } else {
-                    "Context compaction is unavailable in this mode (no interactive session command channel)."
+                    (
+                        "Context compaction is unavailable in this mode (no interactive session command channel).".into(),
+                        false,
+                        false,
+                    )
                 };
                 Ok(ToolResult {
-                    content: vec![ContentBlock::Text { text: text.into() }],
-                    details: json!({ "dispatched": dispatched }),
+                    content: vec![ContentBlock::Text { text }],
+                    details: json!({ "dispatched": dispatched, "accepted": accepted }),
                 })
             }
 
             "context_clear" => {
-                let dispatched = dispatch_command(&self.command_tx, TuiCommand::ContextClear);
-                let text = if dispatched {
-                    "Context clear requested."
+                let response = run_context_slash(&self.command_tx, "clear").await?;
+                let (text, accepted, dispatched) = if let Some(response) = response {
+                    (
+                        response.output.unwrap_or_else(|| "Context cleared.".into()),
+                        response.accepted,
+                        true,
+                    )
                 } else {
-                    "Context clear is unavailable in this mode (no interactive session command channel)."
+                    (
+                        "Context clear is unavailable in this mode (no interactive session command channel).".into(),
+                        false,
+                        false,
+                    )
                 };
                 Ok(ToolResult {
-                    content: vec![ContentBlock::Text { text: text.into() }],
-                    details: json!({ "dispatched": dispatched }),
+                    content: vec![ContentBlock::Text { text }],
+                    details: json!({ "dispatched": dispatched, "accepted": accepted }),
                 })
             }
 
@@ -193,6 +232,13 @@ impl Feature for ContextProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn expect_text(result: &ToolResult) -> &str {
+        match &result.content[0] {
+            ContentBlock::Text { text } => text,
+            other => panic!("unexpected content block: {other:?}"),
+        }
+    }
 
     #[tokio::test]
     async fn context_status_reports_current_metrics_snapshot() {
@@ -257,5 +303,109 @@ mod tests {
             other => panic!("unexpected content block: {other:?}"),
         }
         assert_eq!(result.details["dispatched"], false);
+        assert_eq!(result.details["accepted"], false);
+    }
+
+    #[tokio::test]
+    async fn compact_tool_waits_for_structured_slash_response() {
+        let metrics = SharedContextMetrics::new();
+        let command_tx = new_shared_command_tx();
+        let rx = {
+            let (tx, rx) = mpsc::channel(1);
+            *command_tx.lock().unwrap() = Some(tx);
+            rx
+        };
+        let provider = ContextProvider::new(metrics, command_tx);
+
+        let exec = tokio::spawn(async move {
+            provider
+                .execute(
+                    "context_compact",
+                    "call-3",
+                    json!({}),
+                    tokio_util::sync::CancellationToken::new(),
+                )
+                .await
+                .expect("tool result")
+        });
+
+        let mut rx = rx;
+        let command = rx.recv().await.expect("context slash command");
+        match command {
+            TuiCommand::RunSlashCommand {
+                name,
+                args,
+                respond_to,
+            } => {
+                assert_eq!(name, "context");
+                assert_eq!(args, "compact");
+                respond_to
+                    .expect("responder")
+                    .send(omegon_traits::SlashCommandResponse {
+                        accepted: true,
+                        output: Some("Context compressed. Now using 1234 tokens.".into()),
+                    })
+                    .expect("send response");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let result = exec.await.expect("join");
+        assert_eq!(
+            expect_text(&result),
+            "Context compressed. Now using 1234 tokens."
+        );
+        assert_eq!(result.details["dispatched"], true);
+        assert_eq!(result.details["accepted"], true);
+    }
+
+    #[tokio::test]
+    async fn clear_tool_waits_for_structured_slash_failure() {
+        let metrics = SharedContextMetrics::new();
+        let command_tx = new_shared_command_tx();
+        let rx = {
+            let (tx, rx) = mpsc::channel(1);
+            *command_tx.lock().unwrap() = Some(tx);
+            rx
+        };
+        let provider = ContextProvider::new(metrics, command_tx);
+
+        let exec = tokio::spawn(async move {
+            provider
+                .execute(
+                    "context_clear",
+                    "call-4",
+                    json!({}),
+                    tokio_util::sync::CancellationToken::new(),
+                )
+                .await
+                .expect("tool result")
+        });
+
+        let mut rx = rx;
+        let command = rx.recv().await.expect("context slash command");
+        match command {
+            TuiCommand::RunSlashCommand {
+                name,
+                args,
+                respond_to,
+            } => {
+                assert_eq!(name, "context");
+                assert_eq!(args, "clear");
+                respond_to
+                    .expect("responder")
+                    .send(omegon_traits::SlashCommandResponse {
+                        accepted: false,
+                        output: Some("clear failed".into()),
+                    })
+                    .expect("send response");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let result = exec.await.expect("join");
+        assert_eq!(expect_text(&result), "clear failed");
+        assert_eq!(result.details["dispatched"], true);
+        assert_eq!(result.details["accepted"], false);
     }
 }
