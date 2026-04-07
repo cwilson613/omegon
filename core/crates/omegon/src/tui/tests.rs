@@ -26,6 +26,73 @@ fn test_tx() -> mpsc::Sender<TuiCommand> {
     tx
 }
 
+fn render_app_to_string(app: &mut App, width: u16, height: u16) -> String {
+    let backend = ratatui::backend::TestBackend::new(width, height);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+
+    let mut text = String::new();
+    let size = terminal.backend().size().unwrap();
+    let area = Rect::new(0, 0, size.width, size.height);
+    let buf = terminal.backend().buffer();
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right() {
+            text.push_str(buf[(x, y)].symbol());
+        }
+        text.push('\n');
+    }
+    text
+}
+
+#[test]
+fn modal_overlay_clears_stale_wrapped_rows_when_content_shrinks() {
+    let mut app = test_app();
+    app.active_modal = Some((
+        "widget-modal".into(),
+        serde_json::json!({
+            "message": "line 1\nline 2\nline 3\nline 4\nline 5\nline 6"
+        }),
+        None,
+        std::time::Instant::now(),
+    ));
+    let _verbose = render_app_to_string(&mut app, 100, 30);
+
+    app.active_modal = Some((
+        "widget-modal".into(),
+        serde_json::json!({ "message": "short" }),
+        None,
+        std::time::Instant::now(),
+    ));
+    let compact = render_app_to_string(&mut app, 100, 30);
+
+    assert!(compact.contains("short"), "got {compact}");
+    assert!(!compact.contains("line 6"), "got {compact}");
+    assert!(!compact.contains("line 5"), "got {compact}");
+}
+
+#[test]
+fn action_prompt_clears_stale_rows_when_reused_with_fewer_actions() {
+    let mut app = test_app();
+    app.active_action_prompt = Some((
+        "widget-actions".into(),
+        vec![
+            "alpha".into(),
+            "beta".into(),
+            "gamma".into(),
+            "delta".into(),
+            "epsilon".into(),
+        ],
+    ));
+    let _verbose = render_app_to_string(&mut app, 100, 30);
+
+    app.active_action_prompt = Some(("widget-actions".into(), vec!["only".into()]));
+    let compact = render_app_to_string(&mut app, 100, 30);
+
+    assert!(compact.contains("only"), "got {compact}");
+    assert!(!compact.contains("epsilon"), "got {compact}");
+    assert!(!compact.contains("delta"), "got {compact}");
+}
+
 #[test]
 fn turn_end_does_not_overwrite_footer_context_with_last_request_input_tokens() {
     let mut app = test_app();

@@ -2462,13 +2462,20 @@ impl App {
         let title = widget_id.to_string();
         let json_str = serde_json::to_string_pretty(data).unwrap_or_else(|_| "{}".to_string());
 
+        let modal_bg = self.theme.card_bg();
         let block = ratatui::widgets::Block::default()
             .title(format!(" {} ", title))
             .borders(ratatui::widgets::Borders::ALL)
-            .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan));
+            .border_style(
+                ratatui::style::Style::default()
+                    .fg(ratatui::style::Color::Cyan)
+                    .bg(modal_bg),
+            )
+            .style(ratatui::style::Style::default().bg(modal_bg));
 
         let para = ratatui::widgets::Paragraph::new(json_str)
             .block(block)
+            .style(ratatui::style::Style::default().bg(modal_bg))
             .wrap(ratatui::widgets::Wrap { trim: true });
 
         frame.render_widget(para, modal_area);
@@ -2507,12 +2514,20 @@ impl App {
             )));
         }
 
+        let prompt_bg = self.theme.card_bg();
         let block = ratatui::widgets::Block::default()
             .title(format!(" {} ", widget_id))
             .borders(ratatui::widgets::Borders::ALL)
-            .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::Green));
+            .border_style(
+                ratatui::style::Style::default()
+                    .fg(ratatui::style::Color::Green)
+                    .bg(prompt_bg),
+            )
+            .style(ratatui::style::Style::default().bg(prompt_bg));
 
-        let para = ratatui::widgets::Paragraph::new(lines).block(block);
+        let para = ratatui::widgets::Paragraph::new(lines)
+            .block(block)
+            .style(ratatui::style::Style::default().bg(prompt_bg));
         frame.render_widget(para, prompt_area);
     }
 
