@@ -1713,6 +1713,9 @@ fn slash_auspex_status_reports_attach_metadata() {
     assert!(text.contains("ipc.sock"), "got: {text}");
     assert!(text.contains("session id: not yet exposed"), "got: {text}");
     assert!(text.contains("Auspex\n  app:"), "got: {text}");
+    if !text.contains("app: not detected") {
+        assert!(text.contains("modes:"), "got: {text}");
+    }
     assert!(
         text.contains("Use `/auspex open` as the primary local desktop handoff"),
         "got: {text}"
@@ -1842,12 +1845,34 @@ fn auspex_attach_payload_carries_startup_and_instance_metadata() {
         }),
     };
 
-    let payload = super::build_auspex_attach_payload(&startup).unwrap();
+    let payload = super::build_auspex_attach_payload(&startup, super::AuspexHandoffMode::Env)
+        .unwrap();
     let json: serde_json::Value = serde_json::from_str(&payload).unwrap();
     assert_eq!(json["transport"], "omegon-ipc");
+    assert_eq!(json["preferred_handoff"], "env");
     assert_eq!(json["startup_url"], "http://127.0.0.1:7842/api/startup");
     assert_eq!(json["ws_token"], "test");
     assert_eq!(json["instance"]["identity"]["instance_id"], "instance-1");
+}
+
+#[test]
+fn parse_handoff_modes_defaults_to_env_when_unspecified() {
+    let modes = super::parse_handoff_modes(&serde_json::json!({"omegon_ipc_protocol": 1}));
+    assert_eq!(modes, vec![super::AuspexHandoffMode::Env]);
+}
+
+#[test]
+fn parse_handoff_modes_reads_supported_modes() {
+    let modes = super::parse_handoff_modes(&serde_json::json!({
+        "handoff_modes": ["browser-url", "env", "unknown"]
+    }));
+    assert_eq!(
+        modes,
+        vec![
+            super::AuspexHandoffMode::BrowserUrl,
+            super::AuspexHandoffMode::Env,
+        ]
+    );
 }
 
 #[test]

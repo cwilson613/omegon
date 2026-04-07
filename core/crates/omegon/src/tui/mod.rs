@@ -297,11 +297,31 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
 }
 
 /// Compute dynamic editor height from the editor's wrapped visual rows.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum AuspexHandoffMode {
+    Env,
+    BrowserUrl,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct AuspexAttachPayload {
+    version: u16,
+    transport: String,
+    preferred_handoff: AuspexHandoffMode,
+    startup_url: String,
+    http_base: String,
+    ws_url: String,
+    ws_token: String,
+    instance: Option<omegon_traits::OmegonInstanceDescriptor>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AuspexProbe {
     target: String,
     source: &'static str,
     compatibility: AuspexCompatibility,
+    handoff_modes: Vec<AuspexHandoffMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -320,6 +340,18 @@ fn launch_auspex_with_startup(startup: &crate::web::WebStartupInfo) -> anyhow::R
     }
 
     let target = probe.target;
+    let preferred_handoff = if probe.handoff_modes.contains(&AuspexHandoffMode::Env) {
+        AuspexHandoffMode::Env
+    } else {
+        AuspexHandoffMode::BrowserUrl
+    };
+    let attach_payload = build_auspex_attach_payload(startup, preferred_handoff.clone())?;
+
+    if matches!(preferred_handoff, AuspexHandoffMode::BrowserUrl) {
+        open_browser(&startup.http_base);
+        return Ok(format!("{target} via browser-url"));
+    }
+
     let mut command = if let Some(explicit) = target.strip_prefix("AUSPEX_BIN=") {
         std::process::Command::new(explicit)
     } else if target.ends_with(".app") {
@@ -337,7 +369,6 @@ fn launch_auspex_with_startup(startup: &crate::web::WebStartupInfo) -> anyhow::R
         std::process::Command::new(target.clone())
     };
 
-    let attach_payload = build_auspex_attach_payload(startup)?;
     command
         .env("AUSPEX_OMEGON_STARTUP_URL", startup.startup_url.clone())
         .env("AUSPEX_OMEGON_WS_URL", startup.ws_url.clone())
@@ -367,22 +398,45 @@ fn launch_auspex_with_startup(startup: &crate::web::WebStartupInfo) -> anyhow::R
     Ok(target)
 }
 
-fn build_auspex_attach_payload(startup: &crate::web::WebStartupInfo) -> anyhow::Result<String> {
-    let payload = serde_json::json!({
-        "version": 1,
-        "transport": "omegon-ipc",
-        "startup_url": startup.startup_url,
-        "http_base": startup.http_base,
-        "ws_url": startup.ws_url,
-        "ws_token": startup.token,
-        "instance": startup.instance_descriptor,
-    });
+fn build_auspex_attach_payload(
+    startup: &crate::web::WebStartupInfo,
+    preferred_handoff: AuspexHandoffMode,
+) -> anyhow::Result<String> {
+    let payload = AuspexAttachPayload {
+        version: 1,
+        transport: "omegon-ipc".into(),
+        preferred_handoff,
+        startup_url: startup.startup_url.clone(),
+        http_base: startup.http_base.clone(),
+        ws_url: startup.ws_url.clone(),
+        ws_token: startup.token.clone(),
+        instance: startup.instance_descriptor.clone(),
+    };
     serde_json::to_string(&payload).map_err(Into::into)
 }
 
-fn probe_auspex_compatibility(target: &str) -> AuspexCompatibility {
+fn parse_handoff_modes(value: &serde_json::Value) -> Vec<AuspexHandoffMode> {
+    let Some(modes) = value.get("handoff_modes").and_then(|v| v.as_array()) else {
+        return vec![AuspexHandoffMode::Env];
+    };
+    let parsed: Vec<AuspexHandoffMode> = modes
+        .iter()
+        .filter_map(|mode| match mode.as_str() {
+            Some("env") => Some(AuspexHandoffMode::Env),
+            Some("browser-url") => Some(AuspexHandoffMode::BrowserUrl),
+            _ => None,
+        })
+        .collect();
+    if parsed.is_empty() {
+        vec![AuspexHandoffMode::Env]
+    } else {
+        parsed
+    }
+}
+
+fn probe_auspex_target(target: &str) -> (AuspexCompatibility, Vec<AuspexHandoffMode>) {
     if target.ends_with(".app") {
-        return AuspexCompatibility::Unknown;
+        return (AuspexCompatibility::Unknown, vec![AuspexHandoffMode::Env]);
     }
     let bin = target.strip_prefix("AUSPEX_BIN=").unwrap_or(target);
     let output = std::process::Command::new(bin)
@@ -392,25 +446,29 @@ fn probe_auspex_compatibility(target: &str) -> AuspexCompatibility {
         .stderr(std::process::Stdio::null())
         .output();
     let Ok(output) = output else {
-        return AuspexCompatibility::Unknown;
+        return (AuspexCompatibility::Unknown, vec![AuspexHandoffMode::Env]);
     };
     if !output.status.success() {
-        return AuspexCompatibility::Unknown;
+        return (AuspexCompatibility::Unknown, vec![AuspexHandoffMode::Env]);
     }
     let body = String::from_utf8_lossy(&output.stdout);
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) else {
-        return AuspexCompatibility::Unknown;
+        return (AuspexCompatibility::Unknown, vec![AuspexHandoffMode::Env]);
     };
+    let modes = parse_handoff_modes(&value);
     let Some(protocol) = value.get("omegon_ipc_protocol").and_then(|v| v.as_u64()) else {
-        return AuspexCompatibility::Unknown;
+        return (AuspexCompatibility::Unknown, modes);
     };
     if protocol == omegon_traits::IPC_PROTOCOL_VERSION as u64 {
-        AuspexCompatibility::Compatible
+        (AuspexCompatibility::Compatible, modes)
     } else {
-        AuspexCompatibility::Incompatible(format!(
-            "reported omegon_ipc_protocol={protocol}, expected {}",
-            omegon_traits::IPC_PROTOCOL_VERSION
-        ))
+        (
+            AuspexCompatibility::Incompatible(format!(
+                "reported omegon_ipc_protocol={protocol}, expected {}",
+                omegon_traits::IPC_PROTOCOL_VERSION
+            )),
+            modes,
+        )
     }
 }
 
@@ -425,8 +483,10 @@ fn detect_auspex_target() -> Option<AuspexProbe> {
             let path = std::path::Path::new(trimmed);
             if path_contains_executable(path) {
                 let target = format!("AUSPEX_BIN={trimmed}");
+                let (compatibility, handoff_modes) = probe_auspex_target(&target);
                 return Some(AuspexProbe {
-                    compatibility: probe_auspex_compatibility(&target),
+                    compatibility,
+                    handoff_modes,
                     target,
                     source: "env",
                 });
@@ -439,8 +499,10 @@ fn detect_auspex_target() -> Option<AuspexProbe> {
             let candidate = entry.join("auspex");
             if path_contains_executable(&candidate) {
                 let target = candidate.display().to_string();
+                let (compatibility, handoff_modes) = probe_auspex_target(&target);
                 return Some(AuspexProbe {
-                    compatibility: probe_auspex_compatibility(&target),
+                    compatibility,
+                    handoff_modes,
                     target,
                     source: "path",
                 });
@@ -454,6 +516,7 @@ fn detect_auspex_target() -> Option<AuspexProbe> {
         if app_bundle.exists() {
             return Some(AuspexProbe {
                 compatibility: AuspexCompatibility::Unknown,
+                handoff_modes: vec![AuspexHandoffMode::Env],
                 target: app_bundle.display().to_string(),
                 source: "app-bundle",
             });
@@ -510,9 +573,18 @@ impl App {
                         format!("incompatible ({reason})")
                     }
                 };
+                let modes = probe
+                    .handoff_modes
+                    .iter()
+                    .map(|mode| match mode {
+                        AuspexHandoffMode::Env => "env",
+                        AuspexHandoffMode::BrowserUrl => "browser-url",
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 format!(
-                    "{} (source: {}, {})",
-                    probe.target, probe.source, compatibility
+                    "{} (source: {}, {}, modes: {})",
+                    probe.target, probe.source, compatibility, modes
                 )
             })
             .unwrap_or_else(|| "not detected".into());
