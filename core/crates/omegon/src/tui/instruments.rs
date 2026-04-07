@@ -991,17 +991,6 @@ impl InstrumentPanel {
         let breakdown = self.context_breakdown();
         let activity = self.activity_mode();
         let time = self.time;
-        let activity_label = match activity {
-            ActivityMode::Idle => None,
-            ActivityMode::ToolChurn => Some("tool"),
-            ActivityMode::Waiting => Some("wait"),
-            ActivityMode::Thinking => Some("think"),
-        };
-        let label_range = activity_label.map(|label| {
-            let label_width = label.chars().count().min(w);
-            let start = w.saturating_sub(label_width) / 2;
-            (start, start + label_width, label)
-        });
 
         let mut boundaries: Vec<(ContextBand, f64, f64)> = Vec::new();
         let mut cursor = 0.0_f64;
@@ -1062,33 +1051,23 @@ impl InstrumentPanel {
             }
             .clamp(0.0, 1.0);
 
-            let (activity_ch, activity_fg) = if let Some((start, end, label)) = label_range {
-                if x >= start && x < end {
-                    let ch = label.chars().nth(x - start).unwrap_or(' ');
-                    (ch, Self::activity_color(activity, activity_phase))
-                } else {
-                    match activity {
-                        ActivityMode::Idle => {
-                            let c = if activity_phase > 0.55 { '·' } else { ' ' };
-                            (c, Self::activity_color(ActivityMode::Idle, activity_phase))
-                        }
-                        ActivityMode::ToolChurn => {
-                            let c = if activity_phase > 0.72 { '+' } else { '=' };
-                            (c, Self::activity_color(ActivityMode::ToolChurn, activity_phase))
-                        }
-                        ActivityMode::Waiting => {
-                            let c = if activity_phase > 0.66 { '~' } else { '-' };
-                            (c, Self::activity_color(ActivityMode::Waiting, activity_phase))
-                        }
-                        ActivityMode::Thinking => {
-                            let c = if activity_phase > 0.72 { '^' } else { ':' };
-                            (c, Self::activity_color(ActivityMode::Thinking, activity_phase))
-                        }
-                    }
+            let (activity_ch, activity_fg) = match activity {
+                ActivityMode::Idle => {
+                    let c = if activity_phase > 0.55 { '·' } else { ' ' };
+                    (c, Self::activity_color(ActivityMode::Idle, activity_phase))
                 }
-            } else {
-                let c = if activity_phase > 0.55 { '·' } else { ' ' };
-                (c, Self::activity_color(ActivityMode::Idle, activity_phase))
+                ActivityMode::ToolChurn => {
+                    let c = if activity_phase > 0.72 { '+' } else { '=' };
+                    (c, Self::activity_color(ActivityMode::ToolChurn, activity_phase))
+                }
+                ActivityMode::Waiting => {
+                    let c = if activity_phase > 0.66 { '~' } else { '-' };
+                    (c, Self::activity_color(ActivityMode::Waiting, activity_phase))
+                }
+                ActivityMode::Thinking => {
+                    let c = if activity_phase > 0.72 { '^' } else { ':' };
+                    (c, Self::activity_color(ActivityMode::Thinking, activity_phase))
+                }
             };
 
             if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, activity_y)) {
@@ -2460,14 +2439,16 @@ mod tests {
             "composition row should use simple band glyphs: {composition_row}"
         );
         assert!(
-            activity_row.contains("think"),
-            "activity row should name the active runtime state instead of showing anonymous dots: {activity_row}"
+            !activity_row.contains("think")
+                && !activity_row.contains("tool")
+                && !activity_row.contains("wait"),
+            "activity row should be glyph-only, not centered text: {activity_row}"
         );
         assert!(
             activity_row
                 .chars()
                 .any(|ch| matches!(ch, ':' | '^')),
-            "thinking activity row should use sane ASCII support glyphs around the label: {activity_row}"
+            "thinking activity row should use sane ASCII support glyphs: {activity_row}"
         );
         assert_ne!(
             composition_row, activity_row,
