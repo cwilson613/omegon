@@ -562,7 +562,28 @@ impl App {
         let dash_status = self
             .web_startup
             .as_ref()
-            .map(|startup| format!("running at {}", startup.http_base))
+            .map(|startup| {
+                let warning_suffix = if startup.daemon_status.transport_warnings.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "\n  transport warnings: {}",
+                        startup.daemon_status.transport_warnings.join(" | ")
+                    )
+                };
+                format!(
+                    "running at {}\n  queued events: {}\n  processed events: {}\n  worker: {}{}",
+                    startup.http_base,
+                    startup.daemon_status.queued_events,
+                    startup.daemon_status.processed_events,
+                    if startup.daemon_status.worker_running {
+                        "running"
+                    } else {
+                        "idle"
+                    },
+                    warning_suffix,
+                )
+            })
             .unwrap_or_else(|| "not running".into());
         let auspex_status = detect_auspex_target()
             .map(|probe| {
@@ -3351,8 +3372,25 @@ impl App {
                 if let Some(addr) = self.web_server_addr {
                     let url = format!("http://{addr}");
                     if args == "status" {
+                        let detail = self
+                            .web_startup
+                            .as_ref()
+                            .map(|startup| {
+                                let warnings = if startup.daemon_status.transport_warnings.is_empty() {
+                                    "none".to_string()
+                                } else {
+                                    startup.daemon_status.transport_warnings.join(" | ")
+                                };
+                                format!(
+                                    "\nqueue depth: {}\nprocessed events: {}\ntransport warnings: {}",
+                                    startup.daemon_status.queued_events,
+                                    startup.daemon_status.processed_events,
+                                    warnings,
+                                )
+                            })
+                            .unwrap_or_default();
                         SlashResult::Display(format!(
-                            "Auspex compatibility/debug browser path running at {url}"
+                            "Auspex compatibility/debug browser path running at {url}{detail}"
                         ))
                     } else {
                         open_browser(&url);

@@ -231,6 +231,9 @@ pub async fn post_event(
         Ok(mut queue) => {
             queue.push(event);
             let queued_events = queue.len();
+            if let Ok(mut status) = state.daemon_status.lock() {
+                status.queued_events = queued_events;
+            }
             (
                 StatusCode::ACCEPTED,
                 Json(EventAccepted {
@@ -580,7 +583,7 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
 mod tests {
     use super::*;
     use crate::tui::dashboard::DashboardHandles;
-    use crate::web::{ControlPlaneState, WebAuthState, WebStartupInfo};
+    use crate::web::{ControlPlaneState, WebAuthState, WebDaemonStatus, WebStartupInfo};
     use std::sync::{Arc, Mutex};
 
     fn test_state() -> WebState {
@@ -602,12 +605,14 @@ mod tests {
                 auth_mode: "ephemeral-bearer".into(),
                 auth_source: "generated".into(),
                 control_plane_state: ControlPlaneState::Ready,
+                daemon_status: WebDaemonStatus::default(),
                 instance_descriptor: None,
             }))),
             control_plane_state: std::sync::Arc::new(std::sync::Mutex::new(
                 ControlPlaneState::Ready,
             )),
             daemon_events: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            daemon_status: std::sync::Arc::new(std::sync::Mutex::new(WebDaemonStatus::default())),
         }
     }
 
@@ -656,6 +661,8 @@ mod tests {
         assert_eq!(payload.health_url, "http://127.0.0.1:7842/api/healthz");
         assert_eq!(payload.ready_url, "http://127.0.0.1:7842/api/readyz");
         assert_eq!(payload.auth_mode, "ephemeral-bearer");
+        assert_eq!(payload.daemon_status.queued_events, 0);
+        assert!(payload.daemon_status.transport_warnings.is_empty());
         assert!(payload.instance_descriptor.is_none());
     }
 
@@ -726,6 +733,7 @@ mod tests {
         assert!(payload.accepted);
         assert_eq!(payload.queued_events, 1);
         assert_eq!(state.daemon_events.lock().unwrap().len(), 1);
+        assert_eq!(state.daemon_status.lock().unwrap().queued_events, 1);
     }
 
     #[test]

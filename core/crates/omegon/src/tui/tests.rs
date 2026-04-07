@@ -8,6 +8,7 @@ use crate::lifecycle::types::NodeStatus;
 use crate::settings::{ContextClass, Settings, ThinkingLevel};
 use crate::tui::dashboard::FocusedNodeSummary;
 use crate::update::{UpdateChannel, UpdateInfo};
+use crate::web::WebDaemonStatus;
 use tokio::sync::mpsc;
 
 fn test_settings() -> crate::settings::SharedSettings {
@@ -1701,6 +1702,27 @@ fn slash_auspex_status_reports_attach_metadata() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = test_app();
     app.footer_data.cwd = tmp.path().to_string_lossy().to_string();
+    app.web_startup = Some(crate::web::WebStartupInfo {
+        schema_version: 2,
+        addr: "127.0.0.1:7842".into(),
+        http_base: "http://127.0.0.1:7842".into(),
+        state_url: "http://127.0.0.1:7842/api/state".into(),
+        startup_url: "http://127.0.0.1:7842/api/startup".into(),
+        health_url: "http://127.0.0.1:7842/api/healthz".into(),
+        ready_url: "http://127.0.0.1:7842/api/readyz".into(),
+        ws_url: "ws://127.0.0.1:7842/ws?token=test".into(),
+        token: "test".into(),
+        auth_mode: "ephemeral-bearer".into(),
+        auth_source: "generated".into(),
+        control_plane_state: crate::web::ControlPlaneState::Ready,
+        daemon_status: WebDaemonStatus {
+            queued_events: 2,
+            processed_events: 3,
+            worker_running: true,
+            transport_warnings: vec!["HTTP and WebSocket control-plane transports use insecure bootstrap tokens on localhost.".into()],
+        },
+        instance_descriptor: None,
+    });
     let tx = test_tx();
 
     let result = app.handle_slash_command("/auspex status", &tx);
@@ -1712,6 +1734,10 @@ fn slash_auspex_status_reports_attach_metadata() {
     assert!(text.contains("protocol: v1"), "got: {text}");
     assert!(text.contains("ipc.sock"), "got: {text}");
     assert!(text.contains("session id: not yet exposed"), "got: {text}");
+    assert!(text.contains("/dash compatibility view:"), "got: {text}");
+    assert!(text.contains("queued events:"), "got: {text}");
+    assert!(text.contains("transport warnings:"), "got: {text}");
+    assert!(text.contains("insecure bootstrap tokens"), "got: {text}");
     assert!(text.contains("Auspex\n  app:"), "got: {text}");
     if !text.contains("app: not detected") {
         assert!(text.contains("modes:"), "got: {text}");
@@ -1730,6 +1756,27 @@ fn slash_auspex_status_reports_attach_metadata() {
 fn slash_dash_status_uses_compatibility_wording() {
     let mut app = test_app();
     app.web_server_addr = Some("127.0.0.1:7842".parse().unwrap());
+    app.web_startup = Some(crate::web::WebStartupInfo {
+        schema_version: 2,
+        addr: "127.0.0.1:7842".into(),
+        http_base: "http://127.0.0.1:7842".into(),
+        state_url: "http://127.0.0.1:7842/api/state".into(),
+        startup_url: "http://127.0.0.1:7842/api/startup".into(),
+        health_url: "http://127.0.0.1:7842/api/healthz".into(),
+        ready_url: "http://127.0.0.1:7842/api/readyz".into(),
+        ws_url: "ws://127.0.0.1:7842/ws?token=test".into(),
+        token: "test".into(),
+        auth_mode: "ephemeral-bearer".into(),
+        auth_source: "generated".into(),
+        control_plane_state: crate::web::ControlPlaneState::Ready,
+        daemon_status: WebDaemonStatus {
+            queued_events: 4,
+            processed_events: 7,
+            worker_running: true,
+            transport_warnings: vec!["HTTP and WebSocket control-plane transports use insecure bootstrap tokens on localhost.".into()],
+        },
+        instance_descriptor: None,
+    });
     let tx = test_tx();
 
     let result = app.handle_slash_command("/dash status", &tx);
@@ -1739,6 +1786,8 @@ fn slash_dash_status_uses_compatibility_wording() {
 
     assert!(text.contains("compatibility/debug browser path"), "got: {text}");
     assert!(text.contains("http://127.0.0.1:7842"), "got: {text}");
+    assert!(text.contains("queue depth:"), "got: {text}");
+    assert!(text.contains("transport warnings:"), "got: {text}");
 }
 
 #[test]
@@ -1757,6 +1806,12 @@ fn web_dashboard_started_event_updates_cached_addr() {
         auth_mode: "ephemeral-bearer".into(),
         auth_source: "generated".into(),
         control_plane_state: crate::web::ControlPlaneState::Ready,
+        daemon_status: WebDaemonStatus {
+            queued_events: 2,
+            processed_events: 3,
+            worker_running: true,
+            transport_warnings: vec!["HTTP and WebSocket control-plane transports use insecure bootstrap tokens on localhost.".into()],
+        },
         instance_descriptor: None,
     };
 
@@ -1795,6 +1850,12 @@ fn auspex_attach_payload_carries_startup_and_instance_metadata() {
         auth_mode: "ephemeral-bearer".into(),
         auth_source: "generated".into(),
         control_plane_state: crate::web::ControlPlaneState::Ready,
+        daemon_status: WebDaemonStatus {
+            queued_events: 0,
+            processed_events: 0,
+            worker_running: false,
+            transport_warnings: vec!["HTTP and WebSocket control-plane transports use insecure bootstrap tokens on localhost.".into()],
+        },
         instance_descriptor: Some(omegon_traits::OmegonInstanceDescriptor {
             schema_version: 1,
             identity: omegon_traits::OmegonIdentity {
