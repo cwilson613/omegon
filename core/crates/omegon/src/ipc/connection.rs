@@ -439,6 +439,7 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
             actual_output_tokens,
             cache_read_tokens,
             provider_telemetry,
+            ..
         } => Some(IpcEventPayload::TurnEnded {
             turn: *turn,
             estimated_tokens: *estimated_tokens,

@@ -3874,6 +3874,8 @@ impl App {
             AgentEvent::TurnEnd {
                 turn,
                 estimated_tokens,
+                context_window,
+                context_composition,
                 actual_input_tokens,
                 actual_output_tokens,
                 cache_read_tokens,
@@ -3888,6 +3890,8 @@ impl App {
                     actual_input_tokens as u32,
                     actual_output_tokens as u32,
                     cache_read_tokens as u32,
+                    context_composition,
+                    context_window,
                 );
                 let ctx_window = self.footer_data.context_window;
                 if ctx_window > 0 {

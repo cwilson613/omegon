@@ -4,7 +4,8 @@
 //! Includes: turn limits, retry with backoff, stuck detection,
 //! context wiring, and parallel tool dispatch.
 
-use crate::bridge::{LlmBridge, LlmEvent, StreamOptions};
+use crate::bridge::{LlmBridge, LlmEvent, LlmMessage, StreamOptions};
+
 use crate::context::ContextManager;
 use crate::conversation::{AssistantMessage, ConversationState, ToolCall, ToolResultEntry};
 use crate::ollama::{OllamaManager, WarmupResult};
@@ -12,7 +13,8 @@ use crate::upstream_errors::{
     TransientFailureKind, UpstreamFailureLogEntry, append_upstream_failure_log,
     classify_upstream_error_for_provider, is_context_overflow, is_malformed_history,
 };
-use omegon_traits::{AgentEvent, ContentBlock};
+use omegon_traits::{AgentEvent, ContentBlock, ContextComposition};
+
 use serde_json::Value;
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -62,6 +64,80 @@ impl Default for LoopConfig {
             secrets: None,
             force_compact: None,
         }
+    }
+}
+
+fn default_context_composition(context_window: usize) -> ContextComposition {
+    ContextComposition {
+        free_tokens: context_window,
+        ..ContextComposition::default()
+    }
+}
+
+fn estimate_chars_to_tokens(chars: usize) -> usize {
+    chars / 4
+}
+
+pub(crate) fn compute_context_composition(
+    system_prompt: &str,
+    llm_messages: &[LlmMessage],
+    context_window: usize,
+) -> ContextComposition {
+    let system_tokens = estimate_chars_to_tokens(system_prompt.len());
+    let mut conversation_tokens = 0usize;
+    let mut memory_tokens = 0usize;
+    let mut tool_tokens = 0usize;
+    let mut thinking_tokens = 0usize;
+
+    for message in llm_messages {
+        match message {
+            LlmMessage::User { content, .. } => {
+                conversation_tokens += estimate_chars_to_tokens(content.len());
+            }
+            LlmMessage::Assistant {
+                text,
+                thinking,
+                tool_calls,
+                ..
+            } => {
+                conversation_tokens +=
+                    estimate_chars_to_tokens(text.iter().map(|t| t.len()).sum::<usize>());
+                thinking_tokens +=
+                    estimate_chars_to_tokens(thinking.iter().map(|t| t.len()).sum::<usize>());
+                tool_tokens += estimate_chars_to_tokens(
+                    tool_calls
+                        .iter()
+                        .map(|tc| tc.name.len() + tc.arguments.to_string().len())
+                        .sum::<usize>(),
+                );
+            }
+            LlmMessage::ToolResult {
+                content,
+                tool_name,
+                ..
+            } => {
+                tool_tokens += estimate_chars_to_tokens(content.len() + tool_name.len());
+                if tool_name.starts_with("memory_") {
+                    memory_tokens += estimate_chars_to_tokens(content.len());
+                }
+            }
+        }
+    }
+
+    let used = system_tokens
+        .saturating_add(conversation_tokens)
+        .saturating_add(memory_tokens)
+        .saturating_add(tool_tokens)
+        .saturating_add(thinking_tokens);
+    let free_tokens = context_window.saturating_sub(used);
+
+    ContextComposition {
+        conversation_tokens,
+        system_tokens,
+        memory_tokens,
+        tool_tokens,
+        thinking_tokens,
+        free_tokens,
     }
 }
 
@@ -119,12 +195,14 @@ pub async fn run(
                 config.max_turns
             );
             let _ = events.send(AgentEvent::TurnStart { turn });
+            let context_composition = default_context_composition(context_window);
             bus.emit(&omegon_traits::BusEvent::TurnEnd {
                 turn,
                 model: None,
                 provider: None,
                 estimated_tokens: conversation.estimate_tokens(),
                 context_window,
+                context_composition: context_composition.clone(),
                 actual_input_tokens: 0,
                 actual_output_tokens: 0,
                 cache_read_tokens: 0,
@@ -133,6 +211,8 @@ pub async fn run(
             let _ = events.send(AgentEvent::TurnEnd {
                 turn,
                 estimated_tokens: conversation.estimate_tokens(),
+                context_window,
+                context_composition,
                 actual_input_tokens: 0,
                 actual_output_tokens: 0,
                 cache_read_tokens: 0,
@@ -346,6 +426,7 @@ pub async fn run(
                     provider: None,
                     estimated_tokens: conversation.estimate_tokens(),
                     context_window,
+                    context_composition: default_context_composition(context_window),
                     actual_input_tokens: 0,
                     actual_output_tokens: 0,
                     cache_read_tokens: 0,
@@ -354,6 +435,8 @@ pub async fn run(
                 let _ = events.send(AgentEvent::TurnEnd {
                     turn,
                     estimated_tokens: conversation.estimate_tokens(),
+                    context_window,
+                    context_composition: default_context_composition(context_window),
                     actual_input_tokens: 0,
                     actual_output_tokens: 0,
                     cache_read_tokens: 0,
@@ -400,6 +483,11 @@ pub async fn run(
                     provider: Some(crate::providers::infer_provider_id(&config.model).to_string()),
                     estimated_tokens: conversation.estimate_tokens(),
                     context_window,
+                    context_composition: compute_context_composition(
+                        &context.build_system_prompt(conversation.last_user_prompt(), conversation),
+                        &conversation.build_llm_view(),
+                        context_window,
+                    ),
                     actual_input_tokens: act_in,
                     actual_output_tokens: act_out,
                     cache_read_tokens: act_cr,
@@ -408,6 +496,12 @@ pub async fn run(
                 let _ = events.send(AgentEvent::TurnEnd {
                     turn,
                     estimated_tokens: conversation.estimate_tokens(),
+                    context_window,
+                    context_composition: compute_context_composition(
+                        &context.build_system_prompt(conversation.last_user_prompt(), conversation),
+                        &conversation.build_llm_view(),
+                        context_window,
+                    ),
                     actual_input_tokens: act_in,
                     actual_output_tokens: act_out,
                     cache_read_tokens: act_cr,
@@ -415,12 +509,18 @@ pub async fn run(
                 });
                 continue; // give it one more turn to commit
             }
+            let turn_context_composition = compute_context_composition(
+                &context.build_system_prompt(conversation.last_user_prompt(), conversation),
+                &conversation.build_llm_view(),
+                context_window,
+            );
             bus.emit(&omegon_traits::BusEvent::TurnEnd {
                 turn,
                 model: Some(config.model.clone()),
                 provider: Some(crate::providers::infer_provider_id(&config.model).to_string()),
                 estimated_tokens: conversation.estimate_tokens(),
                 context_window,
+                context_composition: turn_context_composition.clone(),
                 actual_input_tokens: act_in,
                 actual_output_tokens: act_out,
                 cache_read_tokens: act_cr,
@@ -429,6 +529,8 @@ pub async fn run(
             let _ = events.send(AgentEvent::TurnEnd {
                 turn,
                 estimated_tokens: conversation.estimate_tokens(),
+                context_window,
+                context_composition: turn_context_composition,
                 actual_input_tokens: act_in,
                 actual_output_tokens: act_out,
                 cache_read_tokens: act_cr,
@@ -495,12 +597,18 @@ pub async fn run(
             stuck_detector.record(call, is_error);
         }
 
+        let turn_context_composition = compute_context_composition(
+            &context.build_system_prompt(conversation.last_user_prompt(), conversation),
+            &conversation.build_llm_view(),
+            context_window,
+        );
         bus.emit(&omegon_traits::BusEvent::TurnEnd {
             turn,
             model: Some(config.model.clone()),
             provider: Some(crate::providers::infer_provider_id(&config.model).to_string()),
             estimated_tokens: conversation.estimate_tokens(),
             context_window,
+            context_composition: turn_context_composition.clone(),
             actual_input_tokens: act_in,
             actual_output_tokens: act_out,
             cache_read_tokens: act_cr,
@@ -580,6 +688,8 @@ pub async fn run(
         let _ = events.send(AgentEvent::TurnEnd {
             turn,
             estimated_tokens,
+            context_window,
+            context_composition: turn_context_composition,
             actual_input_tokens: act_in,
             actual_output_tokens: act_out,
             cache_read_tokens: act_cr,

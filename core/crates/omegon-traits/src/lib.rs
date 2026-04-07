@@ -772,6 +772,17 @@ pub struct ToolDefinition {
 // Bus events — flow DOWN from agent loop → features → TUI
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// A breakdown of prompt/context surface within Omegon's own token-estimation model.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextComposition {
+    pub conversation_tokens: usize,
+    pub system_tokens: usize,
+    pub memory_tokens: usize,
+    pub tool_tokens: usize,
+    pub thinking_tokens: usize,
+    pub free_tokens: usize,
+}
+
 /// Events emitted by the agent loop and delivered to features.
 ///
 /// These are the typed replacement for pi's `pi.on("event_name")` strings.
@@ -800,6 +811,7 @@ pub enum BusEvent {
         provider: Option<String>,
         estimated_tokens: usize,
         context_window: usize,
+        context_composition: ContextComposition,
         actual_input_tokens: u64,
         actual_output_tokens: u64,
         cache_read_tokens: u64,
@@ -1083,6 +1095,10 @@ pub enum AgentEvent {
         turn: u32,
         /// Real token estimate from conversation history. Zero on early-exit paths.
         estimated_tokens: usize,
+        /// Context window used for the turn.
+        context_window: usize,
+        /// Composition breakdown within Omegon's chars/4 accounting model.
+        context_composition: ContextComposition,
         /// Actual input tokens reported by the provider. 0 = not available.
         actual_input_tokens: u64,
         /// Actual output tokens reported by the provider. 0 = not available.

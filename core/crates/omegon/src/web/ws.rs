@@ -296,6 +296,7 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             actual_output_tokens,
             cache_read_tokens,
             provider_telemetry,
+            ..
         } => json!({
             "type": "turn_end",
             "event_name": "turn.ended",
@@ -494,6 +495,8 @@ mod tests {
         let event = AgentEvent::TurnEnd {
             turn: 2,
             estimated_tokens: 123,
+            context_window: 200_000,
+            context_composition: omegon_traits::ContextComposition::default(),
             actual_input_tokens: 45,
             actual_output_tokens: 67,
             cache_read_tokens: 8,
@@ -560,6 +563,8 @@ mod tests {
             AgentEvent::TurnEnd {
                 turn: 1,
                 estimated_tokens: 0,
+                context_window: 200_000,
+                context_composition: omegon_traits::ContextComposition::default(),
                 actual_input_tokens: 0,
                 actual_output_tokens: 0,
                 cache_read_tokens: 0,

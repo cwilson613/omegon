@@ -17,6 +17,7 @@
 use super::theme::Theme;
 use super::widgets::{truncate_str, visible_width};
 use crate::features::cleave::CleaveProgress;
+use omegon_traits::ContextComposition;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};
 use unicode_width::UnicodeWidthChar;
@@ -312,8 +313,10 @@ pub struct InstrumentPanel {
     // ── Cumulative session memory op counters ──
     session_stores: u32,
     session_recalls: u32,
-    /// Actual context window size in tokens — used to compute realistic sys fraction.
+    /// Actual context window size in tokens — used to compute realistic fractions.
     context_window: usize,
+    /// Authoritative composition snapshot from the turn runner's accounting model.
+    context_composition: ContextComposition,
     /// Live cleave progress snapshot — if active, tools panel becomes cleave panel.
     cleave_progress: Option<CleaveProgress>,
 }
@@ -343,6 +346,7 @@ impl Default for InstrumentPanel {
             session_stores: 0,
             session_recalls: 0,
             context_window: 200_000,
+            context_composition: ContextComposition::default(),
             cleave_progress: None,
         }
     }
@@ -490,63 +494,22 @@ impl InstrumentPanel {
     }
 
     fn context_breakdown(&self) -> [(ContextBand, f64); 6] {
-        let total_used = self.context_fill.clamp(0.0, 1.0);
         let ctx_window_f = self.context_window.max(1) as f64;
-
-        // ── SYSTEM PROMPT ──
-        // Fixed ~10k tokens of directives/AGENTS.md.
-        // Express as fraction of context window (100k → 10%, 200k → 5%, 1M → 1%).
-        // Cap at 0.15 for very small windows.
-        const SYS_PROMPT_TOKENS: f64 = 10_000.0;
-        let system = (SYS_PROMPT_TOKENS / ctx_window_f).min(0.15).min(total_used);
-
-        // ── MEMORY FACTS ──
-        // Pre-computed by update_memory_context as actual fact injection.
-        // Already clamped to 0.0..0.12 to stay visually proportionate.
-        let memory = self.memory_fill.min((total_used - system).max(0.0));
-
-        // ── THINKING (extended reasoning) ──
-        // Thinking is only active when enabled by the user.
-        // Estimate: ~5-15% overhead depending on setting.
-        let thinking = if self.thinking_active {
-            let estimate: f64 = match self.thinking_level_pct {
-                p if p >= 0.9 => 0.08, // "high" → 8% of window
-                p if p >= 0.5 => 0.05, // "medium" → 5%
-                p if p >= 0.3 => 0.03, // "low" → 3%
-                _ => 0.015,            // "minimal" → 1.5%
-            };
-            estimate.min((total_used - system - memory).max(0.0))
-        } else {
-            0.0
-        };
-
-        // ── TOOLS ──
-        // Tool schemas and recent tool call/result content occupy prompt surface too.
-        // We do not have exact token provenance yet, so use a bounded heuristic from
-        // active/recent tool load rather than pretending tools are free.
-        let tool_load = self.active_tool_load();
-        let tools = if tool_load > 0.0 {
-            let estimate = 0.02 + tool_load * 0.06;
-            estimate.min((total_used - system - memory - thinking).max(0.0))
-        } else {
-            0.0
-        };
-
-        // ── CONVERSATION ──
-        // User input, conversation history, and assistant text excluding the reserved
-        // shares attributed above.
-        let conversation = (total_used - system - memory - thinking - tools).max(0.0);
-
-        // ── FREE SPACE ──
-        let free = (1.0 - total_used).max(0.0);
+        let composition = &self.context_composition;
 
         [
-            (ContextBand::Conversation, conversation),
-            (ContextBand::System, system),
-            (ContextBand::Memory, memory),
-            (ContextBand::Tools, tools),
-            (ContextBand::Thinking, thinking),
-            (ContextBand::Free, free),
+            (
+                ContextBand::Conversation,
+                composition.conversation_tokens as f64 / ctx_window_f,
+            ),
+            (ContextBand::System, composition.system_tokens as f64 / ctx_window_f),
+            (ContextBand::Memory, composition.memory_tokens as f64 / ctx_window_f),
+            (ContextBand::Tools, composition.tool_tokens as f64 / ctx_window_f),
+            (
+                ContextBand::Thinking,
+                composition.thinking_tokens as f64 / ctx_window_f,
+            ),
+            (ContextBand::Free, composition.free_tokens as f64 / ctx_window_f),
         ]
     }
 
@@ -660,11 +623,20 @@ impl InstrumentPanel {
     }
 
     /// Update mind fact counts and memory context fraction.
-    /// Record token counts from the provider's TurnEnd event.
-    pub fn update_turn_tokens(&mut self, input: u32, output: u32, cache_read: u32) {
+    /// Record token counts and composition from the provider/runtime TurnEnd event.
+    pub fn update_turn_tokens(
+        &mut self,
+        input: u32,
+        output: u32,
+        cache_read: u32,
+        composition: ContextComposition,
+        context_window: usize,
+    ) {
         self.last_input_tokens = input;
         self.last_output_tokens = output;
         self.last_cache_read_tokens = cache_read;
+        self.context_composition = composition;
+        self.context_window = context_window.max(1);
     }
 
     /// Increment cumulative memory operation counters.
@@ -2043,6 +2015,20 @@ mod tests {
     fn context_breakdown_stays_normalized_and_ordered() {
         let mut panel = InstrumentPanel::default();
         panel.update_mind_facts(18, 3, 2, 0.08);
+        panel.update_turn_tokens(
+            800,
+            120,
+            0,
+            ContextComposition {
+                conversation_tokens: 68_000,
+                system_tokens: 10_000,
+                memory_tokens: 12_000,
+                tool_tokens: 6_000,
+                thinking_tokens: 4_000,
+                free_tokens: 100_000,
+            },
+            200_000,
+        );
         panel.update_telemetry(
             62.0,
             200_000,
@@ -2143,6 +2129,20 @@ mod tests {
         let mut panel = InstrumentPanel::default();
         panel.update_mind_facts(180, 12, 6, 0.08);
         panel.tool_started("read");
+        panel.update_turn_tokens(
+            800,
+            120,
+            0,
+            ContextComposition {
+                conversation_tokens: 68_000,
+                system_tokens: 10_000,
+                memory_tokens: 12_000,
+                tool_tokens: 6_000,
+                thinking_tokens: 4_000,
+                free_tokens: 100_000,
+            },
+            200_000,
+        );
         panel.update_telemetry(
             68.0,
             200_000,
@@ -2202,6 +2202,20 @@ mod tests {
     fn inference_context_bar_separates_composition_from_activity_rows() {
         let mut panel = InstrumentPanel::default();
         panel.update_mind_facts(180, 12, 6, 0.08);
+        panel.update_turn_tokens(
+            800,
+            120,
+            0,
+            ContextComposition {
+                conversation_tokens: 68_000,
+                system_tokens: 10_000,
+                memory_tokens: 12_000,
+                tool_tokens: 6_000,
+                thinking_tokens: 4_000,
+                free_tokens: 100_000,
+            },
+            200_000,
+        );
         panel.update_telemetry(
             68.0,
             200_000,
@@ -2251,6 +2265,20 @@ mod tests {
     fn inference_legend_avoids_partial_entries_in_narrow_widths() {
         let mut panel = InstrumentPanel::default();
         panel.update_mind_facts(180, 12, 6, 0.08);
+        panel.update_turn_tokens(
+            800,
+            120,
+            0,
+            ContextComposition {
+                conversation_tokens: 68_000,
+                system_tokens: 10_000,
+                memory_tokens: 12_000,
+                tool_tokens: 6_000,
+                thinking_tokens: 4_000,
+                free_tokens: 100_000,
+            },
+            200_000,
+        );
         panel.update_telemetry(
             68.0,
             200_000,
@@ -2301,6 +2329,20 @@ mod tests {
     fn composition_legend_keeps_free_space_implicit() {
         let mut panel = InstrumentPanel::default();
         panel.update_mind_facts(180, 12, 6, 0.08);
+        panel.update_turn_tokens(
+            800,
+            120,
+            0,
+            ContextComposition {
+                conversation_tokens: 68_000,
+                system_tokens: 10_000,
+                memory_tokens: 12_000,
+                tool_tokens: 6_000,
+                thinking_tokens: 4_000,
+                free_tokens: 100_000,
+            },
+            200_000,
+        );
         panel.update_telemetry(68.0, 200_000, None, false, "high", None, true, 0.016);
 
         let area = Rect::new(0, 0, 64, 10);
@@ -2327,6 +2369,20 @@ mod tests {
         let mut panel = InstrumentPanel::default();
         panel.update_mind_facts(180, 12, 6, 0.08);
         panel.tool_started("read");
+        panel.update_turn_tokens(
+            800,
+            120,
+            0,
+            ContextComposition {
+                conversation_tokens: 68_000,
+                system_tokens: 10_000,
+                memory_tokens: 12_000,
+                tool_tokens: 6_000,
+                thinking_tokens: 4_000,
+                free_tokens: 100_000,
+            },
+            200_000,
+        );
         panel.update_telemetry(68.0, 200_000, Some("read"), false, "high", None, true, 0.016);
 
         let breakdown = panel.context_breakdown();

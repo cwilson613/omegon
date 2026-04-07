@@ -3,6 +3,7 @@
 //! These catch visual regressions: layout changes, text truncation, missing sections.
 //! Run `cargo insta review` to inspect and approve snapshot changes.
 
+use omegon_traits::ContextComposition;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -402,6 +403,20 @@ fn snapshot_unified_footer_console() {
 
     let mut panel = InstrumentPanel::default();
     panel.update_mind_facts(2440, 8, 45, 0.11);
+    panel.update_turn_tokens(
+        800,
+        120,
+        0,
+        ContextComposition {
+            conversation_tokens: 68_000,
+            system_tokens: 10_000,
+            memory_tokens: 22_000,
+            tool_tokens: 6_000,
+            thinking_tokens: 4_000,
+            free_tokens: 90_000,
+        },
+        200_000,
+    );
     panel.update_telemetry(
         68.0,
         200_000,

@@ -1193,9 +1193,21 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                 }
 
                                 if ctx_window > 0 {
+                                    let system_prompt = agent.context_manager.build_system_prompt(
+                                        agent.conversation.last_user_prompt(),
+                                        &agent.conversation,
+                                    );
+                                    let llm_messages = agent.conversation.build_llm_view();
+                                    let context_composition = crate::r#loop::compute_context_composition(
+                                        &system_prompt,
+                                        &llm_messages,
+                                        ctx_window,
+                                    );
                                     let _ = events_tx.send(AgentEvent::TurnEnd {
                                         turn: agent.conversation.intent.stats.turns,
                                         estimated_tokens: est,
+                                        context_window: ctx_window,
+                                        context_composition,
                                         actual_input_tokens: 0,
                                         actual_output_tokens: 0,
                                         cache_read_tokens: 0,
