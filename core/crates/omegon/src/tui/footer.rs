@@ -88,11 +88,13 @@ impl FooterData {
     pub fn render(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
         let width = area.width as usize;
 
-        // Clear first so stale terminal cells never survive behind footer chrome.
+        // Clear first so stale glyphs from prior surfaces cannot survive under
+        // footer chrome. A styled Block updates style but does not blank any
+        // pre-existing symbols in the area.
         frame.render_widget(Clear, area);
 
-        // Fill the entire footer zone with footer-specific background
-        // Footer is permanent chrome — darker than conversation card_bg
+        // Fill the entire footer zone with footer-specific background.
+        // Footer is permanent chrome — darker than conversation card_bg.
         let bg_block = Block::default().style(t.style_footer_bg());
         frame.render_widget(bg_block, area);
 
@@ -1141,6 +1143,92 @@ mod tests {
         assert!(
             text.contains("75") || text.contains("200k"),
             "should show context info: {text}"
+        );
+    }
+
+    #[test]
+    fn footer_render_clears_dirty_cells_in_owned_area() {
+        let data = FooterData {
+            model_id: "claude-sonnet-4-6".into(),
+            model_provider: "anthropic".into(),
+            context_percent: 45.0,
+            context_window: 200_000,
+            total_facts: 150,
+            turn: 5,
+            tool_calls: 12,
+            ..Default::default()
+        };
+        let area = Rect::new(0, 0, 120, 5);
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                let buf = frame.buffer_mut();
+                for y in area.top()..area.bottom() {
+                    for x in area.left()..area.right() {
+                        if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                            cell.set_char('X');
+                            cell.set_fg(Color::Red);
+                            cell.set_bg(Color::Red);
+                        }
+                    }
+                }
+                data.render(area, frame, &super::super::theme::Alpharius);
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let residual = (area.top()..area.bottom())
+            .flat_map(|y| (area.left()..area.right()).map(move |x| (x, y)))
+            .filter(|(x, y)| buf[(*x, *y)].symbol() == "X")
+            .collect::<Vec<_>>();
+        assert!(
+            residual.is_empty(),
+            "footer should clear dirty cells it owns, residual: {residual:?}"
+        );
+    }
+
+    #[test]
+    fn footer_left_panel_clears_dirty_cells_in_owned_area() {
+        let data = FooterData {
+            model_id: "ollama:qwen3".into(),
+            model_provider: "ollama".into(),
+            context_percent: 68.0,
+            context_window: 262_144,
+            thinking_level: "high".into(),
+            model_tier: "victory".into(),
+            provider_connected: true,
+            ..Default::default()
+        };
+        let area = Rect::new(0, 0, 40, 8);
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                let buf = frame.buffer_mut();
+                for y in area.top()..area.bottom() {
+                    for x in area.left()..area.right() {
+                        if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                            cell.set_char('Ω');
+                            cell.set_fg(Color::White);
+                            cell.set_bg(Color::Black);
+                        }
+                    }
+                }
+                data.render_left_panel(area, frame, &super::super::theme::Alpharius);
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let residual = (area.top()..area.bottom())
+            .flat_map(|y| (area.left()..area.right()).map(move |x| (x, y)))
+            .filter(|(x, y)| buf[(*x, *y)].symbol() == "Ω")
+            .collect::<Vec<_>>();
+        assert!(
+            residual.is_empty(),
+            "left footer panel should clear dirty cells it owns, residual: {residual:?}"
         );
     }
 
