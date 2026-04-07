@@ -198,7 +198,7 @@ enum AuthAction {
     Status,
     /// Log in to a provider (OAuth or API key depending on provider).
     Login {
-        /// Provider to log in to (anthropic, openai, or openai-codex). Default: anthropic.
+        /// Provider to log in to (anthropic, openai, openai-codex, openrouter, or ollama-cloud). Default: anthropic.
         #[arg(default_value = "anthropic")]
         provider: String,
     },
@@ -247,11 +247,11 @@ enum Commands {
     },
 
     /// Log in to a provider. Defaults to Anthropic.
-    /// Usage: omegon-agent login [anthropic|openai|openai-codex]
+    /// Usage: omegon-agent login [anthropic|openai|openai-codex|openrouter|ollama-cloud]
     /// DEPRECATED: Use `omegon auth login` instead.
     #[command(hide = true)]
     Login {
-        /// Provider to log in to (anthropic, openai, or openai-codex). Default: anthropic.
+        /// Provider to log in to (anthropic, openai, openai-codex, openrouter, or ollama-cloud). Default: anthropic.
         #[arg(default_value = "anthropic")]
         provider: String,
     },
@@ -2900,6 +2900,7 @@ fn format_auth_status(status: &auth::AuthStatus) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
 
     #[test]
     fn format_agent_error_extracts_message() {
@@ -3065,6 +3066,27 @@ mod tests {
             }
             _ => panic!("Expected Embedded command"),
         }
+    }
+
+    #[test]
+    fn auth_login_help_lists_all_supported_non_oauth_providers() {
+        let mut cmd = Cli::command();
+        let auth_cmd = cmd
+            .find_subcommand_mut("auth")
+            .expect("auth command must exist");
+        let login_cmd = auth_cmd
+            .find_subcommand_mut("login")
+            .expect("auth login command must exist");
+        let help = login_cmd.render_help().to_string();
+
+        assert!(
+            help.contains("openrouter"),
+            "auth login help should mention openrouter: {help}"
+        );
+        assert!(
+            help.contains("ollama-cloud"),
+            "auth login help should mention ollama-cloud: {help}"
+        );
     }
 
     #[test]
