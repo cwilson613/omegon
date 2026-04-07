@@ -373,10 +373,16 @@ pub struct OmegonControlPlane {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OmegonRuntime {
     pub deployment_kind: OmegonDeploymentKind,
+    pub runtime_mode: OmegonRuntimeMode,
     pub health: OmegonRuntimeHealth,
     pub provider_ok: bool,
     pub memory_ok: bool,
     pub cleave_available: bool,
+    pub queued_events: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transport_warnings: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_dir: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_class: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -429,6 +435,14 @@ pub enum OmegonDeploymentKind {
     KubernetesWorker,
     CleaveChild,
     RemoteAgent,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OmegonRuntimeMode {
+    Standalone,
+    AuspexManaged,
     Unknown,
 }
 
@@ -1270,10 +1284,14 @@ mod tests {
                 },
                 runtime: OmegonRuntime {
                     deployment_kind: OmegonDeploymentKind::InteractiveTui,
+                    runtime_mode: OmegonRuntimeMode::Standalone,
                     health: OmegonRuntimeHealth::Ready,
                     provider_ok: true,
                     memory_ok: true,
                     cleave_available: false,
+                    queued_events: 0,
+                    transport_warnings: Vec::new(),
+                    runtime_dir: Some("/tmp/project/.omegon/runtime".into()),
                     context_class: Some("Squad".into()),
                     thinking_level: Some("Medium".into()),
                     capability_tier: Some("victory".into()),
@@ -1531,6 +1549,12 @@ mod tests {
     fn transport_security_serializes_kebab_case() {
         let v = serde_json::to_value(OmegonTransportSecurity::InsecureBootstrap).unwrap();
         assert_eq!(v, serde_json::Value::String("insecure-bootstrap".into()));
+    }
+
+    #[test]
+    fn runtime_mode_serializes_snake_case() {
+        let v = serde_json::to_value(OmegonRuntimeMode::AuspexManaged).unwrap();
+        assert_eq!(v, serde_json::Value::String("auspex_managed".into()));
     }
 
     #[test]
