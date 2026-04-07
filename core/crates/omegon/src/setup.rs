@@ -307,6 +307,9 @@ impl AgentSetup {
         };
         let mut memory_warning: Option<String> = None;
 
+        let mut context_memory_backend: Option<std::sync::Arc<dyn omegon_memory::MemoryBackend>> = None;
+        let mut context_memory_mind: Option<String> = None;
+
         if let Ok(backend) = omegon_memory::SqliteBackend::open(&db_path) {
             tracing::info!(mind = %mind, db = %db_path.display(), child = is_child, "memory backend loaded");
 
@@ -348,6 +351,8 @@ impl AgentSetup {
             // Register MemoryFeature with Arc<dyn MemoryBackend>
             let memory_backend: std::sync::Arc<dyn omegon_memory::MemoryBackend> =
                 std::sync::Arc::new(backend);
+            context_memory_backend = Some(memory_backend.clone());
+            context_memory_mind = Some(mind.clone());
             bus.register(Box::new(features::memory::MemoryFeature::new(
                 memory_backend,
                 mind,
@@ -437,9 +442,12 @@ impl AgentSetup {
         // ─── Context management provider ───────────────────────────────
         let context_metrics = features::context::SharedContextMetrics::new();
         let command_tx = features::context::new_shared_command_tx();
-        bus.register(Box::new(features::context::ContextProvider::new(
+        bus.register(Box::new(features::context::ContextProvider::new_with_sources(
             context_metrics.clone(),
             command_tx.clone(),
+            Some(lifecycle_handle.clone()),
+            context_memory_backend.clone(),
+            context_memory_mind.clone(),
         )));
 
         // ─── Operator-installed extensions (RPC + OCI) ────────────────

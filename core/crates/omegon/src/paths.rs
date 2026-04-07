@@ -14,8 +14,8 @@
 //!   - `history/`      — session history
 //!
 //! For backward compatibility, every path resolver checks the `ai/` location
-//! first, then falls back to the legacy location (`docs/`, `openspec/`,
-//! `.omegon/memory/`, `.omegon/lifecycle/`, `.pi/memory/`).
+//! first, then falls back to the legacy Omegon-owned location (`docs/`,
+//! `openspec/`, `.omegon/memory/`, `.omegon/lifecycle/`).
 //!
 //! New writes always go to the `ai/` location.
 
@@ -62,7 +62,7 @@ pub fn openspec_dir_write(repo_root: &Path) -> PathBuf {
 }
 
 /// Resolve the memory directory.
-/// Primary: `ai/memory/`, fallback chain: `.omegon/memory/` → `.pi/memory/`
+/// Primary: `ai/memory/`, fallback: `.omegon/memory/`
 pub fn memory_dir(repo_root: &Path) -> PathBuf {
     let primary = repo_root.join("ai/memory");
     if primary.is_dir() {
@@ -71,10 +71,6 @@ pub fn memory_dir(repo_root: &Path) -> PathBuf {
     let omegon = repo_root.join(".omegon/memory");
     if omegon.is_dir() {
         return omegon;
-    }
-    let pi = repo_root.join(".pi/memory");
-    if pi.is_dir() {
-        return pi;
     }
     // Default to primary for new projects
     primary
@@ -135,17 +131,12 @@ pub fn is_agent_artifact(path: &str) -> bool {
         || path.starts_with("docs/")       // legacy design docs
         || path.starts_with("openspec/")   // legacy openspec
         || path.starts_with(".omegon/")
-        || path.starts_with(".pi/")        // legacy pi
 }
 
 /// Resolve the JSONL facts file for import.
-/// Checks: `ai/memory/facts.jsonl` → `.omegon/memory/facts.jsonl` → `.pi/memory/facts.jsonl`
+/// Checks: `ai/memory/facts.jsonl` → `.omegon/memory/facts.jsonl`
 pub fn facts_jsonl(repo_root: &Path) -> Option<PathBuf> {
-    for dir in [
-        repo_root.join("ai/memory"),
-        repo_root.join(".omegon/memory"),
-        repo_root.join(".pi/memory"),
-    ] {
+    for dir in [repo_root.join("ai/memory"), repo_root.join(".omegon/memory")] {
         let path = dir.join("facts.jsonl");
         if path.exists() {
             return Some(path);
@@ -160,7 +151,6 @@ pub fn has_memory_facts(repo_root: &Path) -> bool {
 }
 
 /// User-level config directory: `~/.config/omegon/`
-/// Fallback reads from `~/.pi/agent/` for backward compat.
 pub fn user_config_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -205,11 +195,7 @@ mod tests {
         // No dirs → default to ai/memory
         assert_eq!(memory_dir(tmp.path()), tmp.path().join("ai/memory"));
 
-        // .pi/memory exists
-        std::fs::create_dir_all(tmp.path().join(".pi/memory")).unwrap();
-        assert_eq!(memory_dir(tmp.path()), tmp.path().join(".pi/memory"));
-
-        // .omegon/memory takes priority over .pi
+        // .omegon/memory exists
         std::fs::create_dir_all(tmp.path().join(".omegon/memory")).unwrap();
         assert_eq!(memory_dir(tmp.path()), tmp.path().join(".omegon/memory"));
 
@@ -236,7 +222,7 @@ mod tests {
         assert!(is_agent_artifact("docs/old-node.md"));
         assert!(is_agent_artifact("openspec/changes/bar/tasks.md"));
         assert!(is_agent_artifact(".omegon/profile.json"));
-        assert!(is_agent_artifact(".pi/memory/facts.jsonl"));
+        assert!(!is_agent_artifact(".pi/memory/facts.jsonl"));
         assert!(!is_agent_artifact("src/main.rs"));
         assert!(!is_agent_artifact("Cargo.toml"));
     }

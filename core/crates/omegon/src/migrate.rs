@@ -76,7 +76,6 @@ pub fn detect_sources() -> Vec<(&'static str, &'static str, bool)> {
     let h = home();
     vec![
         ("claude-code", "Claude Code", h.join(".claude").is_dir()),
-        ("pi", "pi / Omegon TS", h.join(".pi/agent").is_dir()),
         (
             "codex",
             "OpenAI Codex CLI",
@@ -106,7 +105,6 @@ pub fn detect_sources() -> Vec<(&'static str, &'static str, bool)> {
 pub fn run(source: &str, cwd: &Path) -> MigrationReport {
     match source {
         "claude-code" | "claude" => migrate_claude_code(cwd),
-        "pi" | "omegon" => migrate_pi(cwd),
         "codex" => migrate_codex(cwd),
         "cursor" => migrate_cursor(cwd),
         "aider" => migrate_aider(cwd),
@@ -116,7 +114,7 @@ pub fn run(source: &str, cwd: &Path) -> MigrationReport {
         "auto" => migrate_auto(cwd),
         _ => {
             let mut r = MigrationReport::new(source);
-            r.warn(format!("Unknown source: {source}. Try: auto, claude-code, pi, codex, cursor, aider, continue, copilot, windsurf"));
+            r.warn(format!("Unknown source: {source}. Try: auto, claude-code, codex, cursor, aider, continue, copilot, windsurf"));
             r
         }
     }
@@ -145,7 +143,6 @@ fn migrate_auto(cwd: &Path) -> MigrationReport {
         "cursor",
         "windsurf",
         "codex",
-        "pi",
         "claude-code",
     ];
     for source in &priority {
@@ -622,34 +619,20 @@ pub fn init_project(cwd: &Path, move_all: bool) -> String {
         lines.push("✓ `AGENTS.md` already exists".into());
     }
 
-    // ── Migrate memory facts (.pi/memory/ → ai/memory/) ─────────────
+    // ── Migrate memory facts (.omegon/memory/ → ai/memory/) ─────────────
     let ai_memory = cwd.join("ai/memory");
-    let pi_memory = cwd.join(".pi/memory");
     let omegon_memory = cwd.join(".omegon/memory");
-    if !ai_memory.exists() {
-        // Find existing facts to migrate
-        let source_dir = if omegon_memory.join("facts.jsonl").exists() {
-            Some((&omegon_memory, ".omegon/memory"))
-        } else if pi_memory.join("facts.jsonl").exists() {
-            Some((&pi_memory, ".pi/memory"))
-        } else {
-            None
-        };
-
-        if let Some((src, label)) = source_dir {
-            let _ = std::fs::create_dir_all(&ai_memory);
-            // Copy facts.jsonl
-            if let Ok(content) = std::fs::read_to_string(src.join("facts.jsonl")) {
-                let _ = std::fs::write(ai_memory.join("facts.jsonl"), &content);
-                lines.push(format!("✓ Migrated facts.jsonl from {label} → ai/memory/"));
-                actions += 1;
-            }
-            // Copy facts.db if it exists
-            if src.join("facts.db").exists() {
-                let _ = std::fs::copy(src.join("facts.db"), ai_memory.join("facts.db"));
-                lines.push(format!("✓ Migrated facts.db from {label} → ai/memory/"));
-                actions += 1;
-            }
+    if !ai_memory.exists() && omegon_memory.join("facts.jsonl").exists() {
+        let _ = std::fs::create_dir_all(&ai_memory);
+        if let Ok(content) = std::fs::read_to_string(omegon_memory.join("facts.jsonl")) {
+            let _ = std::fs::write(ai_memory.join("facts.jsonl"), &content);
+            lines.push("✓ Migrated facts.jsonl from .omegon/memory → ai/memory/".into());
+            actions += 1;
+        }
+        if omegon_memory.join("facts.db").exists() {
+            let _ = std::fs::copy(omegon_memory.join("facts.db"), ai_memory.join("facts.db"));
+            lines.push("✓ Migrated facts.db from .omegon/memory → ai/memory/".into());
+            actions += 1;
         }
     }
 
@@ -801,27 +784,7 @@ pub fn init_project(cwd: &Path, move_all: bool) -> String {
 /// Migrate user-level config from legacy locations to ~/.config/omegon/.
 /// Returns a list of actions taken (empty if nothing to do).
 fn migrate_user_config() -> Vec<String> {
-    let mut actions = Vec::new();
-    let h = home();
-
-    // Auth: ~/.pi/agent/auth.json → ~/.config/omegon/auth.json
-    let omegon_auth = h.join(".config/omegon/auth.json");
-    let pi_auth = h.join(".pi/agent/auth.json");
-    if !omegon_auth.exists() && pi_auth.exists() {
-        let _ = std::fs::create_dir_all(omegon_auth.parent().unwrap());
-        if std::fs::copy(&pi_auth, &omegon_auth).is_ok() {
-            actions.push("✓ Migrated auth.json from ~/.pi/agent/ → ~/.config/omegon/".into());
-        }
-    }
-
-    // MCP config: ~/.pi/agent/mcp.json → ~/.config/omegon/mcp.json
-    let omegon_mcp = h.join(".config/omegon/mcp.json");
-    let pi_mcp = h.join(".pi/agent/mcp.json");
-    if !omegon_mcp.exists() && pi_mcp.exists() && std::fs::copy(&pi_mcp, &omegon_mcp).is_ok() {
-        actions.push("✓ Migrated mcp.json from ~/.pi/agent/ → ~/.config/omegon/".into());
-    }
-
-    actions
+    Vec::new()
 }
 
 /// Scan for agent conventions in the project directory.
@@ -1068,19 +1031,6 @@ mod tests {
     }
 
     #[test]
-    fn scan_detects_pi_memory() {
-        let dir = tempfile::tempdir().unwrap();
-        let mem = dir.path().join(".pi/memory");
-        std::fs::create_dir_all(&mem).unwrap();
-        std::fs::write(mem.join("facts.jsonl"), r#"{"_type":"fact"}"#).unwrap();
-        let found = scan_conventions(dir.path());
-        assert!(
-            found.iter().any(|d| d.source == "pi (Omegon TS)"),
-            "should detect .pi/memory"
-        );
-    }
-
-    #[test]
     fn init_empty_project_creates_config() {
         let dir = tempfile::tempdir().unwrap();
         let report = init_project(dir.path(), false);
@@ -1100,28 +1050,6 @@ mod tests {
         let content = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
         assert!(content.contains("Be concise"));
         assert!(content.contains("Migrated from Claude Code"));
-    }
-
-    #[test]
-    fn init_migrates_pi_memory_to_ai() {
-        let dir = tempfile::tempdir().unwrap();
-        let pi_mem = dir.path().join(".pi/memory");
-        std::fs::create_dir_all(&pi_mem).unwrap();
-        std::fs::write(pi_mem.join("facts.jsonl"), r#"{"_type":"fact","id":"x"}"#).unwrap();
-        let report = init_project(dir.path(), false);
-        assert!(report.contains("Migrated facts.jsonl"), "{report}");
-        assert!(dir.path().join("ai/memory/facts.jsonl").exists());
-    }
-
-    #[test]
-    fn init_migrates_omegon_lifecycle_to_ai() {
-        let dir = tempfile::tempdir().unwrap();
-        let lc = dir.path().join(".omegon/lifecycle");
-        std::fs::create_dir_all(&lc).unwrap();
-        std::fs::write(lc.join("state.json"), r#"{"version":1,"nodes":[]}"#).unwrap();
-        let report = init_project(dir.path(), false);
-        assert!(report.contains("Migrated lifecycle state"), "{report}");
-        assert!(dir.path().join("ai/lifecycle/state.json").exists());
     }
 
     #[test]

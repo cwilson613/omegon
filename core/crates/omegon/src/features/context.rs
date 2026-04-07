@@ -1,15 +1,22 @@
-//! Context management provider — handles context_status, context_compact, context_clear tools.
+//! Context management provider — handles context_status, request_context, context_compact, context_clear tools.
 //!
 //! Provides the harness with tools for organic context management:
 //! - context_status: show current window usage, token budget
+//! - request_context: request bounded, curated context packs
 //! - context_compact: compress conversation via LLM
 //! - context_clear: clear history, start fresh
 
 use async_trait::async_trait;
+use omegon_memory::{FactFilter, FactStatus, MemoryBackend, Section};
 use omegon_traits::{ContentBlock, Feature, ToolDefinition, ToolResult};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
+
+use crate::lifecycle::context::LifecycleContextProvider;
+use crate::lifecycle::design;
+use crate::lifecycle::types::ChangeStage;
+use crate::tui::TuiCommand;
 
 fn dispatch_command(command_tx: &SharedCommandTx, command: TuiCommand) -> bool {
     if let Ok(guard) = command_tx.lock()
@@ -42,8 +49,6 @@ async fn run_context_slash(
             .map_err(|_| anyhow::anyhow!("context slash executor dropped response"))?,
     ))
 }
-
-use crate::tui::TuiCommand;
 
 /// Shared context metrics — updated by main loop, read by ContextProvider
 #[derive(Debug, Clone)]
@@ -96,6 +101,9 @@ pub fn new_shared_command_tx() -> SharedCommandTx {
 pub struct ContextProvider {
     command_tx: SharedCommandTx,
     metrics: Arc<Mutex<SharedContextMetrics>>,
+    lifecycle: Option<Arc<Mutex<LifecycleContextProvider>>>,
+    memory_backend: Option<Arc<dyn MemoryBackend>>,
+    memory_mind: Option<String>,
 }
 
 impl ContextProvider {
@@ -103,7 +111,179 @@ impl ContextProvider {
         Self {
             command_tx,
             metrics,
+            lifecycle: None,
+            memory_backend: None,
+            memory_mind: None,
         }
+    }
+
+    pub fn new_with_sources(
+        metrics: Arc<Mutex<SharedContextMetrics>>,
+        command_tx: SharedCommandTx,
+        lifecycle: Option<Arc<Mutex<LifecycleContextProvider>>>,
+        memory_backend: Option<Arc<dyn MemoryBackend>>,
+        memory_mind: Option<String>,
+    ) -> Self {
+        Self {
+            command_tx,
+            metrics,
+            lifecycle,
+            memory_backend,
+            memory_mind,
+        }
+    }
+
+    fn request_max_items(req: &Value) -> usize {
+        req.get("max_items")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize)
+            .unwrap_or(3)
+            .clamp(1, 4)
+    }
+
+    fn summarize_decisions(&self, query: &str, reason: &str, max_items: usize) -> Option<String> {
+        let lifecycle = self.lifecycle.as_ref()?;
+        let provider = lifecycle.lock().ok()?;
+        let mut items = Vec::new();
+
+        if let Some(node_id) = provider.focused_node_id()
+            && let Some(node) = provider.get_node(node_id)
+            && let Some(sections) = design::read_node_sections(node)
+        {
+            for decision in sections
+                .decisions
+                .iter()
+                .filter(|d| d.status == "decided" || d.status == "exploring")
+            {
+                let hay = format!("{} {} {}", node.title, decision.title, decision.rationale)
+                    .to_lowercase();
+                if query.is_empty() || hay.contains(&query.to_lowercase()) {
+                    items.push(format!(
+                        "- {} / {} — {} [{}]\n  rationale: {}",
+                        node.id, node.title, decision.title, decision.status, decision.rationale
+                    ));
+                }
+                if items.len() >= max_items {
+                    break;
+                }
+            }
+        }
+
+        if items.is_empty() {
+            return None;
+        }
+
+        Some(format!(
+            "### Decisions\n- Reason: {reason}\n- Query: {query}\n{}",
+            items.join("\n")
+        ))
+    }
+
+    fn summarize_specs(&self, query: &str, reason: &str, max_items: usize) -> Option<String> {
+        let lifecycle = self.lifecycle.as_ref()?;
+        let provider = lifecycle.lock().ok()?;
+        let mut items = Vec::new();
+        let query_lower = query.to_lowercase();
+
+        for change in provider
+            .changes()
+            .iter()
+            .filter(|c| matches!(c.stage, ChangeStage::Implementing | ChangeStage::Verifying | ChangeStage::Planned | ChangeStage::Specified))
+        {
+            for spec in &change.specs {
+                for req in &spec.requirements {
+                    let req_hay = format!("{} {} {}", spec.domain, req.title, req.description)
+                        .to_lowercase();
+                    let req_match = query.is_empty() || req_hay.contains(&query_lower);
+                    if req_match {
+                        items.push(format!(
+                            "- {} / {} — {}\n  {}",
+                            change.name,
+                            spec.domain,
+                            req.title,
+                            req.description
+                        ));
+                    }
+                    for scenario in &req.scenarios {
+                        let scenario_hay = format!(
+                            "{} {} {} {} {}",
+                            req.title, scenario.title, scenario.given, scenario.when, scenario.then
+                        )
+                        .to_lowercase();
+                        if query.is_empty() || scenario_hay.contains(&query_lower) {
+                            items.push(format!(
+                                "- {} / {} / {}\n  Given {}\n  When {}\n  Then {}",
+                                change.name,
+                                spec.domain,
+                                scenario.title,
+                                scenario.given,
+                                scenario.when,
+                                scenario.then
+                            ));
+                        }
+                        if items.len() >= max_items {
+                            break;
+                        }
+                    }
+                    if items.len() >= max_items {
+                        break;
+                    }
+                }
+                if items.len() >= max_items {
+                    break;
+                }
+            }
+            if items.len() >= max_items {
+                break;
+            }
+        }
+
+        if items.is_empty() {
+            return None;
+        }
+
+        Some(format!(
+            "### Specs\n- Reason: {reason}\n- Query: {query}\n{}",
+            items.join("\n")
+        ))
+    }
+
+    async fn summarize_memory(
+        &self,
+        query: &str,
+        reason: &str,
+        max_items: usize,
+    ) -> Option<String> {
+        let backend = self.memory_backend.as_ref()?;
+        let mind = self.memory_mind.as_deref()?;
+        let results = backend.fts_search(mind, query, max_items).await.ok()?;
+        if results.is_empty() {
+            return None;
+        }
+        let items = results
+            .into_iter()
+            .take(max_items)
+            .map(|scored| {
+                format!(
+                    "- [{}] {}\n  score: {:.2}",
+                    match scored.fact.section {
+                        Section::Architecture => "Architecture",
+                        Section::Decisions => "Decisions",
+                        Section::Constraints => "Constraints",
+                        Section::KnownIssues => "Known Issues",
+                        Section::PatternsConventions => "Patterns & Conventions",
+                        Section::Specs => "Specs",
+                        Section::RecentWork => "Recent Work",
+                    },
+                    scored.fact.content,
+                    scored.score
+                )
+            })
+            .collect::<Vec<_>>();
+        Some(format!(
+            "### Memory\n- Reason: {reason}\n- Query: {query}\n{}",
+            items.join("\n")
+        ))
     }
 }
 
@@ -218,7 +398,10 @@ impl Feature for ContextProvider {
                     anyhow::bail!("request_context accepts at most 3 requests per call");
                 }
 
-                let metrics = self.metrics.lock().unwrap();
+                let metrics = {
+                    let metrics = self.metrics.lock().unwrap();
+                    metrics.clone()
+                };
                 let mut sections = Vec::new();
                 let mut supported = 0usize;
                 let mut unsupported = 0usize;
@@ -250,10 +433,43 @@ impl Feature for ContextProvider {
                                 metrics.thinking_level
                             ));
                         }
-                        "code" | "memory" | "decisions" | "specs" => {
+                        "decisions" => {
+                            if let Some(pack) = self.summarize_decisions(query, reason, Self::request_max_items(req)) {
+                                supported += 1;
+                                sections.push(pack);
+                            } else {
+                                unsupported += 1;
+                                sections.push(format!(
+                                    "### decisions\n- Reason: {reason}\n- Query: {query}\n- Status: no focused lifecycle decision context matched this request."
+                                ));
+                            }
+                        }
+                        "specs" => {
+                            if let Some(pack) = self.summarize_specs(query, reason, Self::request_max_items(req)) {
+                                supported += 1;
+                                sections.push(pack);
+                            } else {
+                                unsupported += 1;
+                                sections.push(format!(
+                                    "### specs\n- Reason: {reason}\n- Query: {query}\n- Status: no active spec scenarios matched this request."
+                                ));
+                            }
+                        }
+                        "memory" => {
+                            if let Some(pack) = self.summarize_memory(query, reason, Self::request_max_items(req)).await {
+                                supported += 1;
+                                sections.push(pack);
+                            } else {
+                                unsupported += 1;
+                                sections.push(format!(
+                                    "### memory\n- Reason: {reason}\n- Query: {query}\n- Status: no memory facts matched this request."
+                                ));
+                            }
+                        }
+                        "code" => {
                             unsupported += 1;
                             sections.push(format!(
-                                "### {kind}\n- Reason: {reason}\n- Query: {query}\n- Status: request_context v1 does not yet curate {kind} packs. Use targeted retrieval tools for this category right now."
+                                "### code\n- Reason: {reason}\n- Query: {query}\n- Status: request_context v2 does not yet mediate code packs. Use codebase_search/read for this category right now."
                             ));
                         }
                         other => {
@@ -550,6 +766,104 @@ mod tests {
         );
         assert!(text.contains("Session State"), "unexpected text: {text}");
         assert!(text.contains("96433/272000"), "unexpected text: {text}");
+    }
+
+    #[tokio::test]
+    async fn request_context_returns_decision_pack_from_focused_node() {
+        use std::collections::HashMap;
+        use std::path::PathBuf;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let docs_dir = tmp.path().join("docs");
+        std::fs::create_dir_all(&docs_dir).unwrap();
+        let doc_path = docs_dir.join("decision-node.md");
+        std::fs::write(
+            &doc_path,
+            "---\nid: decision-node\ntitle: Decision Node\nstatus: exploring\n---\n\n# Decision Node\n\n## Overview\n\nOverview.\n\n## Decisions\n\n### Use selector policy\n\n**Status:** decided\n\n**Rationale:** Keeps request shaping bounded.\n",
+        )
+        .unwrap();
+        let fm = design::parse_frontmatter(&std::fs::read_to_string(&doc_path).unwrap()).unwrap();
+        let node = design::node_from_frontmatter(&fm, doc_path.clone()).unwrap();
+        let mut nodes = HashMap::new();
+        nodes.insert("decision-node".to_string(), node);
+        let lifecycle = LifecycleContextProvider {
+            nodes,
+            sections_cache: HashMap::new(),
+            changes: vec![],
+            focused_node: Some("decision-node".into()),
+            repo_path: tmp.path().to_path_buf(),
+        };
+
+        let provider = ContextProvider::new_with_sources(
+            SharedContextMetrics::new(),
+            new_shared_command_tx(),
+            Some(Arc::new(Mutex::new(lifecycle))),
+            None,
+            None,
+        );
+        let result = provider
+            .execute(
+                crate::tool_registry::context::REQUEST_CONTEXT,
+                "call-ctx-decisions",
+                json!({
+                    "requests": [
+                        {
+                            "kind": "decisions",
+                            "query": "selector policy",
+                            "reason": "Need architectural decision context"
+                        }
+                    ]
+                }),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .expect("tool result");
+        let text = result.content.iter().filter_map(|c| match c { ContentBlock::Text { text } => Some(text.as_str()), _ => None }).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("### Decisions"), "unexpected text: {text}");
+        assert!(text.contains("Use selector policy"), "unexpected text: {text}");
+    }
+
+    #[tokio::test]
+    async fn request_context_returns_memory_pack() {
+        let backend: Arc<dyn MemoryBackend> = Arc::new(omegon_memory::InMemoryBackend::new());
+        backend
+            .store_fact(omegon_memory::StoreFact {
+                mind: "test".into(),
+                content: "Selector policy must remain bounded and mediated".into(),
+                section: Section::Decisions,
+                decay_profile: omegon_memory::DecayProfileName::Standard,
+                source: None,
+            })
+            .await
+            .unwrap();
+
+        let provider = ContextProvider::new_with_sources(
+            SharedContextMetrics::new(),
+            new_shared_command_tx(),
+            None,
+            Some(backend),
+            Some("test".into()),
+        );
+        let result = provider
+            .execute(
+                crate::tool_registry::context::REQUEST_CONTEXT,
+                "call-ctx-memory",
+                json!({
+                    "requests": [
+                        {
+                            "kind": "memory",
+                            "query": "selector policy mediated",
+                            "reason": "Need prior decision memory"
+                        }
+                    ]
+                }),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .expect("tool result");
+        let text = result.content.iter().filter_map(|c| match c { ContentBlock::Text { text } => Some(text.as_str()), _ => None }).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("### Memory"), "unexpected text: {text}");
+        assert!(text.contains("bounded and mediated"), "unexpected text: {text}");
     }
 
     #[tokio::test]
