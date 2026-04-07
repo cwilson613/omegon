@@ -82,12 +82,14 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
             expect_status_line: "1 completed, 0 failed, 0 upstream exhausted, 0 unfinished",
             expect_merge_line: "completed (no changes)",
             runtime_profile: Some(crate::cleave::CleaveChildRuntimeProfile {
+                model: Some("anthropic:claude-sonnet-4-6".into()),
                 thinking_level: Some("high".into()),
                 context_class: Some("legion".into()),
                 disabled_tools: vec!["bash".into()],
                 skills: vec!["security".into()],
                 enabled_extensions: vec!["alpha".into()],
                 disabled_extensions: vec!["beta".into()],
+                preloaded_files: vec!["docs/runtime-preload.md".into()],
                 ..Default::default()
             }),
             assert_runtime: Some(assert_runtime_profile_report),
@@ -133,6 +135,46 @@ async fn run_scenario(cli: &Cli, scenario: &SmokeScenario) -> anyhow::Result<()>
     let workspace = temp_dir.join("workspace");
     std::fs::create_dir_all(&workspace)?;
     init_repo(&repo)?;
+    if scenario.name == "runtime_profile_enforced" {
+        let docs = repo.join("docs");
+        std::fs::create_dir_all(&docs)?;
+        std::fs::write(docs.join("runtime-preload.md"), "preloaded runtime context\n")?;
+        let plugins_dir = repo.join(".omegon").join("plugins");
+        std::fs::create_dir_all(plugins_dir.join("alpha"))?;
+        std::fs::write(
+            plugins_dir.join("alpha").join("plugin.toml"),
+            r#"
+            [plugin]
+            name = "Alpha Plugin"
+            description = "Alpha test plugin"
+
+            [activation]
+            always = true
+
+            [[tools]]
+            name = "alpha_tool"
+            description = "does alpha"
+            endpoint = "http://localhost:9999/alpha"
+        "#,
+        )?;
+        std::fs::create_dir_all(plugins_dir.join("beta"))?;
+        std::fs::write(
+            plugins_dir.join("beta").join("plugin.toml"),
+            r#"
+            [plugin]
+            name = "Beta Plugin"
+            description = "Beta test plugin"
+
+            [activation]
+            always = true
+
+            [[tools]]
+            name = "beta_tool"
+            description = "does beta"
+            endpoint = "http://localhost:9999/beta"
+        "#,
+        )?;
+    }
 
     // temp_dir is PID-namespaced; best-effort cleanup on success
     struct Cleanup(PathBuf);
@@ -255,6 +297,31 @@ fn assert_runtime_profile_report(report: &serde_json::Value) -> anyhow::Result<(
     }
     if report["context_class"] != "legion" && report["context_class"] != "Legion" {
         anyhow::bail!("context class not applied: {report}");
+    }
+    if report["model"] != "anthropic:claude-sonnet-4-6" {
+        anyhow::bail!("model not applied: {report}");
+    }
+    if report["provider"] != "anthropic" {
+        anyhow::bail!("provider not inferred from model: {report}");
+    }
+    let requested_skills = report["requested_skill_filter"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("requested_skill_filter missing"))?
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect::<Vec<_>>();
+    if requested_skills != vec!["security"] {
+        anyhow::bail!("requested skill filter not applied: {requested_skills:?}");
+    }
+    let preloaded_files = report["preloaded_files"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("preloaded_files missing"))?;
+    let preload_hit = preloaded_files.iter().any(|entry| {
+        entry["path"] == "docs/runtime-preload.md"
+            && entry["content"] == "preloaded runtime context\n"
+    });
+    if !preload_hit {
+        anyhow::bail!("preloaded file not surfaced in runtime report: {report}");
     }
     Ok(())
 }

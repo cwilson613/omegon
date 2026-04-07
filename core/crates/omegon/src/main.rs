@@ -2255,7 +2255,7 @@ fn maybe_run_injected_cleave_smoke_child(cwd: &Path) -> anyhow::Result<bool> {
         "report-runtime" => {
             let shared_settings = settings::shared("anthropic:claude-sonnet-4-6");
             let agent = tokio::runtime::Handle::current().block_on(async {
-                setup::AgentSetup::new(cwd, None, Some(shared_settings)).await
+                setup::AgentSetup::new(cwd, None, Some(shared_settings.clone())).await
             })?;
             let status = agent.initial_harness_status.clone();
             let tool_names: Vec<String> = agent
@@ -2264,11 +2264,33 @@ fn maybe_run_injected_cleave_smoke_child(cwd: &Path) -> anyhow::Result<bool> {
                 .into_iter()
                 .map(|t| t.name)
                 .collect();
+            let settings_guard = shared_settings.lock().ok();
+            let selected_model = settings_guard
+                .as_ref()
+                .map(|s| s.model.clone())
+                .unwrap_or_else(|| "unknown".into());
+            let selected_provider = crate::providers::infer_provider_id(&selected_model);
+            let preloaded_files = child_preloaded_files()
+                .into_iter()
+                .map(|path| {
+                    let resolved = cwd.join(&path);
+                    let content = std::fs::read_to_string(&resolved).unwrap_or_default();
+                    serde_json::json!({
+                        "path": path.display().to_string(),
+                        "resolved": resolved.display().to_string(),
+                        "content": content,
+                    })
+                })
+                .collect::<Vec<_>>();
             let report = serde_json::json!({
                 "mode": "report-runtime",
+                "model": selected_model,
+                "provider": selected_provider,
                 "tool_names": tool_names,
                 "plugin_names": status.installed_plugins.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
                 "active_persona_skills": status.active_persona.as_ref().map(|p| p.activated_skills.clone()).unwrap_or_default(),
+                "requested_skill_filter": parse_csv_env("OMEGON_CHILD_SKILLS"),
+                "preloaded_files": preloaded_files,
                 "context_class": status.context_class,
                 "thinking_level": status.thinking_level,
             });
