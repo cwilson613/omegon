@@ -120,6 +120,14 @@ pub mod harness_settings {
     pub const HARNESS_SETTINGS: &str = "harness_settings";
 }
 
+/// Context tools — owned by `features::context`
+pub mod context {
+    pub const CONTEXT_STATUS: &str = "context_status";
+    pub const CONTEXT_COMPACT: &str = "context_compact";
+    pub const CONTEXT_CLEAR: &str = "context_clear";
+    pub const REQUEST_CONTEXT: &str = "request_context";
+}
+
 /// Persona system — owned by `features::persona`
 pub mod persona {
     pub const SWITCH_PERSONA: &str = "switch_persona";
@@ -143,7 +151,7 @@ pub mod codescan {
 /// **Maintenance rule**: every `pub const` above MUST appear here.
 /// The `registry_count_is_current` test will catch omissions.
 /// Number of statically registered tools (for splash screen display).
-pub const TOOL_COUNT: usize = 53;
+pub const TOOL_COUNT: usize = 57;
 
 pub fn all_static_names() -> Vec<&'static str> {
     vec![
@@ -209,6 +217,11 @@ pub fn all_static_names() -> Vec<&'static str> {
         auth::AUTH_STATUS,
         // harness_settings (1)
         harness_settings::HARNESS_SETTINGS,
+        // context (4)
+        context::CONTEXT_STATUS,
+        context::CONTEXT_COMPACT,
+        context::CONTEXT_CLEAR,
+        context::REQUEST_CONTEXT,
         // persona (3)
         persona::SWITCH_PERSONA,
         persona::SWITCH_TONE,
@@ -217,7 +230,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         codescan::CODEBASE_SEARCH,
         codescan::CODEBASE_INDEX,
     ]
-    // Total: 13+1+1+2+3+12+4+2+3+1+3+1+1+1+3+2 = 53
+    // Total: 13+1+1+2+3+12+4+2+3+1+3+1+1+4+3+2 = 57
 }
 
 #[cfg(test)]

@@ -116,7 +116,7 @@ impl Feature for ContextProvider {
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![
             ToolDefinition {
-                name: "context_status".into(),
+                name: crate::tool_registry::context::CONTEXT_STATUS.into(),
                 label: "Context Status".into(),
                 description: "Show current context window usage, token count, and compression statistics.".into(),
                 parameters: json!({
@@ -126,7 +126,34 @@ impl Feature for ContextProvider {
                 }),
             },
             ToolDefinition {
-                name: "context_compact".into(),
+                name: crate::tool_registry::context::REQUEST_CONTEXT.into(),
+                label: "Request Context".into(),
+                description: "Request a compact context pack before making multiple exploratory tool calls. Best for session orientation and recent runtime evidence; returns curated summaries, not raw dumps.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "requests": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 3,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "kind": {"type": "string", "enum": ["session_state", "recent_runtime", "code", "memory", "decisions", "specs"]},
+                                    "query": {"type": "string"},
+                                    "reason": {"type": "string"},
+                                    "max_items": {"type": "integer", "minimum": 1, "maximum": 4},
+                                    "scope": {"type": "array", "items": {"type": "string"}}
+                                },
+                                "required": ["kind", "query", "reason"]
+                            }
+                        }
+                    },
+                    "required": ["requests"]
+                }),
+            },
+            ToolDefinition {
+                name: crate::tool_registry::context::CONTEXT_COMPACT.into(),
                 label: "Compact Context".into(),
                 description: "Compress the conversation history via LLM summarization, freeing tokens for new work.".into(),
                 parameters: json!({
@@ -136,7 +163,7 @@ impl Feature for ContextProvider {
                 }),
             },
             ToolDefinition {
-                name: "context_clear".into(),
+                name: crate::tool_registry::context::CONTEXT_CLEAR.into(),
                 label: "Clear Context".into(),
                 description: "Clear all conversation history and start fresh. Archives the current session first.".into(),
                 parameters: json!({
@@ -156,7 +183,7 @@ impl Feature for ContextProvider {
         _cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
-            "context_status" => {
+            crate::tool_registry::context::CONTEXT_STATUS => {
                 let dispatched = dispatch_command(&self.command_tx, TuiCommand::ContextStatus);
                 let metrics = self.metrics.lock().unwrap();
                 let pct = metrics.usage_percent();
@@ -182,7 +209,81 @@ impl Feature for ContextProvider {
                 })
             }
 
-            "context_compact" => {
+            crate::tool_registry::context::REQUEST_CONTEXT => {
+                let requests = _args
+                    .get("requests")
+                    .and_then(|v| v.as_array())
+                    .ok_or_else(|| anyhow::anyhow!("request_context requires a requests array"))?;
+                if requests.len() > 3 {
+                    anyhow::bail!("request_context accepts at most 3 requests per call");
+                }
+
+                let metrics = self.metrics.lock().unwrap();
+                let mut sections = Vec::new();
+                let mut supported = 0usize;
+                let mut unsupported = 0usize;
+
+                for req in requests {
+                    let kind = req.get("kind").and_then(|v| v.as_str()).unwrap_or("unknown");
+                    let query = req.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                    let reason = req.get("reason").and_then(|v| v.as_str()).unwrap_or("");
+                    match kind {
+                        "session_state" => {
+                            supported += 1;
+                            sections.push(format!(
+                                "### Session State\n- Why selected: session orientation request for `{query}`\n- Reason: {reason}\n- Current context: {}/{} tokens ({}%)\n- Policy: {}\n- Thinking: {}",
+                                metrics.tokens_used,
+                                metrics.context_window,
+                                metrics.usage_percent(),
+                                metrics.context_class,
+                                metrics.thinking_level
+                            ));
+                        }
+                        "recent_runtime" => {
+                            supported += 1;
+                            sections.push(format!(
+                                "### Recent Runtime\n- Why selected: recent runtime evidence request for `{query}`\n- Reason: {reason}\n- Current runtime snapshot: context {}/{} tokens ({}%), policy {}, thinking {}",
+                                metrics.tokens_used,
+                                metrics.context_window,
+                                metrics.usage_percent(),
+                                metrics.context_class,
+                                metrics.thinking_level
+                            ));
+                        }
+                        "code" | "memory" | "decisions" | "specs" => {
+                            unsupported += 1;
+                            sections.push(format!(
+                                "### {kind}\n- Reason: {reason}\n- Query: {query}\n- Status: request_context v1 does not yet curate {kind} packs. Use targeted retrieval tools for this category right now."
+                            ));
+                        }
+                        other => {
+                            anyhow::bail!("unknown request_context kind: {other}");
+                        }
+                    }
+                }
+
+                let summary = format!(
+                    "Retrieved {} supported context pack(s); {} request(s) still require dedicated tools.",
+                    supported, unsupported
+                );
+                let mut blocks = vec![ContentBlock::Text { text: summary.clone() }];
+                blocks.push(ContentBlock::Text {
+                    text: sections.join("\n\n"),
+                });
+                Ok(ToolResult {
+                    content: blocks,
+                    details: json!({
+                        "supported": supported,
+                        "unsupported": unsupported,
+                        "context_window": metrics.context_window,
+                        "tokens_used": metrics.tokens_used,
+                        "thinking": metrics.thinking_level,
+                        "class": metrics.context_class,
+                    }),
+                })
+            }
+
+            crate::tool_registry::context::CONTEXT_COMPACT => {
                 let response = run_context_slash(&self.command_tx, "compact").await?;
                 let (text, accepted, dispatched) = if let Some(response) = response {
                     (
@@ -203,7 +304,7 @@ impl Feature for ContextProvider {
                 })
             }
 
-            "context_clear" => {
+            crate::tool_registry::context::CONTEXT_CLEAR => {
                 let response = run_context_slash(&self.command_tx, "clear").await?;
                 let (text, accepted, dispatched) = if let Some(response) = response {
                     (
@@ -251,7 +352,7 @@ mod tests {
         let provider = ContextProvider::new(metrics, command_tx);
         let result = provider
             .execute(
-                "context_status",
+                crate::tool_registry::context::CONTEXT_STATUS,
                 "call-2",
                 json!({}),
                 tokio_util::sync::CancellationToken::new(),
@@ -285,7 +386,7 @@ mod tests {
         let provider = ContextProvider::new(metrics, command_tx);
         let result = provider
             .execute(
-                "context_compact",
+                crate::tool_registry::context::CONTEXT_COMPACT,
                 "call-1",
                 json!({}),
                 tokio_util::sync::CancellationToken::new(),
@@ -320,7 +421,7 @@ mod tests {
         let exec = tokio::spawn(async move {
             provider
                 .execute(
-                    "context_compact",
+                    crate::tool_registry::context::CONTEXT_COMPACT,
                     "call-3",
                     json!({}),
                     tokio_util::sync::CancellationToken::new(),
@@ -373,7 +474,7 @@ mod tests {
         let exec = tokio::spawn(async move {
             provider
                 .execute(
-                    "context_clear",
+                    crate::tool_registry::context::CONTEXT_CLEAR,
                     "call-4",
                     json!({}),
                     tokio_util::sync::CancellationToken::new(),
@@ -407,5 +508,72 @@ mod tests {
         assert_eq!(expect_text(&result), "clear failed");
         assert_eq!(result.details["dispatched"], true);
         assert_eq!(result.details["accepted"], false);
+    }
+
+    #[tokio::test]
+    async fn request_context_returns_compact_session_pack() {
+        let metrics = SharedContextMetrics::new();
+        {
+            let mut m = metrics.lock().unwrap();
+            m.update(96_433, 272_000, "Maniple (272k)", "medium");
+        }
+        let provider = ContextProvider::new(metrics, new_shared_command_tx());
+        let result = provider
+            .execute(
+                crate::tool_registry::context::REQUEST_CONTEXT,
+                "call-ctx-1",
+                json!({
+                    "requests": [
+                        {
+                            "kind": "session_state",
+                            "query": "orient me before planning",
+                            "reason": "Need session context before exploratory reads"
+                        }
+                    ]
+                }),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .expect("tool result");
+        let text = result
+            .content
+            .iter()
+            .filter_map(|c| match c {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains("Retrieved 1 supported context pack"),
+            "unexpected text: {text}"
+        );
+        assert!(text.contains("Session State"), "unexpected text: {text}");
+        assert!(text.contains("96433/272000"), "unexpected text: {text}");
+    }
+
+    #[tokio::test]
+    async fn request_context_rejects_too_many_requests() {
+        let provider = ContextProvider::new(SharedContextMetrics::new(), new_shared_command_tx());
+        let err = provider
+            .execute(
+                crate::tool_registry::context::REQUEST_CONTEXT,
+                "call-ctx-2",
+                json!({
+                    "requests": [
+                        {"kind": "session_state", "query": "a", "reason": "a"},
+                        {"kind": "session_state", "query": "b", "reason": "b"},
+                        {"kind": "session_state", "query": "c", "reason": "c"},
+                        {"kind": "session_state", "query": "d", "reason": "d"}
+                    ]
+                }),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .expect_err("should reject oversized request batch");
+        assert!(
+            err.to_string().contains("at most 3 requests"),
+            "unexpected error: {err}"
+        );
     }
 }

@@ -32,6 +32,7 @@ Available tools: {tool_list}
 - Read files before editing. Edit requires exact text matches.
 - Ground claims in evidence — cite files and lines. Don't assert about unread code.
 - Every non-trivial change needs tests. Commit when done, do NOT push.
+- Prefer `request_context` before making multiple exploratory tool calls when you need session orientation or recent runtime evidence. Use direct read/search tools first only when you already know the exact target.
 {lex_imperialis}{lifecycle_context}{global_directives}{project_directives}{project_conventions}
 Current date: {date}
 Current working directory: {cwd}"#,
