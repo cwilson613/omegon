@@ -37,11 +37,7 @@ impl TerminalTitle {
         }
     }
 
-    fn update_title(&self) {
-        // Only set title when stderr is a real terminal (not piped/headless)
-        if !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
-            return;
-        }
+    fn current_title(&self) -> String {
         let status = if self.tool_active {
             let chain = self.tool_chain.join(" → ");
             format!("⚙ {chain}")
@@ -50,9 +46,22 @@ impl TerminalTitle {
         } else {
             format!("◆ T{}", self.turn)
         };
-        let title = format!("Ω {} {}", self.project, status);
-        // OSC 0 — set window title
-        eprint!("\x1b]0;{title}\x07");
+        format!("Ω {} {}", self.project, status)
+    }
+
+    fn emit_title_sequence(title: &str) -> String {
+        // Prefer ST (ESC \\) terminator instead of BEL. BEL causes an audible
+        // terminal bell and can leak visible debris in some terminals while a
+        // full-screen TUI owns the alternate screen.
+        format!("\x1b]0;{title}\x1b\\")
+    }
+
+    fn update_title(&self) {
+        // Only set title when stderr is a real terminal (not piped/headless)
+        if !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+            return;
+        }
+        eprint!("{}", Self::emit_title_sequence(&self.current_title()));
     }
 }
 
@@ -143,5 +152,14 @@ mod tests {
             args: serde_json::json!({}),
         });
         assert_eq!(tt.tool_chain, vec!["Edit", "Bash"]); // last 2
+    }
+
+    #[test]
+    fn title_sequence_uses_st_not_bel() {
+        let tt = TerminalTitle::new("/tmp/test");
+        let seq = TerminalTitle::emit_title_sequence(&tt.current_title());
+        assert!(seq.starts_with("\x1b]0;"), "unexpected OSC prefix: {seq:?}");
+        assert!(seq.ends_with("\x1b\\"), "should terminate with ST: {seq:?}");
+        assert!(!seq.contains('\u{7}'), "should not contain BEL: {seq:?}");
     }
 }
