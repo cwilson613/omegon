@@ -186,6 +186,16 @@ impl ShadowContext {
     }
 
     pub fn select_for_turn(&mut self, turn: u32, user_prompt: &str) -> SelectedContext {
+        let budget = self.selector_policy.assembly_budget();
+        self.select_for_turn_with_budget(turn, user_prompt, budget)
+    }
+
+    pub fn select_for_turn_with_budget(
+        &mut self,
+        turn: u32,
+        user_prompt: &str,
+        budget: usize,
+    ) -> SelectedContext {
         self.retain_nonexpired(turn);
 
         for entry in &mut self.entries {
@@ -221,7 +231,6 @@ impl ShadowContext {
 
         let mut total_tokens = 0usize;
         let mut selected_ids = Vec::new();
-        let budget = self.selector_policy.assembly_budget();
 
         for entry in ordered {
             if entry.kind.tier() == 0 || entry.mandatory || entry.pinned {

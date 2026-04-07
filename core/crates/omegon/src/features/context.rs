@@ -18,6 +18,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::lifecycle::context::LifecycleContextProvider;
 use crate::lifecycle::design;
 use crate::lifecycle::types::ChangeStage;
+use crate::shadow_context::{ContextKind, EntryBody, ShadowContext, ShadowEntry};
 use crate::tui::TuiCommand;
 
 fn dispatch_command(command_tx: &SharedCommandTx, command: TuiCommand) -> bool {
@@ -147,48 +148,79 @@ impl ContextProvider {
             .clamp(1, 4)
     }
 
+    fn pack_shadow() -> ShadowContext {
+        ShadowContext::new(crate::settings::SelectorPolicy {
+            model_window: 4_096,
+            requested_class: crate::settings::ContextClass::Squad,
+            reply_reserve: 512,
+            tool_schema_reserve: 256,
+        })
+    }
+
+    fn select_pack(
+        kind_heading: &str,
+        query: &str,
+        reason: &str,
+        mut entries: Vec<ShadowEntry>,
+    ) -> Option<String> {
+        if entries.is_empty() {
+            return None;
+        }
+        let mut shadow = Self::pack_shadow();
+        for entry in entries.drain(..) {
+            shadow.upsert(entry);
+        }
+        let selected = shadow.select_for_turn_with_budget(1, query, 900);
+        let body = shadow.render_selection(&selected);
+        if body.trim().is_empty() {
+            None
+        } else {
+            Some(format!("### {kind_heading}\n- Reason: {reason}\n- Query: {query}\n{body}"))
+        }
+    }
+
     fn summarize_decisions(&self, query: &str, reason: &str, max_items: usize) -> Option<String> {
         let lifecycle = self.lifecycle.as_ref()?;
         let provider = lifecycle.lock().ok()?;
-        let mut items = Vec::new();
+        let mut entries = Vec::new();
 
         if let Some(node_id) = provider.focused_node_id()
             && let Some(node) = provider.get_node(node_id)
             && let Some(sections) = design::read_node_sections(node)
         {
-            for decision in sections
+            for (idx, decision) in sections
                 .decisions
                 .iter()
                 .filter(|d| d.status == "decided" || d.status == "exploring")
+                .enumerate()
             {
                 let hay = format!("{} {} {}", node.title, decision.title, decision.rationale)
                     .to_lowercase();
                 if query.is_empty() || hay.contains(&query.to_lowercase()) {
-                    items.push(format!(
-                        "- {} / {} — {} [{}]\n  rationale: {}",
-                        node.id, node.title, decision.title, decision.status, decision.rationale
-                    ));
+                    let mut entry = ShadowEntry::new(
+                        format!("decision:{}:{idx}", node.id),
+                        ContextKind::DesignNode,
+                        EntryBody::Inline(format!(
+                            "- {} / {} — {} [{}]\n  rationale: {}",
+                            node.id, node.title, decision.title, decision.status, decision.rationale
+                        )),
+                    );
+                    entry.priority = if decision.status == "decided" { 140 } else { 100 };
+                    entries.push(entry);
                 }
-                if items.len() >= max_items {
+                if entries.len() >= max_items {
                     break;
                 }
             }
         }
 
-        if items.is_empty() {
-            return None;
-        }
-
-        Some(format!(
-            "### Decisions\n- Reason: {reason}\n- Query: {query}\n{}",
-            items.join("\n")
-        ))
+        Self::select_pack("Decisions", query, reason, entries)
     }
 
     fn summarize_specs(&self, query: &str, reason: &str, max_items: usize) -> Option<String> {
         let lifecycle = self.lifecycle.as_ref()?;
         let provider = lifecycle.lock().ok()?;
-        let mut items = Vec::new();
+        let mut entries = Vec::new();
         let query_lower = query.to_lowercase();
 
         for change in provider
@@ -200,15 +232,17 @@ impl ContextProvider {
                 for req in &spec.requirements {
                     let req_hay = format!("{} {} {}", spec.domain, req.title, req.description)
                         .to_lowercase();
-                    let req_match = query.is_empty() || req_hay.contains(&query_lower);
-                    if req_match {
-                        items.push(format!(
-                            "- {} / {} — {}\n  {}",
-                            change.name,
-                            spec.domain,
-                            req.title,
-                            req.description
-                        ));
+                    if query.is_empty() || req_hay.contains(&query_lower) {
+                        let mut entry = ShadowEntry::new(
+                            format!("spec:req:{}:{}", change.name, req.title),
+                            ContextKind::SpecScenario,
+                            EntryBody::Inline(format!(
+                                "- {} / {} — {}\n  {}",
+                                change.name, spec.domain, req.title, req.description
+                            )),
+                        );
+                        entry.priority = 120;
+                        entries.push(entry);
                     }
                     for scenario in &req.scenarios {
                         let scenario_hay = format!(
@@ -217,41 +251,40 @@ impl ContextProvider {
                         )
                         .to_lowercase();
                         if query.is_empty() || scenario_hay.contains(&query_lower) {
-                            items.push(format!(
-                                "- {} / {} / {}\n  Given {}\n  When {}\n  Then {}",
-                                change.name,
-                                spec.domain,
-                                scenario.title,
-                                scenario.given,
-                                scenario.when,
-                                scenario.then
-                            ));
+                            let mut entry = ShadowEntry::new(
+                                format!("spec:scn:{}:{}", change.name, scenario.title),
+                                ContextKind::SpecScenario,
+                                EntryBody::Inline(format!(
+                                    "- {} / {} / {}\n  Given {}\n  When {}\n  Then {}",
+                                    change.name,
+                                    spec.domain,
+                                    scenario.title,
+                                    scenario.given,
+                                    scenario.when,
+                                    scenario.then
+                                )),
+                            );
+                            entry.priority = 130;
+                            entries.push(entry);
                         }
-                        if items.len() >= max_items {
+                        if entries.len() >= max_items {
                             break;
                         }
                     }
-                    if items.len() >= max_items {
+                    if entries.len() >= max_items {
                         break;
                     }
                 }
-                if items.len() >= max_items {
+                if entries.len() >= max_items {
                     break;
                 }
             }
-            if items.len() >= max_items {
+            if entries.len() >= max_items {
                 break;
             }
         }
 
-        if items.is_empty() {
-            return None;
-        }
-
-        Some(format!(
-            "### Specs\n- Reason: {reason}\n- Query: {query}\n{}",
-            items.join("\n")
-        ))
+        Self::select_pack("Specs", query, reason, entries)
     }
 
     async fn summarize_memory(
@@ -263,33 +296,33 @@ impl ContextProvider {
         let backend = self.memory_backend.as_ref()?;
         let mind = self.memory_mind.as_deref()?;
         let results = backend.fts_search(mind, query, max_items).await.ok()?;
-        if results.is_empty() {
-            return None;
-        }
-        let items = results
+        let entries = results
             .into_iter()
-            .take(max_items)
-            .map(|scored| {
-                format!(
-                    "- [{}] {}\n  score: {:.2}",
-                    match scored.fact.section {
-                        Section::Architecture => "Architecture",
-                        Section::Decisions => "Decisions",
-                        Section::Constraints => "Constraints",
-                        Section::KnownIssues => "Known Issues",
-                        Section::PatternsConventions => "Patterns & Conventions",
-                        Section::Specs => "Specs",
-                        Section::RecentWork => "Recent Work",
-                    },
-                    scored.fact.content,
-                    scored.score
-                )
+            .enumerate()
+            .map(|(idx, scored)| {
+                let mut entry = ShadowEntry::new(
+                    format!("memory:{idx}:{}", scored.fact.id),
+                    ContextKind::MemoryFact,
+                    EntryBody::Inline(format!(
+                        "- [{}] {}\n  score: {:.2}",
+                        match scored.fact.section {
+                            Section::Architecture => "Architecture",
+                            Section::Decisions => "Decisions",
+                            Section::Constraints => "Constraints",
+                            Section::KnownIssues => "Known Issues",
+                            Section::PatternsConventions => "Patterns & Conventions",
+                            Section::Specs => "Specs",
+                            Section::RecentWork => "Recent Work",
+                        },
+                        scored.fact.content,
+                        scored.score
+                    )),
+                );
+                entry.priority = 80;
+                entry
             })
             .collect::<Vec<_>>();
-        Some(format!(
-            "### Memory\n- Reason: {reason}\n- Query: {query}\n{}",
-            items.join("\n")
-        ))
+        Self::select_pack("Memory", query, reason, entries)
     }
 
     fn summarize_code(&self, query: &str, reason: &str, max_items: usize) -> Option<String> {
@@ -301,28 +334,28 @@ impl ContextProvider {
         let knowledge_chunks = cache.all_knowledge_chunks().ok()?;
         let idx = BM25Index::build(&code_chunks, &knowledge_chunks);
         let results = idx.search(query, SearchScope::Code, max_items);
-        if results.is_empty() {
-            return None;
-        }
-        let items = results
+        let entries = results
             .into_iter()
-            .take(max_items)
-            .map(|r| {
-                format!(
-                    "- {}:{}-{} [{}]\n  score: {:.2}\n  {}",
-                    r.file,
-                    r.start_line,
-                    r.end_line,
-                    r.label,
-                    r.score,
-                    r.preview.chars().take(240).collect::<String>().replace('\n', " · ")
-                )
+            .enumerate()
+            .map(|(idx, r)| {
+                let mut entry = ShadowEntry::new(
+                    format!("code:{idx}:{}:{}", r.file, r.start_line),
+                    ContextKind::CodebaseChunk,
+                    EntryBody::Inline(format!(
+                        "- {}:{}-{} [{}]\n  score: {:.2}\n  {}",
+                        r.file,
+                        r.start_line,
+                        r.end_line,
+                        r.label,
+                        r.score,
+                        r.preview.chars().take(240).collect::<String>().replace('\n', " · ")
+                    )),
+                );
+                entry.priority = 90;
+                entry
             })
             .collect::<Vec<_>>();
-        Some(format!(
-            "### Code\n- Reason: {reason}\n- Query: {query}\n{}",
-            items.join("\n")
-        ))
+        Self::select_pack("Code", query, reason, entries)
     }
 }
 
