@@ -108,19 +108,16 @@ impl Feature for HarnessSettings {
                 let value = args.get("value").and_then(|v| v.as_str()).unwrap_or("");
 
                 if let Some(class) = crate::settings::ContextClass::parse(value) {
-                    let window = class.nominal_tokens();
                     let mut s = self.settings.lock().unwrap();
-                    s.context_class = class;
-                    s.context_window = window;
+                    s.set_requested_context_class(class);
                     drop(s);
 
                     // Set flag for status refresh on next turn
                     self.refresh_status_pending.store(true, Ordering::Relaxed);
 
                     Ok(text_result(&format!(
-                        "Context class → {} ({} tokens)",
+                        "Context policy → {} (model capacity unchanged)",
                         class.short(),
-                        window,
                     )))
                 } else {
                     Ok(error_result(&format!(
@@ -351,7 +348,7 @@ mod tests {
         assert!(text.contains("Clan"), "should confirm: {text}");
 
         let s = settings.lock().unwrap();
-        assert_eq!(s.context_class.short(), "Clan");
+        assert_eq!(s.effective_requested_class().short(), "Clan");
     }
 
     #[tokio::test]

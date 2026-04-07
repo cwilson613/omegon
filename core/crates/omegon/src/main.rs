@@ -21,6 +21,7 @@ pub mod bus;
 mod cleave;
 mod cleave_smoke;
 mod context;
+mod shadow_context;
 pub mod extensions;
 pub mod features;
 mod ipc;
@@ -1003,26 +1004,13 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     if let Some(ref class_str) = cli.context_class {
         if let Ok(mut s) = shared_settings.lock() {
             match class_str.to_lowercase().as_str() {
-                "squad" => {
-                    s.context_class = settings::ContextClass::Squad;
-                    s.context_window = 200_000;
-                }
-                "maniple" => {
-                    s.context_class = settings::ContextClass::Maniple;
-                    s.context_window = 500_000;
-                }
-                "clan" => {
-                    s.context_class = settings::ContextClass::Clan;
-                    s.context_window = 680_000;
-                }
-                "legion" => {
-                    s.context_class = settings::ContextClass::Legion;
-                    s.context_window = 1_000_000;
-                }
+                "squad" => s.set_requested_context_class(settings::ContextClass::Squad),
+                "maniple" => s.set_requested_context_class(settings::ContextClass::Maniple),
+                "clan" => s.set_requested_context_class(settings::ContextClass::Clan),
+                "legion" => s.set_requested_context_class(settings::ContextClass::Legion),
                 _ => tracing::warn!("Unknown context class: {class_str}"),
             }
-            s.apply_context_mode();
-            tracing::info!(class = %class_str, window = s.context_window, "context class override applied");
+            tracing::info!(class = %class_str, "requested context class policy applied");
         }
     }
 
@@ -2624,16 +2612,14 @@ async fn execute_remote_slash_command(
         }
         CanonicalSlashCommand::SetContextClass(class) => {
             if let Ok(mut s) = shared_settings.lock() {
-                s.context_class = class;
-                s.context_window = class.nominal_tokens();
-                s.context_mode = class.context_mode();
+                s.set_requested_context_class(class);
                 let mut profile = settings::Profile::load(&agent.cwd);
                 profile.capture_from(&s);
                 let _ = profile.save(&agent.cwd);
             }
             SlashCommandResponse {
                 accepted: true,
-                output: Some(format!("Context → {}", class.label())),
+                output: Some(format!("Context policy → {} (model capacity unchanged)", class.label())),
             }
         }
         CanonicalSlashCommand::NewSession => {

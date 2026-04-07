@@ -1097,11 +1097,9 @@ impl App {
             SelectorKind::ContextClass => {
                 if let Some(class) = crate::settings::ContextClass::parse(&value) {
                     self.update_settings(|s| {
-                        s.context_class = class;
-                        s.context_window = class.nominal_tokens();
-                        s.context_mode = class.context_mode();
+                        s.set_requested_context_class(class);
                     });
-                    Some(format!("Context class → {}", class.label()))
+                    Some(format!("Context policy → {}", class.label()))
                 } else {
                     Some(format!("Unknown context class: {value}"))
                 }
@@ -2014,7 +2012,7 @@ impl App {
             let s = self.settings();
             self.footer_data.model_id = s.model.clone();
             self.footer_data.model_provider = s.provider().to_string();
-            self.footer_data.context_class = s.context_class;
+            self.footer_data.context_class = s.effective_requested_class();
             self.footer_data.context_mode = s.context_mode;
             self.footer_data.context_window = s.context_window;
             self.footer_data.thinking_level = s.thinking.as_str().to_string();
@@ -3190,13 +3188,9 @@ impl App {
                         }
                         Some(CanonicalSlashCommand::SetContextClass(class)) => {
                             self.update_settings(|s| {
-                                s.context_class = class;
-                                s.context_window = class.nominal_tokens();
-                                s.context_mode = class.context_mode();
+                                s.set_requested_context_class(class);
                             });
-                            let s = self.settings();
-                            self.footer_data.context_window = s.context_window;
-                            SlashResult::Display(format!("Context → {}", class.label()))
+                            SlashResult::Display(format!("Context policy → {}", class.label()))
                         }
                         _ => {
                             let (sub, _) = args.split_once(' ').unwrap_or((args, ""));

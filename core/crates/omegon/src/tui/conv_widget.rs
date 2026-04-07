@@ -195,7 +195,20 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
     type State = ConvState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut ConvState) {
-        // Global bg fill in App::draw() covers all cells.
+        // Own the entire viewport every frame so shorter/shrinking content,
+        // partial clipping, and out-of-band terminal corruption cannot leave
+        // stale glyphs behind in the conversation region.
+        let bg = self.theme.surface_bg();
+        let fg = self.theme.fg();
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                if let Some(cell) = buf.cell_mut((x, y)) {
+                    cell.set_char(' ');
+                    cell.set_bg(bg);
+                    cell.set_fg(fg);
+                }
+            }
+        }
 
         if area.width == 0 || area.height == 0 || self.segments.is_empty() {
             return;

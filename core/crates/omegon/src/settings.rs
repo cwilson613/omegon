@@ -33,9 +33,15 @@ pub struct Settings {
     /// Context window size (tokens). Inferred from model via route matrix.
     pub context_window: usize,
 
-    /// Context class — named abstraction over context_window.
-    /// Derived from context_window, not set directly.
+    /// Context class — authoritative model-capacity class.
+    /// Updated by `set_model()` and provider probes. Do NOT set directly from commands.
     pub context_class: ContextClass,
+
+    /// Operator's requested working-set policy class.
+    /// `None` means "track model capacity" (default until operator explicitly changes).
+    /// Set by `/context <class>` — does NOT affect the actual model window.
+    #[serde(default)]
+    pub requested_context_class: Option<ContextClass>,
 
     /// Extended context mode — legacy Anthropic 200k/1M toggle.
     /// Deprecated: derived from context_class. Kept for backward compat.
@@ -245,6 +251,41 @@ fn default_mouse() -> bool {
     true
 }
 
+// ─── Selector Policy ─────────────────────────────────────────────────────────
+
+/// Derived per-turn context assembly policy.
+/// Computed from Settings on each turn — separates operator intent from model truth.
+#[derive(Debug, Clone, Copy)]
+pub struct SelectorPolicy {
+    /// Hard model ceiling — from provider probe or route matrix.
+    pub model_window: usize,
+    /// Operator's working-set breadth request. May exceed model_window.
+    pub requested_class: ContextClass,
+    /// Tokens reserved for model reply + thinking budget.
+    pub reply_reserve: usize,
+    /// Tokens reserved for tool schema overhead.
+    pub tool_schema_reserve: usize,
+}
+
+impl SelectorPolicy {
+    /// Actual token budget available for context assembly this turn.
+    pub fn assembly_budget(&self) -> usize {
+        self.model_window
+            .saturating_sub(self.reply_reserve)
+            .saturating_sub(self.tool_schema_reserve)
+    }
+
+    /// Whether the operator requested more capacity than the model supports.
+    pub fn has_class_mismatch(&self) -> bool {
+        self.requested_class > ContextClass::from_tokens(self.model_window)
+    }
+
+    /// Actual class derived from model_window.
+    pub fn actual_class(&self) -> ContextClass {
+        ContextClass::from_tokens(self.model_window)
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         let context_window = 200_000;
@@ -255,6 +296,7 @@ impl Default for Settings {
             compaction_threshold: 0.75,
             context_window,
             context_class: ContextClass::from_tokens(context_window),
+            requested_context_class: None,
             context_mode: ContextMode::Standard,
             tool_detail: ToolDetail::Detailed,
             provider_order: Vec::new(),
@@ -291,6 +333,29 @@ impl Settings {
         self.context_window = infer_context_window(model);
         self.context_class = ContextClass::from_tokens(self.context_window);
         self.context_mode = self.context_class.context_mode();
+    }
+
+    /// The effective working-set policy class for this turn.
+    /// Returns the operator's explicit request if set, otherwise the model-derived class.
+    pub fn effective_requested_class(&self) -> ContextClass {
+        self.requested_context_class.unwrap_or(self.context_class)
+    }
+
+    /// Set the operator's requested working-set policy class.
+    /// Does NOT change `context_window` or `context_class` — those are model-derived.
+    pub fn set_requested_context_class(&mut self, class: ContextClass) {
+        self.requested_context_class = Some(class);
+    }
+
+    /// Derive a SelectorPolicy for this turn's context assembly.
+    pub fn selector_policy(&self) -> SelectorPolicy {
+        let thinking_reserve = self.thinking.budget_tokens().unwrap_or(0) as usize;
+        SelectorPolicy {
+            model_window: self.context_window,
+            requested_class: self.effective_requested_class(),
+            reply_reserve: 8_192 + thinking_reserve,
+            tool_schema_reserve: 4_096,
+        }
     }
 
     /// Returns the human-readable short name for the model.
