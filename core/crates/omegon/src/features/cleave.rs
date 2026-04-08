@@ -453,13 +453,64 @@ pub struct CleaveFeature {
 
 impl CleaveFeature {
     pub fn new(repo_path: &std::path::Path, session_secret_env: Vec<(String, String)>) -> Self {
-        Self {
+        let progress = Arc::new(Mutex::new(CleaveProgress::default()));
+        let feature = Self {
             repo_path: repo_path.to_path_buf(),
-            progress: Arc::new(Mutex::new(CleaveProgress::default())),
+            progress,
             child_cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
             inventory: None,
             session_secret_env,
-        }
+        };
+        feature.refresh_progress_from_workspace_state();
+        feature
+    }
+
+    fn workspace_state_path(&self) -> PathBuf {
+        self.repo_path.join(".omegon/cleave-workspace/state.json")
+    }
+
+    fn refresh_progress_from_workspace_state(&self) {
+        let state_path = self.workspace_state_path();
+        let Ok(state) = crate::cleave::state::CleaveState::load(&state_path) else {
+            return;
+        };
+        let mut progress = self.progress.lock().unwrap();
+        progress.run_id = state.run_id.clone();
+        progress.total_children = state.children.len();
+        progress.completed = state
+            .children
+            .iter()
+            .filter(|c| c.status == ChildStatus::Completed)
+            .count();
+        progress.failed = state
+            .children
+            .iter()
+            .filter(|c| c.status == ChildStatus::Failed)
+            .count();
+        progress.active = state.children.iter().any(|c| c.status == ChildStatus::Running);
+        progress.children = state
+            .children
+            .iter()
+            .map(|c| ChildProgress {
+                label: c.label.clone(),
+                status: match c.status {
+                    ChildStatus::Completed => "completed".into(),
+                    ChildStatus::Failed => "failed".into(),
+                    ChildStatus::UpstreamExhausted => "upstream_exhausted".into(),
+                    ChildStatus::Running => "running".into(),
+                    ChildStatus::Pending => "pending".into(),
+                },
+                duration_secs: c.duration_secs,
+                pid: c.pid,
+                last_tool: None,
+                last_turn: None,
+                started_at: None,
+                last_activity_at: None,
+                tokens_in: 0,
+                tokens_out: 0,
+                runtime: c.runtime.as_ref().map(child_runtime_summary),
+            })
+            .collect();
     }
 
     /// Get a clone of the current progress for dashboard rendering.
@@ -472,7 +523,8 @@ impl CleaveFeature {
         Arc::clone(&self.progress)
     }
 
-    /// Cancel a running child by label. Returns true if a live cancel handle existed.
+    /// Cancel a running child by label. Returns true if a live cancel handle existed
+    /// or a persisted PID could be terminated.
     pub fn cancel_child(&self, label: &str) -> bool {
         let token = self
             .child_cancel_tokens
@@ -481,10 +533,32 @@ impl CleaveFeature {
             .and_then(|map| map.get(label).cloned());
         if let Some(token) = token {
             token.cancel();
-            true
-        } else {
-            false
+            return true;
         }
+
+        let state_path = self.workspace_state_path();
+        let Ok(mut state) = crate::cleave::state::CleaveState::load(&state_path) else {
+            return false;
+        };
+        let Some(child) = state.children.iter_mut().find(|c| c.label == label) else {
+            return false;
+        };
+        let Some(pid) = child.pid else {
+            return false;
+        };
+
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(pid as i32, libc::SIGTERM);
+        }
+        child.status = ChildStatus::Failed;
+        child.error = Some("cancelled via persisted pid fallback".into());
+        child.pid = None;
+        child.last_activity_unix_ms = None;
+        child.started_at_unix_ms = None;
+        let _ = state.save(&state_path);
+        self.refresh_progress_from_workspace_state();
+        true
     }
 
     fn execute_assess(&self, args: &Value) -> anyhow::Result<ToolResult> {
@@ -981,6 +1055,77 @@ mod tests {
         assert!(feature.cancel_child("alpha"));
         assert!(token.is_cancelled());
         assert!(!feature.cancel_child("beta"));
+    }
+
+    #[test]
+    fn new_loads_running_children_from_workspace_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path().join(".omegon/cleave-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let state_path = workspace.join("state.json");
+        let state_json = serde_json::json!({
+            "runId": "run-1",
+            "directive": "test",
+            "repoPath": dir.path().display().to_string(),
+            "workspacePath": workspace.display().to_string(),
+            "children": [{
+                "childId": 0,
+                "label": "alpha",
+                "description": "do alpha",
+                "scope": [],
+                "dependsOn": [],
+                "status": "running",
+                "backend": "native",
+                "pid": 4242
+            }],
+            "plan": {"children": []}
+        });
+        std::fs::write(&state_path, serde_json::to_string_pretty(&state_json).unwrap()).unwrap();
+
+        let feature = CleaveFeature::new(dir.path(), vec![]);
+        let progress = feature.progress();
+        assert!(progress.active);
+        assert_eq!(progress.run_id, "run-1");
+        assert_eq!(progress.total_children, 1);
+        assert_eq!(progress.children[0].label, "alpha");
+        assert_eq!(progress.children[0].status, "running");
+        assert_eq!(progress.children[0].pid, Some(4242));
+    }
+
+    #[test]
+    fn cancel_child_falls_back_to_persisted_pid_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path().join(".omegon/cleave-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let state_path = workspace.join("state.json");
+        let state_json = serde_json::json!({
+            "runId": "run-1",
+            "directive": "test",
+            "repoPath": dir.path().display().to_string(),
+            "workspacePath": workspace.display().to_string(),
+            "children": [{
+                "childId": 0,
+                "label": "alpha",
+                "description": "do alpha",
+                "scope": [],
+                "dependsOn": [],
+                "status": "running",
+                "backend": "native",
+                "pid": 999_999
+            }],
+            "plan": {"children": []}
+        });
+        std::fs::write(&state_path, serde_json::to_string_pretty(&state_json).unwrap()).unwrap();
+
+        let feature = CleaveFeature::new(dir.path(), vec![]);
+        assert!(feature.cancel_child("alpha"));
+        let progress = feature.progress();
+        assert!(!progress.active);
+        assert_eq!(progress.children[0].status, "failed");
+        assert_eq!(progress.children[0].pid, None);
+        let saved = crate::cleave::state::CleaveState::load(&state_path).unwrap();
+        assert_eq!(saved.children[0].status, ChildStatus::Failed);
+        assert!(saved.children[0].pid.is_none());
     }
 
     #[test]
