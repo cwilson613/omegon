@@ -999,6 +999,31 @@ fn focus_mode_render_has_no_side_borders_around_content() {
 }
 
 #[test]
+fn draw_owns_full_root_background() {
+    let mut app = test_app();
+    let backend = ratatui::backend::TestBackend::new(40, 8);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+
+    terminal
+        .draw(|frame| {
+            app.draw(frame);
+        })
+        .expect("draw should succeed");
+
+    let buffer = terminal.backend().buffer();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            let cell = buffer.cell((x, y)).expect("cell in bounds");
+            assert_ne!(
+                cell.bg,
+                Color::Reset,
+                "cell ({x},{y}) retained Reset background; root draw left a transparent hole"
+            );
+        }
+    }
+}
+
+#[test]
 fn slash_update_channel_without_args_shows_helpful_usage() {
     let mut app = test_app();
     let tx = test_tx();

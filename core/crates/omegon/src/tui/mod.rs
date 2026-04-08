@@ -47,7 +47,7 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Padding, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
@@ -1838,6 +1838,10 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        let area = frame.area();
+        frame.render_widget(Clear, area);
+        frame.render_widget(Block::default().style(Style::default().bg(self.theme.bg())), area);
+
         // Check for available update (non-blocking)
         let update_toast: Option<String> = self.update_rx.as_ref().and_then(|rx| {
             let info = rx.borrow();
