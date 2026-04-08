@@ -475,6 +475,46 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn handle_client_command_enqueues_cleave_child_cancel_and_reports_result() {
+        let (events_tx, _) = tokio::sync::broadcast::channel(4);
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
+        let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::channel(4);
+        let state = WebState::new(crate::tui::dashboard::DashboardHandles::default(), events_tx);
+
+        let cmd = serde_json::json!({
+            "type": "cancel_cleave_child",
+            "label": "alpha"
+        });
+
+        let state_for_handler = state.clone();
+        let handler = tokio::spawn(async move {
+            handle_client_command(&cmd, &command_tx, &state_for_handler, &snapshot_tx).await;
+        });
+
+        match command_rx.recv().await.expect("command") {
+            WebCommand::CancelCleaveChild { label, respond_to } => {
+                assert_eq!(label, "alpha");
+                respond_to
+                    .expect("respond_to")
+                    .send(omegon_traits::SlashCommandResponse {
+                        accepted: true,
+                        output: Some("Cancelling cleave child 'alpha'...".into()),
+                    })
+                    .unwrap();
+            }
+            other => panic!("wrong command: {other:?}"),
+        }
+
+        handler.await.unwrap();
+        let msg = snapshot_rx.recv().await.expect("snapshot message");
+        assert_eq!(msg["type"], "slash_command_result");
+        assert_eq!(msg["name"], "cleave");
+        assert_eq!(msg["args"], "cancel alpha");
+        assert_eq!(msg["accepted"], true);
+        assert_eq!(msg["output"], "Cancelling cleave child 'alpha'...");
+    }
+
     #[test]
     fn slash_command_result_message_escapes_html_and_preserves_acceptance() {
         let json = slash_command_result_message(
