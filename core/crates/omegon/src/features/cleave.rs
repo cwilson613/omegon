@@ -288,12 +288,16 @@ pub struct ChildProgress {
     pub label: String,
     pub status: String, // "pending", "running", "completed", "failed", "upstream_exhausted"
     pub duration_secs: Option<f64>,
+    /// Spawned child PID while the orchestrator still owns the subprocess.
+    pub pid: Option<u32>,
     /// Most recent tool active inside this child (e.g. "bash", "write").
     pub last_tool: Option<String>,
     /// Most recent turn number reported by this child.
     pub last_turn: Option<u32>,
     /// Wall-clock instant when status transitioned to "running".
     pub started_at: Option<std::time::Instant>,
+    /// Most recent progress/activity timestamp observed from this child.
+    pub last_activity_at: Option<std::time::Instant>,
     /// Cumulative input tokens consumed by this child.
     pub tokens_in: u64,
     /// Cumulative output tokens consumed by this child.
@@ -332,20 +336,25 @@ fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &ProgressEve
     let mut progress = shared.lock().unwrap();
 
     match event {
-        ProgressEvent::ChildSpawned { child, .. } => {
+        ProgressEvent::ChildSpawned { child, pid } => {
             progress.active = true;
+            let now = std::time::Instant::now();
             if let Some(existing) = progress.children.iter_mut().find(|c| c.label == *child) {
                 existing.status = "running".into();
                 existing.duration_secs = None;
-                existing.started_at = Some(std::time::Instant::now());
+                existing.pid = Some(*pid);
+                existing.started_at = Some(now);
+                existing.last_activity_at = Some(now);
             } else {
                 progress.children.push(ChildProgress {
                     label: child.clone(),
                     status: "running".into(),
                     duration_secs: None,
+                    pid: Some(*pid),
                     last_tool: None,
                     last_turn: None,
-                    started_at: Some(std::time::Instant::now()),
+                    started_at: Some(now),
+                    last_activity_at: Some(now),
                     tokens_in: 0,
                     tokens_out: 0,
                     runtime: None,
@@ -363,6 +372,7 @@ fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &ProgressEve
                 if let Some(t) = tool {
                     c.last_tool = Some(t.clone());
                 }
+                c.last_activity_at = Some(std::time::Instant::now());
             }
         }
         ProgressEvent::ChildTokens {
@@ -375,6 +385,7 @@ fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &ProgressEve
             if let Some(c) = progress.children.iter_mut().find(|c| c.label == *child) {
                 c.tokens_in += input_tokens;
                 c.tokens_out += output_tokens;
+                c.last_activity_at = Some(std::time::Instant::now());
             }
         }
         ProgressEvent::ChildStatus {
@@ -391,14 +402,18 @@ fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &ProgressEve
             if let Some(existing) = progress.children.iter_mut().find(|c| c.label == *child) {
                 existing.status = status_text.into();
                 existing.duration_secs = *duration_secs;
+                existing.pid = None;
+                existing.last_activity_at = Some(std::time::Instant::now());
             } else {
                 progress.children.push(ChildProgress {
                     label: child.clone(),
                     status: status_text.into(),
                     duration_secs: *duration_secs,
+                    pid: None,
                     last_tool: None,
                     last_turn: None,
                     started_at: None,
+                    last_activity_at: Some(std::time::Instant::now()),
                     tokens_in: 0,
                     tokens_out: 0,
                     runtime: None,
@@ -509,9 +524,11 @@ impl CleaveFeature {
                     label: c.label.clone(),
                     status: "pending".into(),
                     duration_secs: None,
+                    pid: None,
                     last_tool: None,
                     last_turn: None,
                     started_at: None,
+                    last_activity_at: None,
                     tokens_in: 0,
                     tokens_out: 0,
                     runtime: c.runtime.as_ref().map(child_runtime_summary),
@@ -938,9 +955,11 @@ mod tests {
                 label: "alpha".into(),
                 status: "pending".into(),
                 duration_secs: None,
+                pid: None,
                 last_tool: None,
                 last_turn: None,
                 started_at: None,
+                last_activity_at: None,
                 tokens_in: 0,
                 tokens_out: 0,
                 runtime: None,
@@ -959,6 +978,9 @@ mod tests {
         {
             let progress = shared.lock().unwrap();
             assert_eq!(progress.children[0].status, "running");
+            assert_eq!(progress.children[0].pid, Some(42));
+            assert!(progress.children[0].started_at.is_some());
+            assert!(progress.children[0].last_activity_at.is_some());
             assert!(progress.active);
         }
 
@@ -974,8 +996,52 @@ mod tests {
         let progress = shared.lock().unwrap();
         assert_eq!(progress.children[0].status, "completed");
         assert_eq!(progress.children[0].duration_secs, Some(1.5));
+        assert_eq!(progress.children[0].pid, None);
+        assert!(progress.children[0].last_activity_at.is_some());
         assert_eq!(progress.completed, 1);
         assert_eq!(progress.failed, 0);
+    }
+
+    #[test]
+    fn apply_progress_event_activity_refreshes_last_seen() {
+        let shared = Arc::new(Mutex::new(CleaveProgress {
+            active: true,
+            run_id: "run-1".into(),
+            total_children: 1,
+            completed: 0,
+            failed: 0,
+            children: vec![ChildProgress {
+                label: "alpha".into(),
+                status: "running".into(),
+                duration_secs: None,
+                pid: Some(42),
+                last_tool: None,
+                last_turn: None,
+                started_at: Some(std::time::Instant::now()),
+                last_activity_at: None,
+                tokens_in: 0,
+                tokens_out: 0,
+                runtime: None,
+            }],
+            total_tokens_in: 0,
+            total_tokens_out: 0,
+        }));
+
+        apply_progress_event(
+            &shared,
+            &ProgressEvent::ChildActivity {
+                child: "alpha".into(),
+                turn: Some(3),
+                tool: Some("bash".into()),
+                target: None,
+            },
+        );
+
+        let progress = shared.lock().unwrap();
+        let child = &progress.children[0];
+        assert_eq!(child.last_turn, Some(3));
+        assert_eq!(child.last_tool.as_deref(), Some("bash"));
+        assert!(child.last_activity_at.is_some());
     }
 
     #[test]
@@ -990,9 +1056,11 @@ mod tests {
                 label: "alpha".into(),
                 status: "pending".into(),
                 duration_secs: None,
+                pid: None,
                 last_tool: None,
                 last_turn: None,
                 started_at: None,
+                last_activity_at: None,
                 tokens_in: 0,
                 tokens_out: 0,
                 runtime: None,

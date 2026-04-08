@@ -41,6 +41,7 @@ pub enum ControlPlaneState {
 pub struct DaemonChildRuntimeStatus {
     pub label: String,
     pub status: String,
+    pub pid: Option<u32>,
     pub model: Option<String>,
     pub thinking_level: Option<String>,
     pub context_class: Option<String>,
@@ -393,6 +394,7 @@ fn refresh_startup_daemon_status(state: &WebState) {
                     Some(DaemonChildRuntimeStatus {
                         label: child.label.clone(),
                         status: child.status.clone(),
+                        pid: child.pid,
                         model: runtime.model.clone(),
                         thinking_level: runtime.thinking_level.clone(),
                         context_class: runtime.context_class.clone(),
@@ -715,9 +717,11 @@ mod tests {
                         label: "child-1".into(),
                         status: "running".into(),
                         duration_secs: None,
+                        pid: Some(4242),
                         last_tool: None,
                         last_turn: None,
                         started_at: None,
+                        last_activity_at: None,
                         tokens_in: 0,
                         tokens_out: 0,
                         runtime: Some(crate::features::cleave::ChildRuntimeSummary {
@@ -790,6 +794,7 @@ mod tests {
         assert_eq!(startup_status.active_child_runtimes.len(), 1);
         let child = &startup_status.active_child_runtimes[0];
         assert_eq!(child.label, "child-1");
+        assert_eq!(child.pid, Some(4242));
         assert_eq!(child.model.as_deref(), Some("anthropic:claude-sonnet-4-6"));
         assert_eq!(child.thinking_level.as_deref(), Some("high"));
         assert_eq!(child.context_class.as_deref(), Some("legion"));
