@@ -851,18 +851,7 @@ impl LlmBridge for AnthropicClient {
         if !wire_tools.is_empty() {
             body["tools"] = Value::Array(wire_tools);
         }
-        if let Some(effort) = anthropic_effort(options.reasoning.as_deref()) {
-            if anthropic_supports_adaptive_thinking(model) {
-                body["thinking"] = json!({ "type": "adaptive" });
-                body["effort"] = json!(effort);
-            } else if let Some(budget) = anthropic_manual_budget_tokens(options.reasoning.as_deref()) {
-                body["thinking"] = json!({
-                    "type": "enabled",
-                    "budget_tokens": budget,
-                });
-                body["effort"] = json!(effort);
-            }
-        }
+        apply_anthropic_thinking(&mut body, model, options.reasoning.as_deref());
 
         let msg_count = body["messages"].as_array().map(|a| a.len()).unwrap_or(0);
         let system_len = system_prompt.len();
@@ -2150,15 +2139,20 @@ fn openai_reasoning_effort(reasoning: Option<&str>) -> Option<&'static str> {
     }
 }
 
-fn anthropic_effort(reasoning: Option<&str>) -> Option<&'static str> {
-    match reasoning? {
-        "off" => None,
-        "minimal" => Some("minimal"),
-        "low" => Some("low"),
-        "medium" => Some("medium"),
-        "high" => Some("high"),
-        "xhigh" => Some("max"),
-        _ => Some("medium"),
+fn apply_anthropic_thinking(body: &mut Value, model: &str, reasoning: Option<&str>) {
+    let Some(reasoning) = reasoning else {
+        return;
+    };
+    if reasoning == "off" {
+        return;
+    }
+    if anthropic_supports_adaptive_thinking(model) {
+        body["thinking"] = json!({ "type": "adaptive" });
+    } else if let Some(budget) = anthropic_manual_budget_tokens(Some(reasoning)) {
+        body["thinking"] = json!({
+            "type": "enabled",
+            "budget_tokens": budget,
+        });
     }
 }
 
@@ -3279,14 +3273,28 @@ mod tests {
 
     #[test]
     fn anthropic_reasoning_helpers_support_adaptive_and_manual_modes() {
-        assert_eq!(anthropic_effort(Some("minimal")), Some("minimal"));
-        assert_eq!(anthropic_effort(Some("xhigh")), Some("max"));
         assert_eq!(anthropic_manual_budget_tokens(Some("minimal")), Some(1_024));
         assert_eq!(anthropic_manual_budget_tokens(Some("high")), Some(50_000));
         assert_eq!(anthropic_manual_budget_tokens(Some("off")), None);
         assert!(anthropic_supports_adaptive_thinking("claude-sonnet-4-6"));
         assert!(anthropic_supports_adaptive_thinking("anthropic:claude-opus-4-6"));
         assert!(!anthropic_supports_adaptive_thinking("claude-sonnet-4-5"));
+    }
+
+    #[test]
+    fn anthropic_thinking_shape_never_emits_top_level_effort() {
+        let mut adaptive = json!({});
+        apply_anthropic_thinking(&mut adaptive, "anthropic:claude-sonnet-4-6", Some("high"));
+        assert_eq!(adaptive["thinking"], json!({ "type": "adaptive" }));
+        assert!(adaptive.get("effort").is_none());
+
+        let mut manual = json!({});
+        apply_anthropic_thinking(&mut manual, "anthropic:claude-sonnet-4-5", Some("high"));
+        assert_eq!(
+            manual["thinking"],
+            json!({ "type": "enabled", "budget_tokens": 50_000 })
+        );
+        assert!(manual.get("effort").is_none());
     }
 
     #[test]

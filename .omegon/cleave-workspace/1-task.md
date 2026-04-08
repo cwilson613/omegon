@@ -1,127 +1,32 @@
 ---
 task_id: 1
-label: surfaces
-siblings: [0:primitives]
+label: workflow-issueing
+siblings: [0:runtime-matrix]
 ---
 
-# Task 1: surfaces
+# Task 1: workflow-issueing
 
 ## Root Directive
 
-> Audit the TUI for any occurrences where terminal garbage leaks through behind the UI, identify root causes with evidence, and implement/tests for any defects found.
+> Design and implement a dedicated daily provider drift workflow for live upstream endpoint verification against an expected response matrix, using limited-budget provider secrets, with deduplicated GitHub issue creation on true drift. Reuse/repair existing live_upstream_smoke and stale provider-drift workflow where sensible, add tests/docs, and keep release/nightly non-blocking.
 
 ## Mission
 
-Audit higher-level TUI surfaces and layouts for incomplete clearing, width mismatches, border/overlay gaps, stale frame retention, and other cases where background terminal garbage could show through. Fix confirmed defects and add focused tests.
+Inspect and repair/replace the stale provider-drift GitHub Actions workflow. Design the daily control-plane workflow, issue dedupe/update behavior, artifact/log strategy, and docs. Implement the workflow and any helper scripts/files needed for issue creation/reporting without making release/nightly blocking.
 
 ## Scope
 
-- `core/crates/omegon/src/tui/mod.rs`
-- `core/crates/omegon/src/tui/dashboard.rs`
-- `core/crates/omegon/src/tui/instruments.rs`
-- `core/crates/omegon/src/tui/footer.rs`
-- `core/crates/omegon/src/tui/tests.rs`
-- `core/crates/omegon/src/tui/snapshot_tests.rs`
+- `.github/workflows/provider-drift.yml`
+- `.github/workflows/nightly.yml`
+- `.github/workflows/release.yml`
+- `docs/provider-api-drift.md`
+- `scripts/`
 
 **Depends on:** none (independent)
 
 ## Siblings
 
-- **primitives**: Audit shared TUI rendering primitives and low-level drawing helpers for overdraw, underdraw, clipping, stale-cell retention, wide-glyph handling, and transparent/background issues that could leak terminal content behind the UI. Fix confirmed defects and add focused tests.
-
-## Dependency Versions
-
-Use these exact versions — do not rely on training data for API shapes:
-
-```toml
-# core/crates/omegon/Cargo.toml
-[dependencies]
-omegon-extension = { path = "../omegon-extension" }
-omegon-traits = { path = "../omegon-traits" }
-omegon-git = { path = "../omegon-git" }
-omegon-memory = { path = "../omegon-memory" }
-omegon-codescan = { path = "../omegon-codescan" }
-omegon-secrets = { path = "../omegon-secrets" }
-opsx-core = { path = "../opsx-core" }
-tokio = { workspace = true }
-serde = { workspace = true }
-toml = "0.8"
-serde_json = { workspace = true }
-anyhow = { workspace = true }
-thiserror = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-async-trait = { workspace = true }
-clap = { workspace = true }
-rusqlite = { workspace = true }
-tokio-util = { workspace = true }
-indexmap = { workspace = true }
-dirs = "6.0.0"
-unicode-truncate = "2.0"
-chrono = "0.4"
-libc = "0.2"
-regex-lite = "0.1"
-ratatui = "0.30.0"
-syntect = { version = "5", default-features = false, features = ["default-syntaxes", "default-themes", "regex-onig"] }
-tui-syntax-highlight = "0.2"
-tachyonfx = { version = "0.25.0", features = ["sendable"] }
-crossterm = "0.29.0"
-reqwest = { version = "0.13.2", features = ["json", "stream"] }
-tokio-stream = "0.1.18"
-sha2 = "0.10.9"
-secrecy = "0.10"
-sysinfo = "0.33"
-getrandom = "0.4.2"
-open = "5.3.3"
-tracing-appender = "0.2.4"
-unicode-width = "0.2.2"
-ratatui-image = { version = "10.0.6", default-features = false, features = ["crossterm", "image-defaults"] }
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
-axum = { version = "0.8.8", features = ["ws", "macros"] }
-tower-http = { version = "0.6.8", features = ["cors"] }
-futures-util = "0.3.32"
-base64 = "0.22"
-hmac = "0.12"
-ansi-to-tui = "8.0"
-tui-tree-widget = "0.24"
-ratatui-toaster = "0.1"
-ratatui-textarea = { version = "0.8", features = ["crossterm"] }
-tui-popup = "0.7"
-hyperrat = "0.1"
-rmcp = { version = "1.2", features = ["transport-child-process", "client", "transport-streamable-http-client-reqwest", "auth"], default-features = false }
-tar = "0.4"
-flate2 = "1.0"
-sigstore = { version = "0.13.0", default-features = false, features = ["cosign", "rustls-tls"] }
-x509-parser = "0.17"
-rpassword = "7"
-
-[dev-dependencies]
-insta = "1.46"
-tempfile = "3.27.0"
-
-```
-
-## Test Convention
-
-Follow this pattern from an existing test in the same crate:
-
-```rust
-// From bridge.rs
-    #[test]
-    fn llm_message_user_round_trip() {
-        let msg = LlmMessage::User {
-            content: "hello".into(),
-            images: vec![],
-        };
-        let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains(r#""role":"user"#));
-        let parsed: LlmMessage = serde_json::from_str(&json).unwrap();
-        match parsed {
-            LlmMessage::User { content, .. } => assert_eq!(content, "hello"),
-            _ => panic!("wrong variant"),
-        }
-    }
-```
+- **runtime-matrix**: Inspect and extend the Rust live upstream smoke/drift test surface. Define or add a checked-in expectation matrix and determine the minimal viable assertions for provider-specific endpoint drift (not just round-trip OK), plus tests or validation around the matrix parsing/execution path.
 
 
 
@@ -129,27 +34,7 @@ Follow this pattern from an existing test in the same crate:
 
 ### Test Convention
 
-Write tests as #[test] functions in the same file or a tests submodule
-
-Example from codebase:
-
-```rust
-// From bridge.rs
-    #[test]
-    fn llm_message_user_round_trip() {
-        let msg = LlmMessage::User {
-            content: "hello".into(),
-            images: vec![],
-        };
-        let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains(r#""role":"user"#));
-        let parsed: LlmMessage = serde_json::from_str(&json).unwrap();
-        match parsed {
-            LlmMessage::User { content, .. } => assert_eq!(content, "hello"),
-            _ => panic!("wrong variant"),
-        }
-    }
-```
+Write tests for new functions and changed behavior — co-locate as *.test.ts
 
 
 ## Contract

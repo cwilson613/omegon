@@ -1,32 +1,32 @@
 ---
 task_id: 0
-label: primitives
-siblings: [1:surfaces]
+label: runtime-matrix
+siblings: [1:workflow-issueing]
 ---
 
-# Task 0: primitives
+# Task 0: runtime-matrix
 
 ## Root Directive
 
-> Audit the TUI for any occurrences where terminal garbage leaks through behind the UI, identify root causes with evidence, and implement/tests for any defects found.
+> Design and implement a dedicated daily provider drift workflow for live upstream endpoint verification against an expected response matrix, using limited-budget provider secrets, with deduplicated GitHub issue creation on true drift. Reuse/repair existing live_upstream_smoke and stale provider-drift workflow where sensible, add tests/docs, and keep release/nightly non-blocking.
 
 ## Mission
 
-Audit shared TUI rendering primitives and low-level drawing helpers for overdraw, underdraw, clipping, stale-cell retention, wide-glyph handling, and transparent/background issues that could leak terminal content behind the UI. Fix confirmed defects and add focused tests.
+Inspect and extend the Rust live upstream smoke/drift test surface. Define or add a checked-in expectation matrix and determine the minimal viable assertions for provider-specific endpoint drift (not just round-trip OK), plus tests or validation around the matrix parsing/execution path.
 
 ## Scope
 
-- `core/crates/omegon/src/tui/shared.rs`
-- `core/crates/omegon/src/tui/instruments.rs`
-- `core/crates/omegon/src/tui/footer.rs`
-- `core/crates/omegon/src/tui/tests.rs`
-- `core/crates/omegon/src/tui/snapshot_tests.rs`
+- `core/crates/omegon/tests/live_upstream_smoke.rs`
+- `core/crates/omegon/src/providers.rs`
+- `core/crates/omegon/src/settings.rs`
+- `.pi/provider-contracts.json`
+- `docs/provider-thinking-capability-matrix.md`
 
 **Depends on:** none (independent)
 
 ## Siblings
 
-- **surfaces**: Audit higher-level TUI surfaces and layouts for incomplete clearing, width mismatches, border/overlay gaps, stale frame retention, and other cases where background terminal garbage could show through. Fix confirmed defects and add focused tests.
+- **workflow-issueing**: Inspect and repair/replace the stale provider-drift GitHub Actions workflow. Design the daily control-plane workflow, issue dedupe/update behavior, artifact/log strategy, and docs. Implement the workflow and any helper scripts/files needed for issue creation/reporting without making release/nightly blocking.
 
 ## Dependency Versions
 

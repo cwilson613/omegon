@@ -1,75 +1,74 @@
 {
-  "runId": "clv-f6piorxi-01lt",
-  "directive": "Audit the TUI for any occurrences where terminal garbage leaks through behind the UI, identify root causes with evidence, and implement/tests for any defects found.",
+  "runId": "clv-5qa6qt21-5q1c",
+  "directive": "Design and implement a dedicated daily provider drift workflow for live upstream endpoint verification against an expected response matrix, using limited-budget provider secrets, with deduplicated GitHub issue creation on true drift. Reuse/repair existing live_upstream_smoke and stale provider-drift workflow where sensible, add tests/docs, and keep release/nightly non-blocking.",
   "repoPath": "/Users/cwilson/workspace/black-meridian/omegon",
   "workspacePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace",
   "children": [
     {
       "childId": 0,
-      "label": "primitives",
-      "description": "Audit shared TUI rendering primitives and low-level drawing helpers for overdraw, underdraw, clipping, stale-cell retention, wide-glyph handling, and transparent/background issues that could leak terminal content behind the UI. Fix confirmed defects and add focused tests.",
+      "label": "runtime-matrix",
+      "description": "Inspect and extend the Rust live upstream smoke/drift test surface. Define or add a checked-in expectation matrix and determine the minimal viable assertions for provider-specific endpoint drift (not just round-trip OK), plus tests or validation around the matrix parsing/execution path.",
       "scope": [
-        "core/crates/omegon/src/tui/shared.rs",
-        "core/crates/omegon/src/tui/instruments.rs",
-        "core/crates/omegon/src/tui/footer.rs",
-        "core/crates/omegon/src/tui/tests.rs",
-        "core/crates/omegon/src/tui/snapshot_tests.rs"
+        "core/crates/omegon/tests/live_upstream_smoke.rs",
+        "core/crates/omegon/src/providers.rs",
+        "core/crates/omegon/src/settings.rs",
+        ".pi/provider-contracts.json",
+        "docs/provider-thinking-capability-matrix.md"
       ],
       "dependsOn": [],
       "status": "running",
-      "branch": "cleave/0-primitives",
-      "worktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/0-wt-primitives",
+      "branch": "cleave/0-runtime-matrix",
+      "worktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/0-wt-runtime-matrix",
       "backend": "native",
-      "executeModel": "anthropic:claude-sonnet-4-6"
+      "executeModel": "openai-codex:gpt-5.4"
     },
     {
       "childId": 1,
-      "label": "surfaces",
-      "description": "Audit higher-level TUI surfaces and layouts for incomplete clearing, width mismatches, border/overlay gaps, stale frame retention, and other cases where background terminal garbage could show through. Fix confirmed defects and add focused tests.",
+      "label": "workflow-issueing",
+      "description": "Inspect and repair/replace the stale provider-drift GitHub Actions workflow. Design the daily control-plane workflow, issue dedupe/update behavior, artifact/log strategy, and docs. Implement the workflow and any helper scripts/files needed for issue creation/reporting without making release/nightly blocking.",
       "scope": [
-        "core/crates/omegon/src/tui/mod.rs",
-        "core/crates/omegon/src/tui/dashboard.rs",
-        "core/crates/omegon/src/tui/instruments.rs",
-        "core/crates/omegon/src/tui/footer.rs",
-        "core/crates/omegon/src/tui/tests.rs",
-        "core/crates/omegon/src/tui/snapshot_tests.rs"
+        ".github/workflows/provider-drift.yml",
+        ".github/workflows/nightly.yml",
+        ".github/workflows/release.yml",
+        "docs/provider-api-drift.md",
+        "scripts/"
       ],
       "dependsOn": [],
       "status": "running",
-      "branch": "cleave/1-surfaces",
-      "worktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/1-wt-surfaces",
+      "branch": "cleave/1-workflow-issueing",
+      "worktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/1-wt-workflow-issueing",
       "backend": "native",
-      "executeModel": "anthropic:claude-sonnet-4-6"
+      "executeModel": "openai-codex:gpt-5.4"
     }
   ],
   "plan": {
     "children": [
       {
         "depends_on": [],
-        "description": "Audit shared TUI rendering primitives and low-level drawing helpers for overdraw, underdraw, clipping, stale-cell retention, wide-glyph handling, and transparent/background issues that could leak terminal content behind the UI. Fix confirmed defects and add focused tests.",
-        "label": "primitives",
+        "description": "Inspect and extend the Rust live upstream smoke/drift test surface. Define or add a checked-in expectation matrix and determine the minimal viable assertions for provider-specific endpoint drift (not just round-trip OK), plus tests or validation around the matrix parsing/execution path.",
+        "label": "runtime-matrix",
         "scope": [
-          "core/crates/omegon/src/tui/shared.rs",
-          "core/crates/omegon/src/tui/instruments.rs",
-          "core/crates/omegon/src/tui/footer.rs",
-          "core/crates/omegon/src/tui/tests.rs",
-          "core/crates/omegon/src/tui/snapshot_tests.rs"
+          "core/crates/omegon/tests/live_upstream_smoke.rs",
+          "core/crates/omegon/src/providers.rs",
+          "core/crates/omegon/src/settings.rs",
+          ".pi/provider-contracts.json",
+          "docs/provider-thinking-capability-matrix.md"
         ]
       },
       {
         "depends_on": [],
-        "description": "Audit higher-level TUI surfaces and layouts for incomplete clearing, width mismatches, border/overlay gaps, stale frame retention, and other cases where background terminal garbage could show through. Fix confirmed defects and add focused tests.",
-        "label": "surfaces",
+        "description": "Inspect and repair/replace the stale provider-drift GitHub Actions workflow. Design the daily control-plane workflow, issue dedupe/update behavior, artifact/log strategy, and docs. Implement the workflow and any helper scripts/files needed for issue creation/reporting without making release/nightly blocking.",
+        "label": "workflow-issueing",
         "scope": [
-          "core/crates/omegon/src/tui/mod.rs",
-          "core/crates/omegon/src/tui/dashboard.rs",
-          "core/crates/omegon/src/tui/instruments.rs",
-          "core/crates/omegon/src/tui/footer.rs",
-          "core/crates/omegon/src/tui/tests.rs",
-          "core/crates/omegon/src/tui/snapshot_tests.rs"
+          ".github/workflows/provider-drift.yml",
+          ".github/workflows/nightly.yml",
+          ".github/workflows/release.yml",
+          "docs/provider-api-drift.md",
+          "scripts/"
         ]
       }
     ],
-    "rationale": "The defect class can originate either in shared cell-writing primitives or in specific panel/layout code that fails to clear/pad its region. Auditing both in parallel reduces blind spots while keeping file ownership bounded."
+    "default_model": "openai-codex:gpt-5.4",
+    "rationale": "Separate the live endpoint verification mechanics from the GitHub Actions orchestration and issue lifecycle so drift semantics are defined once and the workflow becomes a thin runner."
   }
 }
