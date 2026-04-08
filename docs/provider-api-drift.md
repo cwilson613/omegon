@@ -36,13 +36,19 @@ The daily workflow runs on a schedule and on manual dispatch.
 5. Upload both the raw log and the derived report.
 6. Create or update a GitHub issue only when the report identifies true drift.
 
-The helper script extracts failing test names and key failure snippets, then computes a
-short fingerprint from that normalized failure shape. GitHub issue behavior uses that
-fingerprint:
+The helper script extracts failing test names and key failure snippets, then classifies the
+failure shape as one of:
+
+- `transient` — network/runtime/provider-outage style failures;
+- `auth_or_quota` — invalid credentials, exhausted quota, billing disabled, or similar;
+- `likely_drift` — failures that are neither transient nor credential-related and should be treated as probable contract/behavior drift.
+
+It then computes a short fingerprint from that normalized failure shape. GitHub issue
+behavior uses that fingerprint:
 
 - same fingerprint → comment on the existing open drift issue;
 - different fingerprint → close older open drift issues and create a new one;
-- clean run → upload artifacts and summary, but do not open an issue.
+- clean run, transient failure, or auth/quota failure → upload artifacts and summary, but do not open a drift issue.
 
 ## Secrets and budget
 

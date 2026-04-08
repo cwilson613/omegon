@@ -15,6 +15,42 @@ PANIC_RE = re.compile(r"^thread '([^']+)' panicked at (.+)$", re.MULTILINE)
 ERROR_RE = re.compile(r"^(Error:\s+.+|assertion failed:.+)$", re.MULTILINE)
 FAILURES_BLOCK_RE = re.compile(r"^failures:\n(?P<body>(?:\s{4}.+\n)+)", re.MULTILINE)
 
+TRANSIENT_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"timed? out",
+        r"timeout",
+        r"connection reset",
+        r"connection refused",
+        r"temporary failure",
+        r"server error",
+        r"bad gateway",
+        r"gateway timeout",
+        r"service unavailable",
+        r"dns",
+        r"network is unreachable",
+        r"transport error",
+        r"5\\d\\d",
+    ]
+]
+AUTH_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"401",
+        r"403",
+        r"unauthoriz",
+        r"forbidden",
+        r"invalid api key",
+        r"authentication",
+        r"permission denied",
+        r"quota",
+        r"rate limit",
+        r"billing",
+        r"insufficient credits",
+        r"account inactive",
+    ]
+]
+
 
 def parse_failures(log_text: str) -> dict[str, list[str]]:
     failed_tests: list[str] = []
@@ -32,8 +68,48 @@ def parse_failures(log_text: str) -> dict[str, list[str]]:
     return {"failed_tests": failed_tests, "snippets": snippets[:8]}
 
 
-def build_fingerprint(failed_tests: list[str], snippets: list[str]) -> str:
-    material = "\n".join([*failed_tests, *snippets[:3]])
+def classify_failure(snippets: list[str]) -> str:
+    haystack = "\n".join(snippets)
+    if any(pattern.search(haystack) for pattern in AUTH_PATTERNS):
+        return "auth_or_quota"
+    if any(pattern.search(haystack) for pattern in TRANSIENT_PATTERNS):
+        return "transient"
+    return "likely_drift"
+
+
+def classification_summary(classification: str) -> str:
+    return {
+        "clean": "clean",
+        "transient": "transient provider/runtime failure",
+        "auth_or_quota": "credential / quota / billing failure",
+        "likely_drift": "likely provider behavior drift",
+    }[classification]
+
+
+def classification_guidance(classification: str) -> list[str]:
+    if classification == "transient":
+        return [
+            "1. Inspect the uploaded `provider-drift-report` artifact for the full smoke log and summary.",
+            "2. Confirm whether the failure was a transient provider/network event before changing code or baselines.",
+            "3. Only treat this as drift if the same failure shape persists across reruns.",
+        ]
+    if classification == "auth_or_quota":
+        return [
+            "1. Inspect the uploaded `provider-drift-report` artifact for the full smoke log and summary.",
+            "2. Verify the dedicated drift credentials, quota ceilings, and billing state before changing code.",
+            "3. Reclassify as drift only if credentials are healthy and the provider still rejects the expected contract.",
+        ]
+    if classification == "likely_drift":
+        return [
+            "1. Inspect the uploaded `provider-drift-report` artifact for the full smoke log and summary.",
+            "2. Confirm the upstream behavior change against the checked-in expectation matrix / live smoke assertions.",
+            "3. Update the runtime matrix or provider implementation only after the change is understood.",
+        ]
+    return ["1. No action required."]
+
+
+def build_fingerprint(failed_tests: list[str], snippets: list[str], classification: str) -> str:
+    material = "\n".join([classification, *failed_tests, *snippets[:3]])
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
 
 
@@ -42,8 +118,9 @@ def build_issue_payload(*, log_path: Path, repo: str, run_id: str, sha: str, eve
     parsed = parse_failures(log_text)
     failed_tests = parsed["failed_tests"]
     snippets = parsed["snippets"]
-    drift_detected = bool(failed_tests)
-    fingerprint = build_fingerprint(failed_tests, snippets) if drift_detected else "clean"
+    classification = classify_failure(snippets) if failed_tests else "clean"
+    drift_detected = classification == "likely_drift"
+    fingerprint = build_fingerprint(failed_tests, snippets, classification) if failed_tests else "clean"
     run_url = f"https://github.com/{repo}/actions/runs/{run_id}" if repo and run_id else ""
     short_sha = sha[:12] if sha else "unknown"
 
@@ -52,6 +129,7 @@ def build_issue_payload(*, log_path: Path, repo: str, run_id: str, sha: str, eve
         "",
         f"- Event: `{event_name or 'unknown'}`",
         f"- Commit: `{short_sha}`",
+        f"- Classification: `{classification_summary(classification)}`",
         f"- Drift detected: `{'yes' if drift_detected else 'no'}`",
     ]
     if run_url:
@@ -61,33 +139,34 @@ def build_issue_payload(*, log_path: Path, repo: str, run_id: str, sha: str, eve
     if snippets:
         summary_lines.extend(["", "### Failure excerpts", "```text", *snippets, "```"])
 
-    title = f"Provider API drift detected ({fingerprint})"
+    title_prefix = {
+        "transient": "Provider smoke transient failure",
+        "auth_or_quota": "Provider smoke credential/quota failure",
+        "likely_drift": "Provider API drift detected",
+        "clean": "Provider drift run clean",
+    }[classification]
     body_lines = [
         f"<!-- provider-drift-fingerprint: {fingerprint} -->",
-        "# Provider API drift detected",
+        f"# {title_prefix}",
         "",
-        "The daily live upstream verification workflow found behavior that no longer matches the checked-in expectations.",
+        "The daily live upstream verification workflow found a failure shape that needs triage.",
         "",
         f"- Commit: `{short_sha}`",
         f"- Workflow run: {run_url or 'n/a'}",
+        f"- Classification: `{classification_summary(classification)}`",
         "",
         "## Failing checks",
         *([f"- `{name}`" for name in failed_tests] if failed_tests else ["- none captured"]),
     ]
     if snippets:
         body_lines.extend(["", "## Failure excerpts", "```text", *snippets, "```"])
-    body_lines.extend([
-        "",
-        "## Triage",
-        "1. Inspect the uploaded `provider-drift-report` artifact for the full smoke log and summary.",
-        "2. Confirm the upstream behavior change against the checked-in expectation matrix / live smoke assertions.",
-        "3. Update the runtime matrix or provider implementation only after the change is understood.",
-    ])
+    body_lines.extend(["", "## Triage", *classification_guidance(classification)])
 
     return {
+        "classification": classification,
         "drift_detected": drift_detected,
         "fingerprint": fingerprint,
-        "title": title,
+        "title": f"{title_prefix} ({fingerprint})",
         "body": "\n".join(body_lines) + "\n",
         "summary": "\n".join(summary_lines) + "\n",
         "failed_tests": failed_tests,
