@@ -1007,6 +1007,24 @@ fn focus_mode_render_shows_segment_position() {
 }
 
 #[test]
+fn focus_mode_render_has_no_side_borders_around_content() {
+    let mut app = test_app();
+    app.conversation.append_streaming("assistant answer");
+    app.conversation.finalize_message();
+    app.conversation.select_segment(0);
+    app.set_focus_mode(true);
+
+    let rendered = render_app_to_string(&mut app, 80, 20);
+    let content_line = rendered
+        .lines()
+        .find(|line| line.contains("assistant answer"))
+        .expect("assistant answer line should be rendered");
+
+    assert!(!content_line.trim_start().starts_with('│'), "{rendered}");
+    assert!(!content_line.trim_end().ends_with('│'), "{rendered}");
+}
+
+#[test]
 fn slash_update_channel_without_args_shows_helpful_usage() {
     let mut app = test_app();
     let tx = test_tx();

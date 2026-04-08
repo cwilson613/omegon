@@ -2438,7 +2438,7 @@ impl App {
             _ => " focus — no selectable segment ".to_string(),
         };
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::TOP | Borders::BOTTOM)
             .border_type(ratatui::widgets::BorderType::Rounded)
             .border_style(
                 Style::default()
@@ -2461,7 +2461,12 @@ impl App {
                 ))
                 .centered(),
             )
-            .padding(Padding::uniform(1))
+            .padding(Padding {
+                left: 0,
+                right: 0,
+                top: 1,
+                bottom: 1,
+            })
             .style(Style::default().bg(self.theme.surface_bg()));
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -2479,7 +2484,15 @@ impl App {
         let Some(segment) = self.conversation.segments().get(idx).cloned() else {
             return;
         };
-        segment.render(inner, frame.buffer_mut(), self.theme.as_ref());
+        let content = segment.export_text(SegmentExportMode::Raw);
+        let paragraph = Paragraph::new(content)
+            .style(
+                Style::default()
+                    .fg(self.theme.fg())
+                    .bg(self.theme.surface_bg()),
+            )
+            .wrap(ratatui::widgets::Wrap { trim: false });
+        frame.render_widget(paragraph, inner);
     }
 
     /// Render an ephemeral modal from an extension widget.
