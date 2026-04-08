@@ -2,7 +2,27 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use anyhow::{Context, Result};
+use serde::Deserialize;
 use tempfile::TempDir;
+
+const PROVIDER_CONTRACTS_JSON: &str = include_str!("../../../../.pi/provider-contracts.json");
+
+#[derive(Debug, Deserialize)]
+struct ProviderContracts {
+    live_upstream_matrix: Vec<LiveUpstreamExpectation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LiveUpstreamExpectation {
+    provider: String,
+    model: String,
+    env: Option<String>,
+    base_url: String,
+    path: String,
+    request_format: String,
+    response_json_pointer: String,
+    reasoning_control: String,
+}
 
 struct TempRepo {
     _tmp: TempDir,
@@ -46,6 +66,19 @@ fn make_repo() -> Result<TempRepo> {
     Ok(TempRepo { _tmp: tmp, cwd })
 }
 
+fn load_live_upstream_matrix() -> Vec<LiveUpstreamExpectation> {
+    serde_json::from_str::<ProviderContracts>(PROVIDER_CONTRACTS_JSON)
+        .expect("provider contracts JSON should parse")
+        .live_upstream_matrix
+}
+
+fn expectation_for(provider: &str) -> LiveUpstreamExpectation {
+    load_live_upstream_matrix()
+        .into_iter()
+        .find(|entry| entry.provider == provider)
+        .unwrap_or_else(|| panic!("missing live upstream matrix entry for {provider}"))
+}
+
 fn run_prompt(model: &str) -> Result<String> {
     let repo = make_repo()?;
     let bin = resolve_omegon_binary()?;
@@ -74,6 +107,56 @@ fn live_upstream_suite_is_opt_in() {
     if !live_enabled() {
         eprintln!("live upstream tests disabled; set OMEGON_RUN_LIVE_UPSTREAM_TESTS=1 to enable");
     }
+}
+
+#[test]
+fn provider_contract_matrix_parses_and_covers_expected_providers() {
+    let matrix = load_live_upstream_matrix();
+    assert_eq!(matrix.len(), 4);
+    let providers: Vec<&str> = matrix.iter().map(|entry| entry.provider.as_str()).collect();
+    assert_eq!(
+        providers,
+        vec!["anthropic", "openai", "ollama", "ollama-cloud"]
+    );
+}
+
+#[test]
+fn provider_contract_matrix_uses_expected_endpoint_shapes() {
+    let anthropic = expectation_for("anthropic");
+    assert_eq!(anthropic.model, "claude-sonnet-4-6");
+    assert_eq!(anthropic.env.as_deref(), Some("ANTHROPIC_API_KEY"));
+    assert_eq!(anthropic.base_url, "https://api.anthropic.com");
+    assert_eq!(anthropic.path, "/v1/messages");
+    assert_eq!(anthropic.request_format, "anthropic_messages");
+    assert_eq!(anthropic.response_json_pointer, "/content/0/text");
+    assert_eq!(anthropic.reasoning_control, "thinking");
+
+    let openai = expectation_for("openai");
+    assert_eq!(openai.model, "gpt-5.4");
+    assert_eq!(openai.env.as_deref(), Some("OPENAI_API_KEY"));
+    assert_eq!(openai.base_url, "https://api.openai.com");
+    assert_eq!(openai.path, "/v1/chat/completions");
+    assert_eq!(openai.request_format, "openai_chat_completions");
+    assert_eq!(openai.response_json_pointer, "/choices/0/message/content");
+    assert_eq!(openai.reasoning_control, "reasoning");
+
+    let ollama = expectation_for("ollama");
+    assert_eq!(ollama.model, "qwen3:32b");
+    assert_eq!(ollama.env, None);
+    assert_eq!(ollama.base_url, "http://localhost:11434");
+    assert_eq!(ollama.path, "/api/chat");
+    assert_eq!(ollama.request_format, "ollama_chat");
+    assert_eq!(ollama.response_json_pointer, "/message/content");
+    assert_eq!(ollama.reasoning_control, "think");
+
+    let ollama_cloud = expectation_for("ollama-cloud");
+    assert_eq!(ollama_cloud.model, "gpt-oss:120b-cloud");
+    assert_eq!(ollama_cloud.env.as_deref(), Some("OLLAMA_API_KEY"));
+    assert_eq!(ollama_cloud.base_url, "https://ollama.com/api");
+    assert_eq!(ollama_cloud.path, "/api/chat");
+    assert_eq!(ollama_cloud.request_format, "ollama_chat");
+    assert_eq!(ollama_cloud.response_json_pointer, "/message/content");
+    assert_eq!(ollama_cloud.reasoning_control, "think");
 }
 
 #[test]

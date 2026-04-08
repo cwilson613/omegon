@@ -872,6 +872,25 @@ mod tests {
     }
 
     #[test]
+    fn route_matrix_glob_lookup_matches_prefix_patterns() {
+        assert_eq!(
+            lookup_context_ceiling("anthropic", "claude-sonnet-4-6"),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            lookup_context_ceiling("anthropic", "claude-sonnet-4-6-20260401"),
+            Some(1_000_000)
+        );
+        assert_eq!(lookup_context_ceiling("openai", "gpt-5.4"), Some(272_000));
+        assert_eq!(
+            lookup_context_ceiling("openai", "gpt-5.4-mini"),
+            Some(272_000)
+        );
+        assert_eq!(lookup_context_ceiling("ollama", "qwen3:32b"), Some(32_768));
+        assert_eq!(lookup_context_ceiling("openai", "unknown-model"), None);
+    }
+
+    #[test]
     fn context_window_fallback_heuristic() {
         // Unknown models fall back to Squad (fail-closed)
         assert_eq!(infer_context_window("mystery:unknown-model"), 131_072);

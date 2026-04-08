@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "extracted_at": "2026-03-18T19:00:36Z",
   "pi_mono_commit": "72753407",
   "sdk_versions": {
@@ -30,5 +30,47 @@
   },
   "openai_codex_api": {
     "base_url": "https://chatgpt.com/backend-api"
-  }
+  },
+  "live_upstream_matrix": [
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "env": "ANTHROPIC_API_KEY",
+      "base_url": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "request_format": "anthropic_messages",
+      "response_json_pointer": "/content/0/text",
+      "reasoning_control": "thinking"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4",
+      "env": "OPENAI_API_KEY",
+      "base_url": "https://api.openai.com",
+      "path": "/v1/chat/completions",
+      "request_format": "openai_chat_completions",
+      "response_json_pointer": "/choices/0/message/content",
+      "reasoning_control": "reasoning"
+    },
+    {
+      "provider": "ollama",
+      "model": "qwen3:32b",
+      "env": null,
+      "base_url": "http://localhost:11434",
+      "path": "/api/chat",
+      "request_format": "ollama_chat",
+      "response_json_pointer": "/message/content",
+      "reasoning_control": "think"
+    },
+    {
+      "provider": "ollama-cloud",
+      "model": "gpt-oss:120b-cloud",
+      "env": "OLLAMA_API_KEY",
+      "base_url": "https://ollama.com/api",
+      "path": "/api/chat",
+      "request_format": "ollama_chat",
+      "response_json_pointer": "/message/content",
+      "reasoning_control": "think"
+    }
+  ]
 }

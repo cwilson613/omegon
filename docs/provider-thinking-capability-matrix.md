@@ -10,6 +10,11 @@ date: 2026-04-08
 This document is the reviewed snapshot for how Omegon maps its session-level
 `ThinkingLevel` abstraction onto upstream provider request contracts.
 
+It complements the checked-in contract file at [[.pi/provider-contracts.json]],
+which now also carries a `live_upstream_matrix` section for daily endpoint drift
+verification. That JSON is the machine-readable source for probe execution;
+this document remains the human-readable explanation of the reasoning controls.
+
 It exists for one reason: **the harness-level notion of `off/minimal/low/medium/high`
 is not itself an upstream API**. Each provider exposes different controls, cost
 semantics, and capability boundaries.
