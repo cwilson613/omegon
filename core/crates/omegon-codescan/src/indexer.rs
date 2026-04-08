@@ -4,6 +4,7 @@
 //! walk entirely and return cached stats. This makes the incremental path
 //! near-instantaneous (~5ms vs 2s for a full walk of a large repo).
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -69,8 +70,9 @@ impl Indexer {
             .chain(knowledge_hashes.iter())
             .cloned()
             .collect();
-        let stale: std::collections::HashSet<PathBuf> =
-            cache.stale_paths(&all_hashes).into_iter().collect();
+        let stale: HashSet<PathBuf> = cache.stale_paths(&all_hashes).into_iter().collect();
+        let live_paths: HashSet<PathBuf> = all_hashes.iter().map(|(path, _)| path.clone()).collect();
+        cache.prune_missing_paths(&live_paths)?;
 
         for (path, hash) in &code_hashes {
             if !stale.contains(path) {
@@ -164,6 +166,7 @@ fn discover_code_files(repo_path: &Path) -> Vec<PathBuf> {
         "node_modules",
         ".git",
         ".jj",
+        ".omegon",
         "dist",
         "build",
         ".next",
@@ -243,6 +246,62 @@ mod tests {
         assert_eq!(
             s1.code_chunks, s2.code_chunks,
             "chunk count should be stable"
+        );
+    }
+
+    #[test]
+    fn excludes_omegon_workspace_and_prunes_stale_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::write(repo.join("src/main.rs"), "fn canonical() {}").unwrap();
+        std::fs::create_dir_all(repo.join(".omegon/cleave-workspace/0-wt-code-survey/src")).unwrap();
+        std::fs::write(
+            repo.join(".omegon/cleave-workspace/0-wt-code-survey/src/tui_tests.rs"),
+            "fn transient_workspace_copy() {}",
+        )
+        .unwrap();
+
+        let discovered = discover_code_files(repo);
+        assert!(
+            discovered
+                .iter()
+                .all(|path| !path.to_string_lossy().contains(".omegon/cleave-workspace")),
+            "discover_code_files should skip .omegon workspaces: {discovered:?}"
+        );
+
+        let cache_path = repo.join(".omegon/codescan.db");
+        let cache = ScanCache::open(&cache_path).unwrap();
+        cache
+            .upsert_code_chunks(
+                Path::new(".omegon/cleave-workspace/0-wt-code-survey/src/tui_tests.rs"),
+                "stale",
+                &[crate::code::CodeChunk {
+                    path: PathBuf::from(".omegon/cleave-workspace/0-wt-code-survey/src/tui_tests.rs"),
+                    start_line: 1,
+                    end_line: 1,
+                    item_name: "transient_workspace_copy".into(),
+                    item_kind: "fn".into(),
+                    text: "fn transient_workspace_copy() {}".into(),
+                }],
+            )
+            .unwrap();
+
+        let mut cache = ScanCache::open(&cache_path).unwrap();
+        Indexer::run(repo, &mut cache).unwrap();
+
+        let chunks = ScanCache::open(&cache_path).unwrap().all_code_chunks().unwrap();
+        assert!(
+            chunks
+                .iter()
+                .all(|chunk| !chunk.path.to_string_lossy().contains(".omegon/cleave-workspace")),
+            "indexed chunks should prune stale .omegon workspace entries: {chunks:?}"
+        );
+        assert!(
+            chunks
+                .iter()
+                .any(|chunk| chunk.path == PathBuf::from("src/main.rs")),
+            "canonical repo files should remain indexed: {chunks:?}"
         );
     }
 }

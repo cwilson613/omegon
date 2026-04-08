@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::code::CodeChunk;
@@ -137,6 +137,27 @@ impl ScanCache {
                 "INSERT INTO knowledge_chunks (path, heading, start_line, end_line, tags, text, content_hash)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![path_str, chunk.heading, chunk.start_line, chunk.end_line, chunk.tags.join(","), chunk.text, hash],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn prune_missing_paths(&self, live_paths: &HashSet<PathBuf>) -> Result<()> {
+        let cached_paths = self
+            .all_hashes()
+            .into_keys()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>();
+        for path in cached_paths {
+            if live_paths.contains(&path) {
+                continue;
+            }
+            let path_str = path.to_string_lossy();
+            self.conn
+                .execute("DELETE FROM code_chunks WHERE path = ?1", params![path_str.as_ref()])?;
+            self.conn.execute(
+                "DELETE FROM knowledge_chunks WHERE path = ?1",
+                params![path_str.as_ref()],
             )?;
         }
         Ok(())
@@ -319,5 +340,81 @@ mod tests {
         assert_eq!(cache.get_meta("k"), None);
         cache.set_meta("k", "v").unwrap();
         assert_eq!(cache.get_meta("k"), Some("v".into()));
+    }
+
+    #[test]
+    fn prune_missing_paths_removes_absent_code_and_knowledge_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = ScanCache::open(&dir.path().join("t.db")).unwrap();
+
+        cache
+            .upsert_code_chunks(
+                Path::new("src/keep.rs"),
+                "h1",
+                &[CodeChunk {
+                    path: PathBuf::from("src/keep.rs"),
+                    start_line: 1,
+                    end_line: 1,
+                    item_name: "keep".into(),
+                    item_kind: "fn".into(),
+                    text: "fn keep() {}".into(),
+                }],
+            )
+            .unwrap();
+        cache
+            .upsert_code_chunks(
+                Path::new(".omegon/cleave-workspace/stale.rs"),
+                "h2",
+                &[CodeChunk {
+                    path: PathBuf::from(".omegon/cleave-workspace/stale.rs"),
+                    start_line: 1,
+                    end_line: 1,
+                    item_name: "stale".into(),
+                    item_kind: "fn".into(),
+                    text: "fn stale() {}".into(),
+                }],
+            )
+            .unwrap();
+        cache
+            .upsert_knowledge_chunks(
+                Path::new("docs/keep.md"),
+                "k1",
+                &[KnowledgeChunk {
+                    path: PathBuf::from("docs/keep.md"),
+                    heading: "Keep".into(),
+                    start_line: 1,
+                    end_line: 1,
+                    tags: vec![],
+                    text: "keep".into(),
+                }],
+            )
+            .unwrap();
+        cache
+            .upsert_knowledge_chunks(
+                Path::new(".omegon/cleave-workspace/stale.md"),
+                "k2",
+                &[KnowledgeChunk {
+                    path: PathBuf::from(".omegon/cleave-workspace/stale.md"),
+                    heading: "Stale".into(),
+                    start_line: 1,
+                    end_line: 1,
+                    tags: vec![],
+                    text: "stale".into(),
+                }],
+            )
+            .unwrap();
+
+        let live_paths = HashSet::from([
+            PathBuf::from("src/keep.rs"),
+            PathBuf::from("docs/keep.md"),
+        ]);
+        cache.prune_missing_paths(&live_paths).unwrap();
+
+        let code = cache.all_code_chunks().unwrap();
+        let knowledge = cache.all_knowledge_chunks().unwrap();
+        assert_eq!(code.len(), 1);
+        assert_eq!(code[0].path, PathBuf::from("src/keep.rs"));
+        assert_eq!(knowledge.len(), 1);
+        assert_eq!(knowledge[0].path, PathBuf::from("docs/keep.md"));
     }
 }
