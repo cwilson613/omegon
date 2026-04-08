@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 40,
+    "rc_count": 41,
     "notes": [
       "feat(auspex): add mode-aware local handoff probe",
       "feat(auspex): launch desktop handoff from cached startup payload",
@@ -494,6 +494,7 @@
       "fix(runtime): fill new daemon metadata in snapshots",
       "fix(session): give interactive omegon runs stable live session ids",
       "fix(telemetry): format provider usage by active backend",
+      "fix(tui): accept json context request slash payloads",
       "fix(tui): align activity row with context band semantics",
       "fix(tui): align footer context state with inference composition",
       "fix(tui): calm inference activity row glyphs",
@@ -542,7 +543,7 @@
       "refactor(tui): remove activity-row phase labels",
       "refactor(tui): simplify slash command auth and context paths"
     ],
-    "rc_version": "0.15.10-rc.40",
-    "last_rc": "2026-04-08T01:23:12Z"
+    "rc_version": "0.15.10-rc.41",
+    "last_rc": "2026-04-08T01:41:46Z"
   }
 }
