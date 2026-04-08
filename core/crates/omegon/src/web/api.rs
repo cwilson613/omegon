@@ -787,6 +787,7 @@ mod tests {
                         label: "child-1".into(),
                         status: "running".into(),
                         duration_secs: None,
+                        supervision_mode: None,
                         pid: None,
                         last_tool: None,
                         last_turn: None,

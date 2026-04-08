@@ -60,6 +60,12 @@ Phase-1 supervisor authority should introduce a minimal local token/lease model:
 
 **Rationale:** The local supervisor phase needs stronger authority continuity than PID/path/model heuristics, but pulling in Styrene Identity now would prematurely couple restart-path child supervision to an unfinished distributed identity system. A simple local bootstrap token/lease persisted with child metadata provides a minimal lineage/ownership signal for same-host recovery, leaves transport/security semantics explicitly degraded, and creates a clean seam for later replacement by Styrene Identity-backed authority.
 
+### Auspex is the outer process supervisor; Omegon is the inner runtime supervisor for cleave and agent work
+
+**Status:** decided
+
+**Rationale:** There is no separate meaningful 'Omega' layer here. Auspex should supervise the Omegon daemon process externally, while Omegon owns agent semantics, child orchestration, restart recovery, and control surfaces for its internal cleave workers.
+
 ## Open Questions
 
 - What is the durable child-registry source of truth after daemon restart: `state.json` only, a separate supervisor journal/checkpoint file, or an embedded local store that tracks child command, pid, start time, worktree, and last-seen progress?

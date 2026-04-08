@@ -284,11 +284,19 @@ pub struct ChildRuntimeSummary {
     pub preloaded_files: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildSupervisionMode {
+    Attached,
+    RecoveredDegraded,
+}
+
 #[derive(Clone)]
 pub struct ChildProgress {
     pub label: String,
     pub status: String, // "pending", "running", "completed", "failed", "upstream_exhausted"
     pub duration_secs: Option<f64>,
+    /// Current supervision continuity for this child runtime.
+    pub supervision_mode: Option<ChildSupervisionMode>,
     /// Spawned child PID while the orchestrator still owns the subprocess.
     pub pid: Option<u32>,
     /// Most recent tool active inside this child (e.g. "bash", "write").
@@ -343,6 +351,7 @@ fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &ProgressEve
             if let Some(existing) = progress.children.iter_mut().find(|c| c.label == *child) {
                 existing.status = "running".into();
                 existing.duration_secs = None;
+                existing.supervision_mode = Some(ChildSupervisionMode::Attached);
                 existing.pid = Some(*pid);
                 existing.started_at = Some(now);
                 existing.last_activity_at = Some(now);
@@ -351,6 +360,7 @@ fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &ProgressEve
                     label: child.clone(),
                     status: "running".into(),
                     duration_secs: None,
+                    supervision_mode: Some(ChildSupervisionMode::Attached),
                     pid: Some(*pid),
                     last_tool: None,
                     last_turn: None,
@@ -403,6 +413,7 @@ fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &ProgressEve
             if let Some(existing) = progress.children.iter_mut().find(|c| c.label == *child) {
                 existing.status = status_text.into();
                 existing.duration_secs = *duration_secs;
+                existing.supervision_mode = None;
                 existing.pid = None;
                 existing.last_activity_at = Some(std::time::Instant::now());
             } else {
@@ -410,6 +421,7 @@ fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &ProgressEve
                     label: child.clone(),
                     status: status_text.into(),
                     duration_secs: *duration_secs,
+                    supervision_mode: None,
                     pid: None,
                     last_tool: None,
                     last_turn: None,
@@ -541,6 +553,11 @@ impl CleaveFeature {
                         ChildStatus::Pending => "pending".into(),
                     },
                     duration_secs: c.duration_secs,
+                    supervision_mode: if c.status == ChildStatus::Running {
+                        Some(ChildSupervisionMode::RecoveredDegraded)
+                    } else {
+                        None
+                    },
                     pid: c.pid,
                     last_tool: None,
                     last_turn: None,
@@ -660,6 +677,7 @@ impl CleaveFeature {
                     label: c.label.clone(),
                     status: "pending".into(),
                     duration_secs: None,
+                    supervision_mode: None,
                     pid: None,
                     last_tool: None,
                     last_turn: None,
@@ -748,6 +766,11 @@ impl CleaveFeature {
                         ChildStatus::Pending => "pending".into(),
                     };
                     p.duration_secs = child.duration_secs;
+                    p.supervision_mode = if child.status == ChildStatus::Running {
+                        Some(ChildSupervisionMode::Attached)
+                    } else {
+                        None
+                    };
                 }
             }
         }
@@ -1140,6 +1163,7 @@ mod tests {
         assert_eq!(progress.total_children, 1);
         assert_eq!(progress.children[0].label, "alpha");
         assert_eq!(progress.children[0].status, "running");
+        assert_eq!(progress.children[0].supervision_mode, Some(ChildSupervisionMode::RecoveredDegraded));
         assert_eq!(progress.children[0].pid, Some(std::process::id()));
     }
 
@@ -1231,6 +1255,7 @@ mod tests {
         let child = &progress.children[0];
         assert_eq!(child.last_tool.as_deref(), Some("bash"));
         assert_eq!(child.last_turn, Some(3));
+        assert_eq!(child.supervision_mode, Some(ChildSupervisionMode::RecoveredDegraded));
         assert_eq!(child.tokens_in, 123);
         assert_eq!(child.tokens_out, 45);
         assert!(child.last_activity_at.is_some());
@@ -1257,6 +1282,7 @@ mod tests {
                 label: "alpha".into(),
                 status: "pending".into(),
                 duration_secs: None,
+                supervision_mode: None,
                 pid: None,
                 last_tool: None,
                 last_turn: None,
@@ -1280,6 +1306,7 @@ mod tests {
         {
             let progress = shared.lock().unwrap();
             assert_eq!(progress.children[0].status, "running");
+            assert_eq!(progress.children[0].supervision_mode, Some(ChildSupervisionMode::Attached));
             assert_eq!(progress.children[0].pid, Some(42));
             assert!(progress.children[0].started_at.is_some());
             assert!(progress.children[0].last_activity_at.is_some());
@@ -1298,6 +1325,7 @@ mod tests {
         let progress = shared.lock().unwrap();
         assert_eq!(progress.children[0].status, "completed");
         assert_eq!(progress.children[0].duration_secs, Some(1.5));
+        assert_eq!(progress.children[0].supervision_mode, None);
         assert_eq!(progress.children[0].pid, None);
         assert!(progress.children[0].last_activity_at.is_some());
         assert_eq!(progress.completed, 1);
@@ -1316,6 +1344,7 @@ mod tests {
                 label: "alpha".into(),
                 status: "running".into(),
                 duration_secs: None,
+                supervision_mode: None,
                 pid: Some(42),
                 last_tool: None,
                 last_turn: None,
@@ -1358,6 +1387,7 @@ mod tests {
                 label: "alpha".into(),
                 status: "pending".into(),
                 duration_secs: None,
+                supervision_mode: None,
                 pid: None,
                 last_tool: None,
                 last_turn: None,

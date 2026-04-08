@@ -41,6 +41,7 @@ pub enum ControlPlaneState {
 pub struct DaemonChildRuntimeStatus {
     pub label: String,
     pub status: String,
+    pub supervision_mode: Option<String>,
     pub pid: Option<u32>,
     pub model: Option<String>,
     pub thinking_level: Option<String>,
@@ -398,6 +399,10 @@ fn refresh_startup_daemon_status(state: &WebState) {
                     Some(DaemonChildRuntimeStatus {
                         label: child.label.clone(),
                         status: child.status.clone(),
+                        supervision_mode: child.supervision_mode.map(|mode| match mode {
+                            crate::features::cleave::ChildSupervisionMode::Attached => "attached".to_string(),
+                            crate::features::cleave::ChildSupervisionMode::RecoveredDegraded => "recovered_degraded".to_string(),
+                        }),
                         pid: child.pid,
                         model: runtime.model.clone(),
                         thinking_level: runtime.thinking_level.clone(),
@@ -754,6 +759,7 @@ mod tests {
                     children: vec![crate::features::cleave::ChildProgress {
                         label: "child-1".into(),
                         status: "running".into(),
+                        supervision_mode: Some(crate::features::cleave::ChildSupervisionMode::RecoveredDegraded),
                         duration_secs: None,
                         pid: Some(4242),
                         last_tool: None,
@@ -833,6 +839,7 @@ mod tests {
         let child = &startup_status.active_child_runtimes[0];
         assert_eq!(child.label, "child-1");
         assert_eq!(child.pid, Some(4242));
+        assert_eq!(child.supervision_mode.as_deref(), Some("recovered_degraded"));
         assert_eq!(child.model.as_deref(), Some("anthropic:claude-sonnet-4-6"));
         assert_eq!(child.thinking_level.as_deref(), Some("high"));
         assert_eq!(child.context_class.as_deref(), Some("legion"));
