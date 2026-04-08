@@ -1638,7 +1638,7 @@ impl CodexClient {
 }
 
 fn is_codex_retryable(status: u16) -> bool {
-    matches!(status, 429 | 500 | 502 | 503 | 504)
+    matches!(status, 429 | 500 | 502 | 503 | 504 | 520)
 }
 
 #[async_trait]
@@ -3453,6 +3453,7 @@ mod tests {
         assert!(is_codex_retryable(502));
         assert!(is_codex_retryable(503));
         assert!(is_codex_retryable(504));
+        assert!(is_codex_retryable(520));
         assert!(!is_codex_retryable(400));
         assert!(!is_codex_retryable(401));
         assert!(!is_codex_retryable(200));

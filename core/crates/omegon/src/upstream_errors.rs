@@ -169,6 +169,12 @@ const GLOBAL_ERROR_RULES: &[ErrorRule] = &[
     },
     ErrorRule {
         providers: &[],
+        class: UpstreamErrorClass::Upstream5xx,
+        substrings: &["error code: 520"],
+        word_tokens: &["520"],
+    },
+    ErrorRule {
+        providers: &[],
         class: UpstreamErrorClass::StalledStream,
         substrings: &["stream idle for", "connection may be stalled"],
         word_tokens: &[],
@@ -694,6 +700,18 @@ mod tests {
         assert_eq!(
             classify_upstream_error_for_provider("anthropic", "overloaded_error"),
             UpstreamErrorClass::ProviderOverloaded,
+        );
+    }
+
+    #[test]
+    fn classify_bare_520_as_transient_upstream_failure() {
+        assert_eq!(
+            classify_upstream_error_for_provider("openai-codex", "Codex 520: error code: 520"),
+            UpstreamErrorClass::Upstream5xx,
+        );
+        assert_eq!(
+            UpstreamErrorClass::Upstream5xx.transient_kind(),
+            Some(TransientFailureKind::Upstream5xx),
         );
     }
 

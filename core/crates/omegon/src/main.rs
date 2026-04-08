@@ -2033,6 +2033,31 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
 /// Extracts the meaningful part from API error JSON blobs.
 fn format_agent_error(e: &anyhow::Error) -> String {
     let raw = format!("{e}");
+    let provider = provider_label_from_error(&raw);
+    let upstream_class = crate::upstream_errors::classify_upstream_error_for_provider(
+        provider.as_deref().unwrap_or("upstream"),
+        &raw,
+    );
+    if matches!(
+        upstream_class,
+        crate::upstream_errors::UpstreamErrorClass::ProviderOverloaded
+            | crate::upstream_errors::UpstreamErrorClass::Upstream5xx
+            | crate::upstream_errors::UpstreamErrorClass::Timeout
+            | crate::upstream_errors::UpstreamErrorClass::StalledStream
+            | crate::upstream_errors::UpstreamErrorClass::NetworkConnect
+            | crate::upstream_errors::UpstreamErrorClass::NetworkReset
+            | crate::upstream_errors::UpstreamErrorClass::Dns
+            | crate::upstream_errors::UpstreamErrorClass::DecodeBody
+            | crate::upstream_errors::UpstreamErrorClass::BridgeDropped
+            | crate::upstream_errors::UpstreamErrorClass::ResponseIncomplete
+            | crate::upstream_errors::UpstreamErrorClass::ResponseCancelled
+    ) {
+        let who = provider_display_name(provider.as_deref().unwrap_or("upstream"));
+        let status_hint = provider_status_hint(provider.as_deref().unwrap_or("upstream"));
+        return format!(
+            "⚠ Upstream error ({who}) — provider-side failure. Retry later or check {status_hint}."
+        );
+    }
     // Try to extract the "message" field from Anthropic/OpenAI error JSON
     if let Some(start) = raw.find("\"message\":\"") {
         let rest = &raw[start + 11..];
@@ -2050,6 +2075,45 @@ fn format_agent_error(e: &anyhow::Error) -> String {
     // Fallback: truncate
     let truncated = crate::util::truncate_str(&raw, 500);
     format!("⚠ {truncated}")
+}
+
+fn provider_label_from_error(raw: &str) -> Option<String> {
+    let lower = raw.to_lowercase();
+    if lower.contains("codex") {
+        Some("openai-codex".to_string())
+    } else if lower.contains("openai") {
+        Some("openai".to_string())
+    } else if lower.contains("anthropic") || lower.contains("claude") {
+        Some("anthropic".to_string())
+    } else if lower.contains("openrouter") {
+        Some("openrouter".to_string())
+    } else if lower.contains("groq") {
+        Some("groq".to_string())
+    } else if lower.contains("mistral") {
+        Some("mistral".to_string())
+    } else if lower.contains("cerebras") {
+        Some("cerebras".to_string())
+    } else if lower.contains("ollama") {
+        Some("ollama".to_string())
+    } else {
+        None
+    }
+}
+
+fn provider_display_name(provider: &str) -> &'static str {
+    crate::auth::PROVIDERS
+        .iter()
+        .find(|p| p.id == provider)
+        .map(|p| p.display_name)
+        .unwrap_or("the provider")
+}
+
+fn provider_status_hint(provider: &str) -> &'static str {
+    match provider {
+        "openai" | "openai-codex" => "status.openai.com",
+        "anthropic" => "status.anthropic.com",
+        _ => "the provider status page",
+    }
 }
 
 async fn run_smoke_command(cli: &Cli) -> anyhow::Result<()> {
@@ -3057,6 +3121,15 @@ mod tests {
         let e = anyhow::anyhow!("status=429 Too Many Requests blah blah");
         let result = format_agent_error(&e);
         assert!(result.contains("status=429"), "got: {result}");
+    }
+
+    #[test]
+    fn format_agent_error_collapses_openai_provider_side_failures() {
+        let e = anyhow::anyhow!("LLM error: Codex 520: error code: 520");
+        let result = format_agent_error(&e);
+        assert!(result.contains("Upstream error (OpenAI/Codex)"), "got: {result}");
+        assert!(result.contains("status.openai.com"), "got: {result}");
+        assert!(!result.contains("error code: 520"), "got: {result}");
     }
 
     #[test]

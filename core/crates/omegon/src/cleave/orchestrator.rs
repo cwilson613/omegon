@@ -16,7 +16,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
@@ -166,6 +166,7 @@ pub async fn run_cleave(
             wt_path: PathBuf,
             label: String,
             prompt: String,
+            model: String,
         }
         let mut to_dispatch: Vec<ChildDispatchInfo> = Vec::new();
 
@@ -245,11 +246,49 @@ pub async fn run_cleave(
                         std::fs::write(&task_path, &task_content)?;
                     }
 
+                    // Route per-child model: explicit plan model wins; if absent, infer from scope size.
+                    // Parent model is the floor — we never route to a tier above the parent.
+                    let model = if let Some(ref inv_lock) = config.inventory {
+                        let child_state = &state.children[child_idx];
+                        if let Some(explicit) = &child_state.execute_model {
+                            if explicit != &effective_model {
+                                tracing::info!(child = %label, model = %explicit, "using explicit plan model");
+                                explicit.clone()
+                            } else {
+                                let inv = inv_lock.read().await;
+                                let parent_tier = crate::routing::infer_model_tier(&effective_model);
+                                let scope_tier = crate::routing::infer_capability_tier(child_state.scope.len());
+                                let tier = scope_tier.min(parent_tier);
+                                let req = crate::routing::CapabilityRequest {
+                                    tier,
+                                    prefer_local: false,
+                                    avoid_providers: vec![],
+                                };
+                                let candidates = crate::routing::route(&req, &inv);
+                                if let Some(best) = candidates.first() {
+                                    let routed = format!("{}:{}", best.provider_id, best.model_id);
+                                    tracing::info!(child = %label, scope_tier = %scope_tier, parent_tier = %parent_tier, effective_tier = %tier, routed = %routed, "per-child routing");
+                                    routed
+                                } else {
+                                    effective_model.clone()
+                                }
+                            }
+                        } else {
+                            effective_model.clone()
+                        }
+                    } else {
+                        state.children[child_idx]
+                            .execute_model
+                            .clone()
+                            .unwrap_or_else(|| effective_model.clone())
+                    };
+
                     to_dispatch.push(ChildDispatchInfo {
                         child_idx,
                         wt_path,
                         label,
                         prompt: task_content,
+                        model,
                     });
                 }
                 Err(e) => {
@@ -288,72 +327,40 @@ pub async fn run_cleave(
             let timeout_secs = config.timeout_secs;
             let idle_timeout_secs = config.idle_timeout_secs;
             let progress_sink = config.progress_sink.clone();
-
-            // Route per-child model: explicit plan model wins; if absent, infer from scope size.
-            // Parent model is the floor — we never route to a tier above the parent.
-            let model = if let Some(ref inv_lock) = config.inventory {
-                let child_state = &state.children[info.child_idx];
-                if let Some(explicit) = &child_state.execute_model {
-                    if explicit != &effective_model {
-                        // Plan provided an explicit per-child or plan-level override — use it.
-                        tracing::info!(child = %info.label, model = %explicit, "using explicit plan model");
-                        explicit.clone()
-                    } else {
-                        // Model was set to parent's model (from_plan default path) — apply routing.
-                        let inv = inv_lock.read().await;
-                        let parent_tier = crate::routing::infer_model_tier(&effective_model);
-                        let scope_tier =
-                            crate::routing::infer_capability_tier(child_state.scope.len());
-                        // Cap the child at the parent's tier so delegation never upgrades cost.
-                        let tier = scope_tier.min(parent_tier);
-                        let req = crate::routing::CapabilityRequest {
-                            tier,
-                            prefer_local: false,
-                            avoid_providers: vec![],
-                        };
-                        let candidates = crate::routing::route(&req, &inv);
-                        if let Some(best) = candidates.first() {
-                            let routed = format!("{}:{}", best.provider_id, best.model_id);
-                            tracing::info!(child = %info.label, scope_tier = %scope_tier, parent_tier = %parent_tier, effective_tier = %tier, routed = %routed, "per-child routing");
-                            routed
-                        } else {
-                            effective_model.clone()
-                        }
-                    }
-                } else {
-                    effective_model.clone()
-                }
-            } else {
-                // No inventory — use plan model or parent.
-                state.children[info.child_idx]
-                    .execute_model
-                    .clone()
-                    .unwrap_or_else(|| effective_model.clone())
-            };
-
             let inherited_env = config.inherited_env.clone();
             let injected_env = config.injected_env.clone();
             let child_runtime = config.child_runtime.clone();
+
+            let dispatch_config = ChildDispatchConfig {
+                agent_binary: &agent_binary,
+                bridge_path: &bridge_path,
+                node: &node,
+                model: &info.model,
+                max_turns,
+                timeout_secs,
+                idle_timeout_secs,
+                inherited_env: &inherited_env,
+                injected_env: &injected_env,
+                runtime: &child_runtime,
+                progress_sink,
+            };
+
+            let (child_process, pid) = spawn_child_process(
+                &dispatch_config,
+                &info.wt_path,
+                &info.label,
+                &info.prompt,
+            )?;
+            state.mark_child_spawned(info.child_idx, pid);
+            state.save(&state_path)?;
+
             let handle = tokio::spawn(async move {
                 let _permit = sem.acquire().await.unwrap();
-                let dispatch_config = ChildDispatchConfig {
-                    agent_binary: &agent_binary,
-                    bridge_path: &bridge_path,
-                    node: &node,
-                    model: &model,
-                    max_turns,
-                    timeout_secs,
-                    idle_timeout_secs,
-                    inherited_env: &inherited_env,
-                    injected_env: &injected_env,
-                    runtime: &child_runtime,
-                    progress_sink,
-                };
-                let result = dispatch_child(
+                let result = monitor_child_process(
                     &dispatch_config,
-                    &info.wt_path,
+                    child_process,
+                    pid,
                     &info.label,
-                    &info.prompt,
                     child_cancel,
                 )
                 .await;
@@ -464,14 +471,26 @@ pub async fn run_cleave(
                                     progress_sink: config.progress_sink.clone(),
                                 };
 
-                                let fallback_result = dispatch_child(
+                                let fallback_result = match spawn_child_process(
                                     &fb_dispatch,
                                     &wt_path,
                                     label,
                                     &fb_prompt,
-                                    cancel.clone(),
-                                )
-                                .await;
+                                ) {
+                                    Ok((child_process, pid)) => {
+                                        state.mark_child_spawned(child_idx, pid);
+                                        state.save(&state_path)?;
+                                        monitor_child_process(
+                                            &fb_dispatch,
+                                            child_process,
+                                            pid,
+                                            label,
+                                            cancel.clone(),
+                                        )
+                                        .await
+                                    }
+                                    Err(e) => Err(classify_child_error(fb_model, e)),
+                                };
 
                                 match fallback_result {
                                     Ok(output) => {
@@ -714,80 +733,42 @@ struct ChildDispatchConfig<'a> {
     progress_sink: SharedProgressSink,
 }
 
-/// Dispatch a single omegon-agent child process.
-async fn dispatch_child(
-    config: &ChildDispatchConfig<'_>,
-    cwd: &Path,
-    label: &str,
-    prompt: &str,
-    cancel: CancellationToken,
-) -> Result<ChildOutput, ChildError> {
-    let provider = config
-        .model
-        .split(':')
-        .next()
-        .unwrap_or("unknown")
-        .to_string();
-    dispatch_child_inner(config, cwd, label, prompt, cancel)
-        .await
-        .map_err(|e| {
-            let msg = e.to_string();
-            // Exit code 2 means the child tagged itself as upstream-exhausted via main.rs.
-            if msg.contains("exit code 2") || msg.contains("upstream exhausted:") {
-                ChildError::UpstreamExhausted {
-                    provider,
-                    message: msg,
-                }
-            } else {
-                ChildError::Failed(msg)
-            }
-        })
+fn classify_child_error(model: &str, e: anyhow::Error) -> ChildError {
+    let provider = model.split(':').next().unwrap_or("unknown").to_string();
+    let msg = e.to_string();
+    if msg.contains("exit code 2") || msg.contains("upstream exhausted:") {
+        ChildError::UpstreamExhausted { provider, message: msg }
+    } else {
+        ChildError::Failed(msg)
+    }
 }
 
-async fn dispatch_child_inner(
+fn spawn_child_process(
     config: &ChildDispatchConfig<'_>,
     cwd: &Path,
     label: &str,
     prompt: &str,
-    cancel: CancellationToken,
-) -> Result<ChildOutput> {
-    let started = Instant::now();
-
+) -> Result<(Child, u32)> {
     tracing::info!(child = %label, cwd = %cwd.display(), "spawning omegon-agent");
     tracing::info!(child = %label, binary = %config.agent_binary.display(), bridge = %config.bridge_path.display(), node = %config.node, model = %config.model, max_turns = config.max_turns, "dispatch params");
-
-    // Verify cwd exists
     if !cwd.exists() {
         anyhow::bail!("Child cwd does not exist: {}", cwd.display());
     }
-
-    // Write prompt to a temp file to avoid CLI arg parsing issues
-    // (task file content starting with --- breaks clap's arg parser).
-    // Use an absolute prompt path because the child process may resolve
-    // --cwd before reopening the file.
     let prompt_file = std::fs::canonicalize(cwd)
         .unwrap_or_else(|_| cwd.to_path_buf())
         .join(".cleave-prompt.md");
     tracing::info!(child = %label, prompt_file = %prompt_file.display(), prompt_len = prompt.len(), "writing prompt file");
     std::fs::write(&prompt_file, prompt)
         .context(format!("Failed to write prompt file for child '{label}'"))?;
-
     let max_turns_str = config.max_turns.to_string();
     let canonical_cwd = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let cwd_arg = canonical_cwd.to_string_lossy().to_string();
     let prompt_arg = prompt_file.to_string_lossy().to_string();
-    // Don't pass --bridge by default — let children auto-detect native providers.
-    // Forcing --bridge bypasses native providers entirely, which breaks children
-    // when the bridge script path is relative or node_modules are missing.
     let mut args = vec![
-        "--prompt-file",
-        prompt_arg.as_str(),
-        "--cwd",
-        cwd_arg.as_str(),
-        "--model",
-        config.model,
-        "--max-turns",
-        &max_turns_str,
+        "--prompt-file", prompt_arg.as_str(),
+        "--cwd", cwd_arg.as_str(),
+        "--model", config.model,
+        "--max-turns", &max_turns_str,
     ];
     if let Some(ref context_class) = config.runtime.context_class {
         args.extend(["--context-class", context_class.as_str()]);
@@ -797,103 +778,45 @@ async fn dispatch_child_inner(
         args.extend(["--node", config.node]);
     }
     tracing::info!(child = %label, args = ?args, "spawn args");
-
-    tracing::info!(
-        child = %label,
-        inherited_env = config.inherited_env.len(),
-        injected_env = config.injected_env.len(),
-        inherited_env_names = ?config.inherited_env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
-        injected_env_names = ?config.injected_env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
-        "child env inheritance"
-    );
+    tracing::info!(child = %label, inherited_env = config.inherited_env.len(), injected_env = config.injected_env.len(), inherited_env_names = ?config.inherited_env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), injected_env_names = ?config.injected_env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), "child env inheritance");
     let mut child = Command::new(config.agent_binary);
-    child
-        .args(&args)
-        .current_dir(cwd)
-        .env("OMEGON_CHILD", "1") // Signal child mode — read-only memory, no session save
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    for (key, value) in config.inherited_env {
-        child.env(key, value);
-    }
-    for (key, value) in config.injected_env {
-        child.env(key, value);
-    }
-    if let Some(ref thinking) = config.runtime.thinking_level {
-        child.env("OMEGON_CHILD_THINKING_LEVEL", thinking);
-    }
-    if let Some(ref context_class) = config.runtime.context_class {
-        child.env("OMEGON_CHILD_CONTEXT_CLASS", context_class);
-    }
-    if !config.runtime.enabled_tools.is_empty() {
-        child.env(
-            "OMEGON_CHILD_ENABLED_TOOLS",
-            config.runtime.enabled_tools.join(","),
-        );
-    }
-    if !config.runtime.disabled_tools.is_empty() {
-        child.env(
-            "OMEGON_CHILD_DISABLED_TOOLS",
-            config.runtime.disabled_tools.join(","),
-        );
-    }
-    if !config.runtime.skills.is_empty() {
-        child.env("OMEGON_CHILD_SKILLS", config.runtime.skills.join(","));
-    }
-    if !config.runtime.enabled_extensions.is_empty() {
-        child.env(
-            "OMEGON_CHILD_ENABLED_EXTENSIONS",
-            config.runtime.enabled_extensions.join(","),
-        );
-    }
-    if !config.runtime.disabled_extensions.is_empty() {
-        child.env(
-            "OMEGON_CHILD_DISABLED_EXTENSIONS",
-            config.runtime.disabled_extensions.join(","),
-        );
-    }
-    if !config.runtime.preloaded_files.is_empty() {
-        child.env(
-            "OMEGON_CHILD_PRELOADED_FILES",
-            config.runtime.preloaded_files.join(":"),
-        );
-    }
-    let mut child = child
-        .spawn()
-        .context(format!("Failed to spawn omegon-agent for child '{label}'"))?;
-
+    child.args(&args).current_dir(cwd).env("OMEGON_CHILD", "1").stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    for (key, value) in config.inherited_env { child.env(key, value); }
+    for (key, value) in config.injected_env { child.env(key, value); }
+    if let Some(ref thinking) = config.runtime.thinking_level { child.env("OMEGON_CHILD_THINKING_LEVEL", thinking); }
+    if let Some(ref context_class) = config.runtime.context_class { child.env("OMEGON_CHILD_CONTEXT_CLASS", context_class); }
+    if !config.runtime.enabled_tools.is_empty() { child.env("OMEGON_CHILD_ENABLED_TOOLS", config.runtime.enabled_tools.join(",")); }
+    if !config.runtime.disabled_tools.is_empty() { child.env("OMEGON_CHILD_DISABLED_TOOLS", config.runtime.disabled_tools.join(",")); }
+    if !config.runtime.skills.is_empty() { child.env("OMEGON_CHILD_SKILLS", config.runtime.skills.join(",")); }
+    if !config.runtime.enabled_extensions.is_empty() { child.env("OMEGON_CHILD_ENABLED_EXTENSIONS", config.runtime.enabled_extensions.join(",")); }
+    if !config.runtime.disabled_extensions.is_empty() { child.env("OMEGON_CHILD_DISABLED_EXTENSIONS", config.runtime.disabled_extensions.join(",")); }
+    if !config.runtime.preloaded_files.is_empty() { child.env("OMEGON_CHILD_PRELOADED_FILES", config.runtime.preloaded_files.join(":")); }
+    let child = child.spawn().context(format!("Failed to spawn omegon-agent for child '{label}'"))?;
     let pid = child.id().unwrap_or(0);
     tracing::info!(child = %label, pid, "child spawned");
-    config.progress_sink.emit(&ProgressEvent::ChildSpawned {
-        child: label.to_string(),
-        pid,
-    });
-    // Note: child_spawned already signals "running" to the TS handler.
-    // No separate child_status(Running) needed.
+    config.progress_sink.emit(&ProgressEvent::ChildSpawned { child: label.to_string(), pid });
+    Ok((child, pid))
+}
 
+async fn monitor_child_process(
+    config: &ChildDispatchConfig<'_>,
+    mut child: Child,
+    pid: u32,
+    label: &str,
+    cancel: CancellationToken,
+) -> Result<ChildOutput, ChildError> {
+    let started = Instant::now();
     let stderr = child.stderr.take().unwrap();
     let mut reader = BufReader::new(stderr).lines();
-    // Rolling tail of the last 30 stderr lines — surfaced on non-zero exit.
     let mut stderr_tail: VecDeque<String> = VecDeque::with_capacity(30);
-
     let wall_timeout = tokio::time::Duration::from_secs(config.timeout_secs);
     let idle_timeout = tokio::time::Duration::from_secs(config.idle_timeout_secs);
-
     let mut last_activity = Instant::now();
-    let mut last_activity_event = Instant::now() - std::time::Duration::from_secs(2); // allow first event immediately
-
+    let mut last_activity_event = Instant::now() - std::time::Duration::from_secs(2);
     tracing::info!(child = %label, wall_timeout_secs = config.timeout_secs, idle_timeout_secs = config.idle_timeout_secs, "entering IO loop");
-
     let io_result = tokio::select! {
-        _ = tokio::time::sleep(wall_timeout) => {
-            tracing::warn!(child = %label, timeout = config.timeout_secs, "wall-clock timeout");
-            Err(anyhow::anyhow!("Wall-clock timeout after {}s", config.timeout_secs))
-        }
-        _ = cancel.cancelled() => {
-            tracing::warn!(child = %label, "cancelled");
-            Err(anyhow::anyhow!("Cancelled"))
-        }
+        _ = tokio::time::sleep(wall_timeout) => { tracing::warn!(child = %label, timeout = config.timeout_secs, "wall-clock timeout"); Err(classify_child_error(config.model, anyhow::anyhow!("Wall-clock timeout after {}s", config.timeout_secs))) }
+        _ = cancel.cancelled() => { tracing::warn!(child = %label, "cancelled"); Err(classify_child_error(config.model, anyhow::anyhow!("Cancelled"))) }
         result = async {
             let mut line_count = 0u64;
             loop {
@@ -901,85 +824,49 @@ async fn dispatch_child_inner(
                     Ok(Ok(Some(line))) => {
                         last_activity = Instant::now();
                         line_count += 1;
-
-                        // Keep a rolling tail for error diagnostics.
                         if stderr_tail.len() == 30 { stderr_tail.pop_front(); }
                         stderr_tail.push_back(line.clone());
-
-                        // Emit activity events (throttled to 1/sec)
                         if last_activity.duration_since(last_activity_event).as_secs() >= 1
                             && let Some(activity) = progress::parse_child_activity(label, &line) {
                                 config.progress_sink.emit(&activity);
                                 last_activity_event = Instant::now();
                             }
-
-                        if line_count <= 5 || line_count.is_multiple_of(50) {
-                            tracing::info!(child = %label, line_count, "stderr: {line}");
-                        } else {
-                            tracing::debug!(child = %label, "{line}");
-                        }
+                        if line_count <= 5 || line_count.is_multiple_of(50) { tracing::info!(child = %label, line_count, "stderr: {line}"); } else { tracing::debug!(child = %label, "{line}"); }
                     }
-                    Ok(Ok(None)) => {
-                        tracing::info!(child = %label, line_count, "stderr EOF — child exited");
-                        break;
-                    }
-                    Ok(Err(e)) => {
-                        tracing::warn!(child = %label, "stderr read error: {e}");
-                        break;
-                    }
+                    Ok(Ok(None)) => { tracing::info!(child = %label, line_count, "stderr EOF — child exited"); break; }
+                    Ok(Err(e)) => { tracing::warn!(child = %label, "stderr read error: {e}"); break; }
                     Err(_) => {
                         let idle_secs = last_activity.elapsed().as_secs();
                         tracing::warn!(child = %label, idle_secs, line_count, "idle timeout");
-                        return Err(anyhow::anyhow!(
-                            "Idle timeout — no output for {}s", config.idle_timeout_secs
-                        ));
+                        return Err(classify_child_error(config.model, anyhow::anyhow!("Idle timeout — no output for {}s", config.idle_timeout_secs)));
                     }
                 }
             }
-            Ok::<(), anyhow::Error>(())
-        } => {
-            result
-        }
+            Ok::<(), ChildError>(())
+        } => { result }
     };
-
-    // kill_on_drop will handle cleanup, but be explicit
     let _ = child.kill().await;
-    let exit = child.wait().await?;
+    let exit = child.wait().await.map_err(|e| classify_child_error(config.model, e.into()))?;
     tracing::info!(child = %label, exit_code = ?exit.code(), success = exit.success(), "child process exited");
-
     let mut stdout_buf = String::new();
     if let Some(mut stdout) = child.stdout.take() {
         use tokio::io::AsyncReadExt;
         let _ = stdout.read_to_string(&mut stdout_buf).await;
     }
-
     let duration_secs = started.elapsed().as_secs_f64();
-
-    // Build a diagnostic snippet from the stderr tail for failure cases.
     let tail_snippet = |tail: &VecDeque<String>| -> String {
-        if tail.is_empty() {
-            return String::new();
-        }
+        if tail.is_empty() { return String::new(); }
         let lines: Vec<&str> = tail.iter().map(|s| s.as_str()).collect();
-        format!(
-            "\n--- last {} stderr lines ---\n{}\n---",
-            lines.len(),
-            lines.join("\n")
-        )
+        format!("
+--- last {} stderr lines ---
+{}
+---", lines.len(), lines.join("
+"))
     };
-
     match io_result {
-        Ok(()) if exit.success() => Ok(ChildOutput {
-            duration_secs,
-            stdout: stdout_buf,
-            pid,
-        }),
-        Ok(()) => Err(anyhow::anyhow!(
-            "Child exited with code {}{}",
-            exit.code().unwrap_or(-1),
-            tail_snippet(&stderr_tail)
-        )),
-        Err(e) => Err(anyhow::anyhow!("{}{}", e, tail_snippet(&stderr_tail))),
+        Ok(()) if exit.success() => Ok(ChildOutput { duration_secs, stdout: stdout_buf, pid }),
+        Ok(()) => Err(classify_child_error(config.model, anyhow::anyhow!("Child exited with code {}{}", exit.code().unwrap_or(-1), tail_snippet(&stderr_tail)))),
+        Err(e) => Err(classify_child_error(config.model, anyhow::anyhow!("{}{}", e, tail_snippet(&stderr_tail)))),
     }
 }
 
