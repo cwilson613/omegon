@@ -131,6 +131,15 @@ impl Editor {
         }
     }
 
+    fn projected_lines(&self) -> Vec<String> {
+        let text = self.render_text();
+        if text.is_empty() {
+            vec![String::new()]
+        } else {
+            text.split('\n').map(ToOwned::to_owned).collect()
+        }
+    }
+
     fn raw_set_textarea_text(&mut self, text: &str) {
         self.textarea.select_all();
         self.textarea.cut();
@@ -697,14 +706,15 @@ impl Editor {
 
         let mut visual_row: u16 = 0;
         let mut visual_col: u16 = 0;
+        let projected_lines = self.projected_lines();
 
-        for (row_idx, line) in self.model_lines().iter().enumerate() {
+        for (row_idx, line) in projected_lines.iter().enumerate() {
             if row_idx < cursor_row {
                 visual_row =
                     visual_row.saturating_add(wrap_chars_at(line, content_width).len() as u16);
                 continue;
             }
-            // Cursor is in this logical row.
+            // Cursor is in this logical row of the projected text the user sees.
             let prefix: String = line.chars().take(cursor_col).collect();
             let prefix_width = UnicodeWidthStr::width(prefix.as_str());
             visual_row = visual_row.saturating_add((prefix_width / content_width) as u16);
@@ -1075,6 +1085,25 @@ mod tests {
             previous_visual_row.1 < end.1 || previous_visual_row.0 < end.0,
             "moving left across a wrap boundary should move the cursor to an earlier visual cell"
         );
+    }
+
+    #[test]
+    fn attachment_cursor_screen_position_uses_projected_token_width() {
+        let mut e = Editor::new();
+        e.set_text("ab");
+        e.move_left();
+        e.insert_attachment(PathBuf::from("image.png"));
+        assert_eq!(e.render_text(), "a[image0]b");
+
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 6,
+        };
+
+        let cursor = e.cursor_screen_position(area);
+        assert_eq!(cursor, (9, 1));
     }
 
     #[test]
