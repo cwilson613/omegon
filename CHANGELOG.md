@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- **Linux release compatibility path** — release CI now builds GNU/Linux artifacts with `cargo-zigbuild` instead of inheriting the glibc baseline of `ubuntu-latest` from plain `cargo build`. This is intended to lower the Linux ABI floor for Homebrew/GitHub release users rather than forcing a modern-glibc-only support policy.
+
 - **Linux Homebrew install honesty** — install and distribution docs now explicitly warn that Homebrew on Linux does not solve host glibc ABI mismatches for Omegon release binaries. Users hitting `GLIBC_2.38` / `GLIBC_2.39` runtime errors are now directed toward compatible distro/container baselines instead of being left to infer missing dependencies from a failed launch.
 
 - **Release-line correction** — `v0.15.11-rc.2` was published from a mistaken version-line advance after `0.15.10` had not actually closed cleanly. The active candidate line remains the `0.15.10` RC series; `v0.15.10-rc.30` is the corrective RC. See `docs/release-line-correction-0-15-10.md`.

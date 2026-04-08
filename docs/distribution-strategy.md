@@ -65,19 +65,20 @@ If a release artifact is built on too new a Linux baseline, users may install su
 
 ### Current packaging reality
 
+- Linux release CI is moving to `cargo-zigbuild` for GNU/Linux targets so the ABI floor is not implicitly inherited from `ubuntu-latest`
 - Homebrew does **not** patch the host's system glibc to satisfy Omegon
 - a Linux release built against a newer glibc will fail on older distros even when install succeeds
-- install docs must describe this honestly until release artifacts target a lower common baseline or a musl/static path exists
+- install docs must describe this honestly until release artifacts are verified against the intended lower baseline
 
 ### Release requirement
 
-The release process should eventually guarantee at least one Linux distribution path that avoids this footgun:
+The release process should guarantee at least one Linux distribution path that avoids this footgun:
 
-- build on an older glibc baseline, or
+- build Linux release artifacts with a controlled ABI floor (current direction: `cargo-zigbuild`), or
 - ship a musl/static Linux artifact where practical, or
 - publish explicitly versioned distro/ABI-targeted Linux artifacts
 
-Until then, Linux Homebrew documentation must be treated as conditional on host glibc compatibility.
+Until the zigbuild-produced artifacts are verified on enterprise/LTS baselines, Linux Homebrew documentation must be treated as conditional on host glibc compatibility.
 
 ## Open Questions
 
