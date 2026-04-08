@@ -40,6 +40,10 @@ Implement a local-only supervisor model that makes post-restart child management
 
 Phase-1 supervisor authority should introduce a minimal local token/lease model: a per-daemon or per-run opaque token persisted in child registry metadata and checked during restart-path adoption alongside PID liveness and local execution fingerprint. The token is not a remote trust primitive; it is a same-host continuity marker that raises the bar above raw PID/path/model checks while preserving a migration path to identity-backed leases later.
 
+### Control surface schema
+
+Control-surface definition doc written at `docs/omegon-daemon-child-supervisor-control-surface.md`. It defines the durable child registry schema, runtime-only supervision modes (`attached`, `recovered_degraded`), adoption contract, cancel surfaces, activity continuity contract, deployment invariants, and migration seam toward Styrene Identity.
+
 ## Decisions
 
 ### Supervisor v1 is local-only and same-host trusted, not identity-first
