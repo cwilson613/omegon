@@ -809,6 +809,22 @@ pub struct ToolDefinition {
 
 /// A breakdown of prompt/context surface within Omegon's own token-estimation model.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptSectionMetric {
+    pub key: String,
+    pub label: String,
+    pub chars: usize,
+    pub estimated_tokens: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptComposition {
+    pub sections: Vec<PromptSectionMetric>,
+    pub total_chars: usize,
+    pub total_estimated_tokens: usize,
+}
+
+/// A breakdown of prompt/context surface within Omegon's own token-estimation model.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextComposition {
     pub conversation_tokens: usize,
     pub system_tokens: usize,

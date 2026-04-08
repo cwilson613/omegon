@@ -3,8 +3,14 @@
 //! Phase 0: static base prompt + tool definitions + project directives.
 //! Phase 0+: ContextManager provides dynamic injection.
 
-use omegon_traits::ToolDefinition;
+use omegon_traits::{PromptComposition, PromptSectionMetric, ToolDefinition};
 use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptAssembly {
+    pub prompt: String,
+    pub composition: PromptComposition,
+}
 
 /// Build the base system prompt.
 ///
@@ -12,6 +18,11 @@ use std::path::{Path, PathBuf};
 /// lifecycle context (if artifacts exist), global/project AGENTS.md,
 /// project conventions (auto-detected from config files).
 pub fn build_base_prompt(cwd: &Path, tools: &[ToolDefinition]) -> String {
+    build_base_prompt_with_breakdown(cwd, tools).prompt
+}
+
+/// Build the base system prompt and return per-section size instrumentation.
+pub fn build_base_prompt_with_breakdown(cwd: &Path, tools: &[ToolDefinition]) -> PromptAssembly {
     let date = utc_date();
     let tool_list = format_tool_list(tools);
     let lex_imperialis = load_lex_imperialis();
@@ -20,24 +31,53 @@ pub fn build_base_prompt(cwd: &Path, tools: &[ToolDefinition]) -> String {
     let project_directives = load_project_directives(cwd);
     let project_conventions = detect_project_conventions(cwd);
 
-    format!(
-        r#"You are an expert coding assistant. You help by reading files, executing commands, editing code, and writing new files.
+    let sections = vec![
+        prompt_section(
+            "identity",
+            "Identity",
+            "You are an expert coding assistant. You help by reading files, executing commands, editing code, and writing new files.\n\n",
+        ),
+        prompt_section(
+            "tools",
+            "Available Tools",
+            &format!("Available tools: {tool_list}\n\n"),
+        ),
+        prompt_section(
+            "behavior",
+            "Behavior",
+            "# Behavior\n\n- Always respond to the user. Tool calls gather information — they are not the answer. After calling tools, synthesize what you found into a direct response. Never end a turn with only tool calls and no text.\n- Be direct — act, don't narrate intent. Disagree when you see a better path.\n- Read files before editing. Edit requires exact text matches.\n- Ground claims in evidence — cite files and lines. Don't assert about unread code.\n- Every non-trivial change needs tests. Commit when done, do NOT push.\n- Prefer `request_context` before making multiple exploratory tool calls when you need session orientation or recent runtime evidence. Use direct read/search tools first only when you already know the exact target.\n",
+        ),
+        prompt_section("core_directives", "Core Directives", &lex_imperialis),
+        prompt_section("project_lifecycle", "Project Lifecycle", &lifecycle_context),
+        prompt_section("operator_directives", "Operator Directives", &global_directives),
+        prompt_section("project_directives", "Project Directives", &project_directives),
+        prompt_section("project_conventions", "Project Conventions", &project_conventions),
+        prompt_section(
+            "runtime_context",
+            "Runtime Context",
+            &format!(
+                "Current date: {date}\nCurrent working directory: {}",
+                cwd.display()
+            ),
+        ),
+    ];
 
-Available tools: {tool_list}
+    let prompt: String = sections.iter().map(|section| section.content.as_str()).collect();
+    let composition = PromptComposition {
+        sections: sections
+            .iter()
+            .map(|section| PromptSectionMetric {
+                key: section.key.to_string(),
+                label: section.label.to_string(),
+                chars: section.content.len(),
+                estimated_tokens: estimate_chars_to_tokens(section.content.len()),
+            })
+            .collect(),
+        total_chars: prompt.len(),
+        total_estimated_tokens: estimate_chars_to_tokens(prompt.len()),
+    };
 
-# Behavior
-
-- Always respond to the user. Tool calls gather information — they are not the answer. After calling tools, synthesize what you found into a direct response. Never end a turn with only tool calls and no text.
-- Be direct — act, don't narrate intent. Disagree when you see a better path.
-- Read files before editing. Edit requires exact text matches.
-- Ground claims in evidence — cite files and lines. Don't assert about unread code.
-- Every non-trivial change needs tests. Commit when done, do NOT push.
-- Prefer `request_context` before making multiple exploratory tool calls when you need session orientation or recent runtime evidence. Use direct read/search tools first only when you already know the exact target.
-{lex_imperialis}{lifecycle_context}{global_directives}{project_directives}{project_conventions}
-Current date: {date}
-Current working directory: {cwd}"#,
-        cwd = cwd.display()
-    )
+    PromptAssembly { prompt, composition }
 }
 
 /// Rich tool guidelines — how to use each tool well, not just what it does.
@@ -292,6 +332,24 @@ fn find_repo_root(start: &Path) -> Option<PathBuf> {
     None
 }
 
+struct PromptSection<'a> {
+    key: &'a str,
+    label: &'a str,
+    content: String,
+}
+
+fn prompt_section<'a>(key: &'a str, label: &'a str, content: &str) -> PromptSection<'a> {
+    PromptSection {
+        key,
+        label,
+        content: content.to_string(),
+    }
+}
+
+fn estimate_chars_to_tokens(chars: usize) -> usize {
+    chars / 4
+}
+
 fn format_tool_list(tools: &[ToolDefinition]) -> String {
     // Just list names — full descriptions are in the tool definitions
     // sent separately in the API request. No need to duplicate.
@@ -376,6 +434,45 @@ mod tests {
         // Tool list is comma-separated names (descriptions are in API tool defs)
         assert!(prompt.contains("test_tool"));
         assert!(prompt.contains("/tmp"));
+    }
+
+    #[test]
+    fn prompt_breakdown_tracks_sections_and_totals() {
+        let tools = vec![omegon_traits::ToolDefinition {
+            name: "test_tool".into(),
+            label: "test".into(),
+            description: "A test tool".into(),
+            parameters: serde_json::json!({}),
+        }];
+        let assembly = build_base_prompt_with_breakdown(Path::new("/tmp"), &tools);
+        assert_eq!(assembly.composition.total_chars, assembly.prompt.len());
+        assert_eq!(
+            assembly.composition.total_estimated_tokens,
+            assembly.prompt.len() / 4
+        );
+        assert!(
+            assembly
+                .composition
+                .sections
+                .iter()
+                .any(|section| section.key == "identity" && section.chars > 0)
+        );
+        let tools_section = assembly
+            .composition
+            .sections
+            .iter()
+            .find(|section| section.key == "tools")
+            .unwrap();
+        assert!(tools_section.chars >= "Available tools: test_tool\n\n".len());
+        assert_eq!(tools_section.estimated_tokens, tools_section.chars / 4);
+    }
+
+    #[test]
+    fn prompt_breakdown_preserves_prompt_output() {
+        let tools = vec![];
+        let prompt = build_base_prompt(Path::new("/tmp"), &tools);
+        let assembly = build_base_prompt_with_breakdown(Path::new("/tmp"), &tools);
+        assert_eq!(prompt, assembly.prompt);
     }
 
     #[test]
