@@ -185,8 +185,6 @@ pub struct App {
     queued_prompt: Option<(String, Vec<std::path::PathBuf>)>,
     /// Inline operator-facing transient events (replaces floating toasts).
     operator_events: std::collections::VecDeque<OperatorEvent>,
-    /// Pending operator attachments from clipboard paste, applied to the next prompt.
-    pending_attachments: Vec<std::path::PathBuf>,
     /// Previous harness status for diffing on HarnessStatusChanged.
     previous_harness_status: Option<crate::status::HarnessStatus>,
     /// Capability tier detected at startup by systems check probes.
@@ -698,7 +696,6 @@ impl App {
             web_server_addr: None,
             queued_prompt: None,
             operator_events: std::collections::VecDeque::new(),
-            pending_attachments: Vec::new(),
             previous_harness_status: None,
             capability_tier: None,
             tutorial: None,
