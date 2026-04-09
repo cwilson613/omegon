@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 53,
+    "rc_count": 54,
     "notes": [
       "feat(anthropic): prefer adaptive thinking for claude 4.6",
       "feat(auspex): add mode-aware local handoff probe",
@@ -552,6 +552,7 @@
       "fix(tui): clamp engine limit rows before panel overflow",
       "fix(tui): clear conversation viewport before segment repaint",
       "fix(tui): clear footer surfaces before repaint",
+      "fix(tui): clear instrument activity on session reset",
       "fix(tui): clear overlay bodies when popup content shrinks",
       "fix(tui): clear the full root frame on each draw",
       "fix(tui): clip tool rows to panel width",
@@ -608,7 +609,7 @@
       "refactor(tui): remove activity-row phase labels",
       "refactor(tui): simplify slash command auth and context paths"
     ],
-    "rc_version": "0.15.10-rc.58",
-    "last_rc": "2026-04-09T12:15:11Z"
+    "rc_version": "0.15.10-rc.59",
+    "last_rc": "2026-04-09T12:41:25Z"
   }
 }
