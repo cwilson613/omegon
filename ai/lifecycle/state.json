@@ -797,6 +797,21 @@
       "bound_change": null,
       "created_at": "2026-04-09T21:57:40Z",
       "updated_at": "2026-04-09T21:57:40Z"
+    },
+    {
+      "id": "canonical-control-action-matrix",
+      "title": "Canonical control action matrix",
+      "state": "seed",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-04-09T23:22:23Z",
+      "updated_at": "2026-04-09T23:22:23Z"
     }
   ],
   "changes": [],
@@ -1796,6 +1811,15 @@
       "timestamp": "2026-04-09T21:57:40Z",
       "entity_type": "node",
       "entity_id": "runtime-profile-status-contract",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-04-09T23:22:23Z",
+      "entity_type": "node",
+      "entity_id": "canonical-control-action-matrix",
       "from_state": "(new)",
       "to_state": "seed",
       "reason": null,
