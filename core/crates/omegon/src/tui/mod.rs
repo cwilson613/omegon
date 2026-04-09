@@ -3029,16 +3029,32 @@ impl App {
 
             "model" => {
                 if args.is_empty() {
-                    // No args → open interactive selector
-                    self.open_model_selector();
-                    SlashResult::Handled
+                    let s = self.settings();
+                    let provider = s.provider().to_string();
+                    let connected = if s.provider_connected { "Yes" } else { "No" };
+                    SlashResult::Display(format!(
+                        "Model\n  Current Model:   {}\n  Provider:        {}\n  Connected:       {}\n  Context Window:  {} tokens\n  Context Class:   {}\n  Thinking Level:  {}\n\nActions\n  /model list                Show available models\n  /model <provider:model>    Switch model\n  /think <level>             Change reasoning depth\n  /context                   Show context posture",
+                        s.model,
+                        provider,
+                        connected,
+                        s.context_window,
+                        s.context_class.label(),
+                        {
+                            let raw = s.thinking.as_str();
+                            let mut chars = raw.chars();
+                            match chars.next() {
+                                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                                None => String::new(),
+                            }
+                        }
+                    ))
                 } else {
                     match canonical_slash_command("model", args) {
                         Some(CanonicalSlashCommand::ModelList) => {
                             let catalog = self::model_catalog::ModelCatalog::discover();
-                            let mut output = String::from("Available models:\n");
+                            let mut output = String::from("Available Models\n");
                             for (provider_name, models) in &catalog.providers {
-                                output.push_str(&format!("\n{}:\n", provider_name));
+                                output.push_str(&format!("\n{}\n", provider_name));
                                 for model in models {
                                     output.push_str(&format!(
                                         "  {} ({})\n",
@@ -3050,7 +3066,7 @@ impl App {
                         }
                         Some(CanonicalSlashCommand::SetModel(model)) => {
                             let _ = tx.try_send(TuiCommand::SetModel(model.clone()));
-                            SlashResult::Display(format!("Switching model → {model}"))
+                            SlashResult::Display(format!("Switching Model → {model}"))
                         }
                         _ => SlashResult::Display("Usage: /model [list|<provider:model>]".into()),
                     }

@@ -1756,6 +1756,24 @@ fn harness_status_memory_drives_instrument_panel_working_row() {
 }
 
 #[test]
+fn slash_model_no_args_shows_model_status() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/model", &tx);
+    match result {
+        SlashResult::Display(text) => {
+            assert!(text.contains("Model"), "{text}");
+            assert!(text.contains("Current Model:"), "{text}");
+            assert!(text.contains("Provider:"), "{text}");
+            assert!(text.contains("Thinking Level:"), "{text}");
+            assert!(text.contains("/model list"), "{text}");
+        }
+        _ => panic!("/model should display status, got: {result:?}"),
+    }
+}
+
+#[test]
 fn slash_model_command_does_not_optimistically_mutate_settings() {
     let mut app = test_app();
     let tx = test_tx();
