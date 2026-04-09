@@ -3,7 +3,7 @@ source: crates/omegon/src/tui/snapshot_tests.rs
 assertion_line: 347
 expression: render_to_string(&terminal)
 ---
-╭ tools ─────────────────────────────────╮
+┌ tools ─────────────────────────────────┐
 │▸ ⌕ cbase        350ms≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋│
 │▸ ▫ recall       220ms≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋·│
 │✗ ⊕  search      8.1s ≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋·│
@@ -12,4 +12,4 @@ expression: render_to_string(&terminal)
 │                                        │
 │                                        │
 │  4/4 active                            │
-╰────────────────────────────────────────╯
+└────────────────────────────────────────┘

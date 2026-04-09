@@ -169,7 +169,6 @@ impl ConversationView {
             self.segments.push(Segment::separator());
         }
 
-        let text = text.trim_end();
         let non_image_summary = non_image_attachment_summary(attachments);
         let rendered = match (text.is_empty(), non_image_summary) {
             (false, Some(summary)) => format!("{text}\n{summary}"),
