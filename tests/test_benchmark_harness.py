@@ -256,6 +256,70 @@ acceptance:
             self.assertEqual(payload["tokens"]["total"], 145)
             self.assertEqual(payload["tokens"]["cache_write"], 9)
 
+    def test_report_mode_prints_plaintext_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            result_a = repo / "omegon.json"
+            result_b = repo / "claude.json"
+            result_a.write_text(
+                json.dumps(
+                    {
+                        "task_id": "shadow-context-assembly",
+                        "harness": "omegon",
+                        "model": "anthropic:claude-sonnet-4-6",
+                        "status": "pass",
+                        "score": 1.0,
+                        "wall_clock_sec": 812,
+                        "tokens": {"total": 19336},
+                        "omegon_context": {
+                            "sys": 6200,
+                            "tools": 4100,
+                            "conv": 2800,
+                            "mem": 700,
+                            "hist": 3100,
+                            "think": 1134,
+                            "free": 181966,
+                        },
+                    }
+                )
+            )
+            result_b.write_text(
+                json.dumps(
+                    {
+                        "task_id": "shadow-context-assembly",
+                        "harness": "claude-code",
+                        "model": "claude-sonnet-4-6",
+                        "status": "pass",
+                        "score": 1.0,
+                        "wall_clock_sec": 503,
+                        "tokens": {"total": 7211},
+                    }
+                )
+            )
+
+            result = self.run_script("--report", str(result_a), str(result_b), cwd=repo)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Task: shadow-context-assembly", result.stdout)
+            self.assertIn("- omegon / anthropic:claude-sonnet-4-6", result.stdout)
+            self.assertIn("omegon context: sys 6200, tools 4100, conv 2800, mem 700, hist 3100, think 1134", result.stdout)
+            self.assertIn("- claude-code / claude-sonnet-4-6", result.stdout)
+            self.assertIn("token ratio: 2.68x more tokens for omegon", result.stdout)
+            self.assertIn("likely excess buckets: sys + tools + hist", result.stdout)
+
+    def test_requires_task_when_not_reporting(self) -> None:
+        result = self.run_script()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("task is required unless --report is used", result.stderr)
+
+    def test_report_mode_rejects_non_object_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            result_file = repo / "bad.json"
+            result_file.write_text("[]\n")
+            result = self.run_script("--report", str(result_file), cwd=repo)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("result file must contain a JSON object", result.stderr)
+
     def test_claude_adapter_normalizes_json_usage(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir)

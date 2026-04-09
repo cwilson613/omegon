@@ -85,13 +85,18 @@ class HarnessAdapter:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a benchmark task through one harness")
-    parser.add_argument("task", help="Path to task YAML")
+    parser.add_argument("task", nargs="?", help="Path to task YAML")
     parser.add_argument("--root", default=".", help="Repo root for relative task paths")
     parser.add_argument("--harness", help="Harness to run; defaults to first declared harness")
     parser.add_argument("--model", help="Optional model override for implemented adapters")
     parser.add_argument(
         "--out-dir",
         help="Directory for JSON result artifacts (default: <root>/ai/benchmarks/runs)",
+    )
+    parser.add_argument(
+        "--report",
+        nargs="+",
+        help="Print a plain-text comparison report from one or more result JSON artifacts",
     )
     return parser.parse_args()
 
@@ -524,8 +529,116 @@ def write_result(out_dir: Path, spec: TaskSpec, harness: str, payload: dict[str,
     return out_path
 
 
+def load_result(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text())
+    if not isinstance(payload, dict):
+        raise TaskSpecError(f"result file must contain a JSON object: {path}")
+    return payload
+
+
+def fmt_tokens(value: Any) -> str:
+    return "unknown" if value is None else str(value)
+
+
+def fmt_seconds(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        return f"{value:g}s"
+    return "unknown"
+
+
+def find_likely_excess_buckets(results: list[dict[str, Any]]) -> str | None:
+    omegon = next((r for r in results if r.get("harness") == "omegon"), None)
+    if not omegon:
+        return None
+    context = omegon.get("omegon_context")
+    if not isinstance(context, dict):
+        return None
+    ranked = sorted(
+        (
+            (key, value)
+            for key, value in context.items()
+            if key != "free" and isinstance(value, int) and value > 0
+        ),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    if not ranked:
+        return None
+    return " + ".join(key for key, _ in ranked[:3])
+
+
+def render_report(results: list[dict[str, Any]]) -> str:
+    if not results:
+        raise TaskSpecError("report requires at least one result artifact")
+
+    task_id = next((r.get("task_id") for r in results if isinstance(r.get("task_id"), str)), "unknown-task")
+    lines = [f"Task: {task_id}", ""]
+
+    for result in results:
+        harness = result.get("harness", "unknown-harness")
+        model = result.get("model", "unknown-model")
+        status = result.get("status", "unknown")
+        score = result.get("score", "unknown")
+        tokens = result.get("tokens") if isinstance(result.get("tokens"), dict) else {}
+        total_tokens = tokens.get("total") if isinstance(tokens, dict) else None
+        wall_clock = result.get("wall_clock_sec")
+        lines.append(f"- {harness} / {model}")
+        lines.append(f"  status: {status}")
+        lines.append(f"  score: {score}")
+        lines.append(f"  total tokens: {fmt_tokens(total_tokens)}")
+        lines.append(f"  wall clock: {fmt_seconds(wall_clock)}")
+        omegon_context = result.get("omegon_context")
+        if isinstance(omegon_context, dict):
+            ordered = ["sys", "tools", "conv", "mem", "hist", "think"]
+            parts = [
+                f"{key} {omegon_context[key]}"
+                for key in ordered
+                if isinstance(omegon_context.get(key), int)
+            ]
+            if parts:
+                lines.append(f"  omegon context: {', '.join(parts)}")
+        lines.append("")
+
+    passing = [
+        r for r in results if r.get("status") == "pass" and isinstance(((r.get("tokens") or {}).get("total")), int)
+    ]
+    if len(passing) >= 2:
+        baseline = passing[0]
+        challenger = passing[1]
+        base_tokens = baseline["tokens"]["total"]
+        challenger_tokens = challenger["tokens"]["total"]
+        if challenger_tokens > 0:
+            ratio = base_tokens / challenger_tokens
+            more_or_less = "more" if ratio >= 1.0 else "less"
+            ratio_display = ratio if ratio >= 1.0 else (1 / ratio)
+            lines.append("Delta")
+            lines.append(
+                f"- token ratio: {ratio_display:.2f}x {more_or_less} tokens for {baseline.get('harness', 'baseline')}"
+            )
+            likely = find_likely_excess_buckets(results)
+            if likely:
+                lines.append(f"- likely excess buckets: {likely}")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def run_report_mode(paths: list[str]) -> int:
+    try:
+        results = [load_result(Path(path).resolve()) for path in paths]
+        print(render_report(results), end="")
+        return 0
+    except (OSError, json.JSONDecodeError, TaskSpecError) as err:
+        print(str(err), file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     args = parse_args()
+    if args.report:
+        return run_report_mode(args.report)
+    if not args.task:
+        print("task is required unless --report is used", file=sys.stderr)
+        return 1
     root = Path(args.root).resolve()
     task_path = Path(args.task).resolve()
 
