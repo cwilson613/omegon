@@ -189,6 +189,12 @@ pub fn classify_slash_command(name: &str, args: &str) -> ClassifiedAction {
     }
 }
 
+pub fn classify_remote_slash_command(name: &str, args: &str) -> ClassifiedAction {
+    let mut classified = classify_slash_command(name, args);
+    classified.ingress = ControlIngress::Ipc;
+    classified
+}
+
 fn infer_provider_from_args_or_default(raw: &str) -> &str {
     raw.split(':').next().unwrap_or("")
 }

@@ -168,6 +168,26 @@ async fn handle_client_command(
         "slash_command" => {
             let name = cmd["name"].as_str().unwrap_or("").to_string();
             let args = cmd["args"].as_str().unwrap_or("").to_string();
+            let caller_role = match cmd["caller_role"].as_str().unwrap_or("admin") {
+                "read" => crate::control_actions::ControlRole::Read,
+                "edit" => crate::control_actions::ControlRole::Edit,
+                _ => crate::control_actions::ControlRole::Admin,
+            };
+            let classified = crate::control_actions::classify_remote_slash_command(&name, &args);
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx
+                    .send(serde_json::json!({
+                        "type": "system_message",
+                        "role": "system",
+                        "message": format!(
+                            "caller role is insufficient for /{} {}",
+                            name,
+                            args
+                        ).trim().to_string(),
+                    }))
+                    .await;
+                return;
+            }
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
             let accepted = command_tx
                 .send(WebCommand::SlashCommand {

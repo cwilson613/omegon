@@ -360,6 +360,19 @@ impl IpcConnection {
                 "run_slash_command" => {
                     let req = serde_json::from_value::<SlashCommandRequest>(payload)
                         .context("parse run_slash_command")?;
+                    let caller_role = parse_caller_role(req.caller_role.as_deref());
+                    let classified =
+                        crate::control_actions::classify_remote_slash_command(&req.name, &req.args);
+                    if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                        send_error(
+                            &out_tx,
+                            req_id,
+                            IpcErrorCode::InvalidPayload,
+                            "caller role is insufficient for run_slash_command",
+                        )
+                        .await;
+                        continue;
+                    }
                     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
                     let accepted = cfg
                         .command_tx
