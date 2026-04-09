@@ -73,8 +73,6 @@ pub struct PromptSubmission {
 pub enum TuiCommand {
     /// User submitted a prompt with optional image attachments.
     SubmitPrompt(PromptSubmission),
-    /// User submitted a prompt with image attachments (paths).
-    UserPromptWithImages(String, Vec<std::path::PathBuf>),
     /// User wants to quit (double Ctrl+C, or /exit).
     Quit,
     /// Switch the model for the next turn.

@@ -2101,28 +2101,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     ss.busy = runtime.is_busy();
                 }
             }
-
-            tui::TuiCommand::UserPromptWithImages(text, image_paths) => {
-                let _ = events_tx.send(AgentEvent::SystemNotification {
-                    message: "legacy prompt path used; normalizing through SubmitPrompt compatibility".to_string(),
-                });
-                let compat = tui::PromptSubmission {
-                    text,
-                    image_paths,
-                    submitted_by: "legacy-tui".to_string(),
-                    via: "tui",
-                };
-                let actor = RuntimeActor {
-                    kind: RuntimeActorKind::Tui,
-                    label: compat.submitted_by.clone(),
-                };
-                runtime.enqueue_prompt(compat.text, compat.image_paths, actor, ControlSurface::Tui);
-                if runtime.is_busy() {
-                    continue;
-                }
-                let _ = runtime.maybe_start_next_turn();
-                runtime.complete_active_turn();
-            }
         }
     }
 
