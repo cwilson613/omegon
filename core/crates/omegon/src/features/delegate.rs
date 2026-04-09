@@ -184,11 +184,10 @@ impl DelegateRunner {
 
         self.result_store.store_task(task_entry);
 
-        // Spawn a background task that simulates work
-        // In a real implementation, this spawns a headless omegon child process
+        // Best-effort simulated background completion.
         let store = self.result_store.clone();
         let field_kit = field_kit_context;
-        tokio::spawn(async move {
+        crate::task_spawn::spawn_best_effort("delegate-simulated-task", async move {
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
             let result = if field_kit.is_empty() {

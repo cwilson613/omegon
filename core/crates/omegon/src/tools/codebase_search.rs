@@ -198,7 +198,7 @@ impl CodescanProvider {
 
         let repo_path = self.repo_path.clone();
         let cache_arc = Arc::clone(&self.cache);
-        tokio::spawn(async move {
+        crate::task_spawn::spawn_best_effort("codescan-head-check", async move {
             let Ok(out) = tokio::process::Command::new("git")
                 .args(["rev-parse", "HEAD"])
                 .current_dir(&repo_path)
