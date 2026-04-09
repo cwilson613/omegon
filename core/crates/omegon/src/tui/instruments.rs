@@ -562,11 +562,27 @@ impl InstrumentPanel {
             return;
         }
 
-        let panels = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
-            .split(area);
+        let split = Layout::horizontal([
+            Constraint::Percentage(55),
+            Constraint::Length(1),
+            Constraint::Percentage(45),
+        ])
+        .split(area);
 
-        self.render_inference_panel(panels[0], frame, t);
-        self.render_tools_panel(panels[1], frame, t);
+        let seam = split[1];
+        if seam.width > 0 {
+            clear_area(seam, frame.buffer_mut(), panel_bg(t));
+            for y in seam.top()..seam.bottom() {
+                if let Some(cell) = frame.buffer_mut().cell_mut(Position::new(seam.x, y)) {
+                    cell.set_char('│');
+                    cell.set_fg(t.border_dim());
+                    cell.set_bg(panel_bg(t));
+                }
+            }
+        }
+
+        self.render_inference_panel(split[0], frame, t);
+        self.render_tools_panel(split[2], frame, t);
     }
 
     fn context_breakdown(&self) -> [(ContextBand, f64); 7] {
@@ -1994,11 +2010,12 @@ mod tests {
             .draw(|f| {
                 let panels = Layout::horizontal([
                     Constraint::Percentage(55),
+                    Constraint::Length(1),
                     Constraint::Percentage(45),
                 ])
                 .split(area);
                 let inference_inner = Block::default().borders(Borders::ALL).inner(panels[0]);
-                let tools_inner = Block::default().borders(Borders::ALL).inner(panels[1]);
+                let tools_inner = Block::default().borders(Borders::ALL).inner(panels[2]);
                 {
                     let buf = f.buffer_mut();
                     for y in area.top()..area.bottom() {
@@ -2038,10 +2055,14 @@ mod tests {
             })
             .unwrap();
 
-        let panels = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
-            .split(area);
+        let panels = Layout::horizontal([
+            Constraint::Percentage(55),
+            Constraint::Length(1),
+            Constraint::Percentage(45),
+        ])
+        .split(area);
         let inference_inner = Block::default().borders(Borders::ALL).inner(panels[0]);
-        let tools_inner = Block::default().borders(Borders::ALL).inner(panels[1]);
+        let tools_inner = Block::default().borders(Borders::ALL).inner(panels[2]);
         let buf = terminal.backend().buffer();
 
         for y in tools_inner.y..tools_inner.bottom() {
@@ -2100,9 +2121,13 @@ mod tests {
 
         terminal.draw(|f| panel.render(area, f, &t)).unwrap();
 
-        let panels = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
-            .split(area);
-        let tools_inner = Block::default().borders(Borders::ALL).inner(panels[1]);
+        let panels = Layout::horizontal([
+            Constraint::Percentage(55),
+            Constraint::Length(1),
+            Constraint::Percentage(45),
+        ])
+        .split(area);
+        let tools_inner = Block::default().borders(Borders::ALL).inner(panels[2]);
         let buf = terminal.backend().buffer();
         let rendered = (tools_inner.y..tools_inner.bottom())
             .map(|y| {
