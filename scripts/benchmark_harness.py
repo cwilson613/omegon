@@ -521,7 +521,10 @@ def main() -> int:
     run_started = time.monotonic()
     adapter = adapter_impl.run()
 
-    acceptance_status, acceptance_elapsed, acceptance_results = run_acceptance(spec.acceptance, repo_path)
+    acceptance_status, acceptance_elapsed, acceptance_results = run_acceptance(
+        spec.acceptance,
+        clean_repo_path,
+    )
     payload = build_result(
         spec=spec,
         harness=harness,

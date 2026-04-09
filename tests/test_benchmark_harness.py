@@ -141,6 +141,64 @@ acceptance:
             self.assertEqual(payload["harness"], "omegon")
             self.assertEqual(payload["extra"]["context"]["sys"], 100)
 
+    def test_acceptance_runs_in_clean_repo_not_source_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            self.init_repo(repo)
+            subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "config", "user.name", "Benchmark Test"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.email", "benchmark@example.com"], cwd=repo, check=True)
+            (repo / "marker.txt").write_text("source\n")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, text=True)
+
+            fake_cargo = repo / "scripts" / "cargo"
+            fake_cargo.write_text(
+                "#!/bin/sh\n"
+                "usage_json=''\n"
+                "prev=''\n"
+                "for arg in \"$@\"; do\n"
+                "  if [ \"$prev\" = \"--usage-json\" ]; then usage_json=\"$arg\"; fi\n"
+                "  prev=\"$arg\"\n"
+                "done\n"
+                "printf 'clean\n' > marker.txt\n"
+                "if [ -n \"$usage_json\" ]; then\n"
+                "  cat > \"$usage_json\" <<'JSON'\n"
+                '{"input_tokens": 10, "output_tokens": 5, "cache_tokens": 0}\n'
+                "JSON\n"
+                "fi\n"
+                "exit 0\n"
+            )
+            fake_cargo.chmod(0o755)
+
+            task = self.write_task(
+                repo,
+                """
+id: t6
+repo: .
+base_ref: main
+prompt: hi
+harnesses: [omegon]
+acceptance:
+  - python3 -c \"from pathlib import Path; import sys; sys.exit(0 if Path('marker.txt').read_text().strip() == 'clean' else 1)\"
+""",
+            )
+            env = dict(os.environ)
+            env["PATH"] = f"{repo / 'scripts'}:{env['PATH']}"
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(task), "--root", str(repo)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(Path(result.stdout.strip()).read_text())
+            self.assertEqual(payload["status"], "pass")
+            self.assertEqual((repo / "marker.txt").read_text().strip(), "source")
+
     def test_pi_adapter_normalizes_json_usage(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir)
