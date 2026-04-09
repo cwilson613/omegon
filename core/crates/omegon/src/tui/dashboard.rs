@@ -341,7 +341,7 @@ impl DashboardState {
 
         let block = Block::default()
             .borders(Borders::LEFT)
-            .border_type(ratatui::widgets::BorderType::Rounded)
+            .border_type(ratatui::widgets::BorderType::Plain)
             .border_style(Style::default().fg(if self.sidebar_active {
                 t.accent()
             } else {

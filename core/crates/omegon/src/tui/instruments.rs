@@ -883,7 +883,7 @@ impl InstrumentPanel {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border).bg(t.footer_bg()))
-            .border_type(ratatui::widgets::BorderType::Rounded)
+            .border_type(ratatui::widgets::BorderType::Plain)
             .title(Span::styled(
                 " inference ",
                 Style::default().fg(label).bg(t.footer_bg()),
@@ -1237,7 +1237,7 @@ impl InstrumentPanel {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border).bg(t.footer_bg()))
-            .border_type(ratatui::widgets::BorderType::Rounded)
+            .border_type(ratatui::widgets::BorderType::Plain)
             .title(Span::styled(
                 title_text,
                 Style::default().fg(title_color).bg(t.footer_bg()),
@@ -1401,7 +1401,7 @@ impl InstrumentPanel {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border).bg(t.footer_bg()))
-            .border_type(ratatui::widgets::BorderType::Rounded)
+            .border_type(ratatui::widgets::BorderType::Plain)
             .title(Span::styled(
                 " tools ",
                 Style::default().fg(label).bg(t.footer_bg()),

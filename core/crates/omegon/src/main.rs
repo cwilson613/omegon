@@ -333,6 +333,13 @@ enum Commands {
         #[command(subcommand)]
         action: SkillsAction,
     },
+
+    /// Hidden benchmark-oriented commands used by the local comparison harness.
+    #[command(hide = true)]
+    Bench {
+        #[command(subcommand)]
+        action: BenchAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -341,6 +348,20 @@ enum SkillsAction {
     List,
     /// Install all bundled skills to ~/.omegon/skills/.
     Install,
+}
+
+#[derive(Subcommand)]
+enum BenchAction {
+    /// Run a single benchmark task prompt headlessly and emit usage JSON.
+    RunTask {
+        /// Prompt text to execute.
+        #[arg(long)]
+        prompt: String,
+
+        /// Path to write benchmark usage/result JSON.
+        #[arg(long)]
+        usage_json: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -558,6 +579,36 @@ async fn main() -> anyhow::Result<()> {
             SkillsAction::List => skills::cmd_list().map_err(Into::into),
             SkillsAction::Install => skills::cmd_install().map_err(Into::into),
         },
+        Some(Commands::Bench { ref action }) => match action {
+            BenchAction::RunTask { prompt, usage_json } => {
+                let mut bench_cli = Cli {
+                    command: None,
+                    cwd: cli.cwd.clone(),
+                    model: cli.model.clone(),
+                    prompt: Some(prompt.clone()),
+                    prompt_file: None,
+                    max_turns: cli.max_turns,
+                    max_retries: cli.max_retries,
+                    resume: cli.resume.clone(),
+                    fresh: cli.fresh,
+                    no_session: cli.no_session,
+                    no_splash: cli.no_splash,
+                    tutorial: cli.tutorial,
+                    smoke: false,
+                    smoke_cleave: false,
+                    initial_prompt: None,
+                    initial_prompt_file: None,
+                    context_class: cli.context_class.clone(),
+                    log_level: cli.log_level.clone(),
+                    log_file: cli.log_file.clone(),
+                    ollama_integration: cli.ollama_integration,
+                    ollama_model: cli.ollama_model.clone(),
+                    yes: cli.yes,
+                };
+                bench_cli.prompt_file = None;
+                run_agent_command(&bench_cli, Some(usage_json.clone())).await
+            }
+        },
         None => {
             // No subcommand: interactive if no --prompt, headless if --prompt given
             if let Some(warning) = anthropic_subscription_automation_warning(&cli) {
@@ -569,7 +620,7 @@ async fn main() -> anyhow::Result<()> {
             } else if cli.smoke_cleave {
                 cleave_smoke::run(&cli).await
             } else if cli.prompt.is_some() || cli.prompt_file.is_some() {
-                run_agent_command(&cli).await
+                run_agent_command(&cli, None).await
             } else {
                 run_interactive_command(&cli).await
             }
@@ -2142,7 +2193,28 @@ async fn run_smoke_command(cli: &Cli) -> anyhow::Result<()> {
     std::process::exit(exit_code);
 }
 
-async fn run_agent_command(cli: &Cli) -> anyhow::Result<()> {
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+struct BenchmarkUsageSummary {
+    model: Option<String>,
+    provider: Option<String>,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_tokens: u64,
+    estimated_tokens: usize,
+    context_window: usize,
+    context_composition: omegon_traits::ContextComposition,
+    provider_telemetry: Option<omegon_traits::ProviderTelemetrySnapshot>,
+}
+
+fn write_benchmark_usage_json(path: &Path, summary: &BenchmarkUsageSummary) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, serde_json::to_vec_pretty(summary)?)?;
+    Ok(())
+}
+
+async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Result<()> {
     tracing::info!(model = %cli.model, "omegon-agent starting");
 
     if maybe_run_injected_cleave_smoke_child(&cli.cwd)? {
@@ -2221,6 +2293,8 @@ async fn run_agent_command(cli: &Cli) -> anyhow::Result<()> {
 
     // ─── Event channel ──────────────────────────────────────────────────
     let (events_tx, mut events_rx) = broadcast::channel::<AgentEvent>(256);
+    let benchmark_summary = std::sync::Arc::new(std::sync::Mutex::new(BenchmarkUsageSummary::default()));
+    let benchmark_summary_task = std::sync::Arc::clone(&benchmark_summary);
 
     // ─── Event printer (headless mode: print to stderr) ─────────────────
     tokio::spawn(async move {
@@ -2263,10 +2337,29 @@ async fn run_agent_command(cli: &Cli) -> anyhow::Result<()> {
                 }
                 AgentEvent::TurnEnd {
                     turn,
+                    model,
+                    provider,
+                    estimated_tokens,
+                    context_window,
+                    context_composition,
                     actual_input_tokens,
                     actual_output_tokens,
-                    ..
+                    cache_read_tokens,
+                    provider_telemetry,
                 } => {
+                    if let Ok(mut summary) = benchmark_summary_task.lock() {
+                        *summary = BenchmarkUsageSummary {
+                            model,
+                            provider,
+                            input_tokens: actual_input_tokens,
+                            output_tokens: actual_output_tokens,
+                            cache_tokens: cache_read_tokens,
+                            estimated_tokens,
+                            context_window,
+                            context_composition,
+                            provider_telemetry,
+                        };
+                    }
                     if actual_input_tokens > 0 || actual_output_tokens > 0 {
                         tracing::info!(
                             "── Turn {turn} complete — in:{actual_input_tokens} out:{actual_output_tokens} ──"
@@ -2327,6 +2420,14 @@ async fn run_agent_command(cli: &Cli) -> anyhow::Result<()> {
 
     // Graceful bridge shutdown
     bridge.shutdown().await;
+
+    if let Some(path) = usage_json.as_ref() {
+        let summary = benchmark_summary
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default();
+        write_benchmark_usage_json(path, &summary)?;
+    }
 
     match &result {
         Ok(()) => {
@@ -3100,6 +3201,7 @@ fn format_auth_status(status: &auth::AuthStatus) -> String {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+    use tempfile::tempdir;
 
     #[test]
     fn format_agent_error_extracts_message() {
@@ -3516,6 +3618,59 @@ mod tests {
     }
 
     #[test]
+    fn hidden_bench_run_task_cli_parses() {
+        let cli = Cli::try_parse_from([
+            "omegon",
+            "bench",
+            "run-task",
+            "--prompt",
+            "benchmark prompt",
+            "--usage-json",
+            "usage.json",
+        ])
+        .expect("bench run-task should parse");
+
+        match cli.command.unwrap() {
+            Commands::Bench {
+                action: BenchAction::RunTask { prompt, usage_json },
+            } => {
+                assert_eq!(prompt, "benchmark prompt");
+                assert_eq!(usage_json, PathBuf::from("usage.json"));
+            }
+            _ => panic!("wrong command parsed"),
+        }
+    }
+
+    #[test]
+    fn benchmark_usage_json_writer_persists_summary() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("bench").join("usage.json");
+        let summary = BenchmarkUsageSummary {
+            model: Some("anthropic:claude-sonnet-4-6".into()),
+            provider: Some("anthropic".into()),
+            input_tokens: 123,
+            output_tokens: 45,
+            cache_tokens: 6,
+            estimated_tokens: 321,
+            context_window: 200_000,
+            context_composition: omegon_traits::ContextComposition {
+                system_tokens: 100,
+                tool_schema_tokens: 50,
+                conversation_tokens: 75,
+                memory_tokens: 10,
+                tool_history_tokens: 20,
+                thinking_tokens: 30,
+                free_tokens: 199_715,
+            },
+            provider_telemetry: None,
+        };
+
+        write_benchmark_usage_json(&path, &summary).unwrap();
+        let written: BenchmarkUsageSummary =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(written, summary);
+    }
+
     fn anthropic_subscription_automation_warning_only_for_headless_anthropic_oauth() {
         unsafe {
             std::env::remove_var("ANTHROPIC_API_KEY");
