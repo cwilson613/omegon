@@ -366,6 +366,43 @@ acceptance:
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(captured.read_text().strip(), "openai:gpt-4o")
 
+    def test_report_mode_accepts_directory_and_handles_zero_token_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            runs = repo / "runs"
+            runs.mkdir()
+            (runs / "a-omegon.json").write_text(
+                json.dumps(
+                    {
+                        "task_id": "hello-bench",
+                        "harness": "omegon",
+                        "model": "anthropic:claude-sonnet-4-6",
+                        "status": "pass",
+                        "score": 1.0,
+                        "wall_clock_sec": 10,
+                        "tokens": {"total": 0},
+                    }
+                )
+            )
+            (runs / "b-pi.json").write_text(
+                json.dumps(
+                    {
+                        "task_id": "hello-bench",
+                        "harness": "pi",
+                        "model": "claude-sonnet-4-6",
+                        "status": "pass",
+                        "score": 1.0,
+                        "wall_clock_sec": 11,
+                        "tokens": {"total": 11},
+                    }
+                )
+            )
+
+            result = self.run_script("--report", str(runs), cwd=repo)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Task: hello-bench", result.stdout)
+            self.assertIn("- token ratio: unavailable — baseline result reported zero total tokens", result.stdout)
+
     def test_report_mode_prints_plaintext_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir)

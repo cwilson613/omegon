@@ -611,12 +611,23 @@ def render_report(results: list[dict[str, Any]]) -> str:
     ]
     if len(passing) >= 2:
         baseline = next((result for result in passing if result.get("harness") == "omegon"), passing[0])
-        challenger = next((result for result in passing if result is not baseline), None)
+        challenger = next(
+            (
+                result
+                for result in passing
+                if result is not baseline and isinstance(((result.get("tokens") or {}).get("total")), int)
+                and result["tokens"]["total"] > 0
+            ),
+            None,
+        )
         if challenger is None:
+            if baseline.get("harness") == "omegon" and ((baseline.get("tokens") or {}).get("total") == 0):
+                lines.append("Delta")
+                lines.append("- token ratio: unavailable — baseline result reported zero total tokens")
             return "\n".join(lines).rstrip() + "\n"
         base_tokens = baseline["tokens"]["total"]
         challenger_tokens = challenger["tokens"]["total"]
-        if challenger_tokens > 0:
+        if base_tokens > 0 and challenger_tokens > 0:
             ratio = base_tokens / challenger_tokens
             more_or_less = "more" if ratio >= 1.0 else "less"
             ratio_display = ratio if ratio >= 1.0 else (1 / ratio)
@@ -627,6 +638,9 @@ def render_report(results: list[dict[str, Any]]) -> str:
             likely = find_likely_excess_buckets(results)
             if likely:
                 lines.append(f"- likely excess buckets: {likely}")
+        elif baseline.get("harness") == "omegon" and base_tokens == 0:
+            lines.append("Delta")
+            lines.append("- token ratio: unavailable — baseline result reported zero total tokens")
 
     return "\n".join(lines).rstrip() + "\n"
 

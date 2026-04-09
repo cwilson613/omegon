@@ -334,6 +334,8 @@ Delta
 
 When `--report` is pointed at a directory, the harness should read `*.json` result files in that directory, ignore non-JSON files, and emit one grouped summary per `task_id`. This is intentionally minimal: no recursive scan, no persisted aggregate artifact, just directory-backed reporting over the existing per-run JSON schema.
 
+The report must degrade honestly on incomplete historical artifacts. If a result lacks usable `tokens.total` data, the report should print `unknown` or mark the token ratio unavailable rather than crashing or inventing a comparison.
+
 That is enough to drive engineering decisions.
 No charting is required for v1.
 
