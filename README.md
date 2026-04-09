@@ -60,7 +60,13 @@ Docs: <https://omegon.styrene.dev/docs/install>
 
 ```sh
 omegon login openai-codex
-omegon
+omegon --slim
+```
+
+If you prefer quick interactive chats with a smaller prompt/tool surface, make it the default shell shortcut:
+
+```sh
+alias om='omegon --slim'
 ```
 
 ### API-key path
@@ -145,6 +151,17 @@ That means:
 - concrete file boundaries
 - merge and conflict detection
 - better operator control over risky multi-file changes
+
+### Slim mode for quick sessions
+
+Use `--slim` when you want Omegon to start with a smaller default surface:
+
+- lower default thinking (`low`)
+- smaller requested working-set class (`squad`)
+- fewer always-on prompt sections
+- a more aggressively disabled default tool set
+
+This is meant for fast interactive work, not full lifecycle-heavy orchestration. Tools can still be re-enabled during the session.
 
 ---
 
