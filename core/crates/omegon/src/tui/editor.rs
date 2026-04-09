@@ -323,6 +323,24 @@ impl Editor {
         }
     }
 
+    fn expand_collapsed_paste_at_cursor(&mut self) -> bool {
+        let projected_idx = self.projected_cursor();
+        let Some(span) = self.token_span_containing_cursor(projected_idx) else {
+            return false;
+        };
+        let Some(InlineToken::CollapsedPaste { text }) = self.inline_tokens.get(span.token_ord).cloned() else {
+            return false;
+        };
+
+        let start = Self::char_to_byte_idx(&self.model_text, span.model_char_idx);
+        let end = Self::char_to_byte_idx(&self.model_text, span.model_char_idx + 1);
+        self.model_text.replace_range(start..end, &text);
+        self.inline_tokens.remove(span.token_ord);
+        let cursor = span.start.min(self.projection().text.chars().count());
+        self.sync_textarea_from_model(cursor);
+        true
+    }
+
     fn remove_token(&mut self, span: TokenSpan) {
         let start = Self::char_to_byte_idx(&self.model_text, span.model_char_idx);
         let end = Self::char_to_byte_idx(&self.model_text, span.model_char_idx + 1);
@@ -723,6 +741,7 @@ impl Editor {
 
     /// Insert a character directly (for compat with old API).
     pub fn insert(&mut self, c: char) {
+        let _ = self.expand_collapsed_paste_at_cursor();
         let projected_idx = self.projected_cursor();
         let model_idx = self.projected_cursor_to_model_insert_idx(projected_idx);
         let byte_idx = Self::char_to_byte_idx(&self.model_text, model_idx);
@@ -759,11 +778,15 @@ impl Editor {
     pub fn move_left(&mut self) {
         self.textarea
             .move_cursor(ratatui_textarea::CursorMove::Back);
+        let _ = self.expand_collapsed_paste_at_cursor();
+        self.normalize_cursor_outside_token(false);
     }
 
     pub fn move_right(&mut self) {
         self.textarea
             .move_cursor(ratatui_textarea::CursorMove::Forward);
+        let _ = self.expand_collapsed_paste_at_cursor();
+        self.normalize_cursor_outside_token(true);
     }
 
     pub fn move_home(&mut self) {
@@ -993,6 +1016,31 @@ mod tests {
         e.move_left();
         e.backspace();
         assert_eq!(e.render_text(), "ab");
+    }
+
+    #[test]
+    fn moving_into_collapsed_paste_expands_it_for_editing() {
+        let mut e = Editor::new();
+        e.insert('a');
+        e.insert_paste("alpha\n\nbeta\n");
+        e.insert('b');
+        assert_eq!(e.render_text(), "a[Pasted text #1 +2 lines]b");
+
+        e.move_left();
+        e.move_left();
+
+        assert_eq!(e.render_text(), "aalpha\n\nbeta\nb");
+    }
+
+    #[test]
+    fn typing_into_collapsed_paste_expands_then_inserts() {
+        let mut e = Editor::new();
+        e.insert_paste("alpha\n\nbeta\n");
+        assert_eq!(e.render_text(), "[Pasted text #1 +2 lines]");
+
+        e.insert('!');
+
+        assert_eq!(e.render_text(), "!alpha\n\nbeta\n");
     }
 
     #[test]

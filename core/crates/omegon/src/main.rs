@@ -1152,17 +1152,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         secrets: agent.secrets.clone(),
         context_metrics: agent.context_metrics.clone(),
     };
-    let mut runtime_state = Some(InteractiveAgentState {
-        bus: std::mem::take(&mut agent.bus),
-        context_manager: std::mem::replace(
-            &mut agent.context_manager,
-            crate::context::ContextManager::new(String::new(), vec![]),
-        ),
-        conversation: std::mem::replace(
-            &mut agent.conversation,
-            crate::conversation::ConversationState::new(),
-        ),
-    });
+    let mut runtime_state = Some(take_interactive_agent_state(&mut agent));
 
     // ─── Emit session start to bus features ────────────────────────────
     runtime_state
@@ -2283,6 +2273,23 @@ struct InteractiveAgentState {
     bus: crate::bus::EventBus,
     context_manager: crate::context::ContextManager,
     conversation: crate::conversation::ConversationState,
+}
+
+fn take_interactive_agent_state(agent: &mut setup::AgentSetup) -> InteractiveAgentState {
+    InteractiveAgentState {
+        bus: std::mem::take(&mut agent.bus),
+        context_manager: std::mem::replace(
+            &mut agent.context_manager,
+            crate::context::ContextManager::new(
+                "interactive-runtime-state-moved".to_string(),
+                vec![],
+            ),
+        ),
+        conversation: std::mem::replace(
+            &mut agent.conversation,
+            crate::conversation::ConversationState::new(),
+        ),
+    }
 }
 
 #[derive(Clone)]
