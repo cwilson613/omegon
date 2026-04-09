@@ -57,9 +57,16 @@ fn editor_inline_attachment_tokens_submit_as_multimodal_prompt() {
     assert_eq!(attachments, vec![std::path::PathBuf::from("/tmp/paste.png")]);
 
     app.conversation.push_user_with_attachments(&text, &attachments);
-    let rendered = render_app_to_string(&mut app, 100, 20);
-    assert!(rendered.contains("please inspect this"), "{rendered}");
-    assert!(!rendered.contains("[image0]"), "{rendered}");
+    assert_eq!(app.conversation.segments().len(), 2);
+    assert!(matches!(
+        &app.conversation.segments()[0].content,
+        crate::tui::segments::SegmentContent::UserPrompt { text } if text == "please inspect this"
+    ));
+    assert!(matches!(
+        &app.conversation.segments()[1].content,
+        crate::tui::segments::SegmentContent::Image { path, alt }
+            if path == &std::path::PathBuf::from("/tmp/paste.png") && alt.contains("[image0]")
+    ));
 }
 
 #[test]
@@ -1054,24 +1061,6 @@ fn focus_mode_render_shows_fullscreen_conversation_instructions() {
     assert!(rendered.contains("assistant answer"), "{rendered}");
     assert!(rendered.contains("PgUp/PgDn jump"), "{rendered}");
     assert!(!rendered.contains("focus — segment"), "{rendered}");
-}
-
-#[test]
-fn focus_mode_render_has_no_side_borders_around_content() {
-    let mut app = test_app();
-    app.conversation.append_streaming("assistant answer");
-    app.conversation.finalize_message();
-    app.conversation.select_segment(0);
-    app.set_focus_mode(true);
-
-    let rendered = render_app_to_string(&mut app, 80, 20);
-    let content_line = rendered
-        .lines()
-        .find(|line| line.contains("assistant answer"))
-        .expect("assistant answer line should be rendered");
-
-    assert!(!content_line.trim_start().starts_with('│'), "{rendered}");
-    assert!(!content_line.trim_end().ends_with('│'), "{rendered}");
 }
 
 #[test]

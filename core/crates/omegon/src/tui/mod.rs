@@ -47,7 +47,7 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
@@ -2423,13 +2423,16 @@ impl App {
         self.dashboard_area = None;
 
         let t = &self.theme;
-        let conv_widget = conv_widget::ConversationWidget::new(self.conversation.segments(), t.as_ref());
-        let conv_state = &mut self.conversation.conv_state;
-        frame.render_stateful_widget(conv_widget, area, conv_state);
+        {
+            let (segments, conv_state) = self.conversation.segments_and_state();
+            let conv_widget = conv_widget::ConversationWidget::new(segments, t.as_ref());
+            frame.render_stateful_widget(conv_widget, area, conv_state);
+        }
 
         let image_renders: Vec<(usize, Rect, std::path::PathBuf)> = {
             let segments = self.conversation.segments();
-            conv_state
+            self.conversation
+                .conv_state
                 .visible_image_areas(segments, area)
                 .into_iter()
                 .filter_map(|(idx, image_area)| {
