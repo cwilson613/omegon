@@ -1496,7 +1496,10 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                             while let Some(web_cmd) = rx.recv().await {
                                 let tui_cmd = match web_cmd {
                                     web::WebCommand::UserPrompt(text) => {
-                                        tui::TuiCommand::UserPrompt(text)
+                                        tui::TuiCommand::SubmitPrompt(crate::tui::PromptSubmission {
+                                            text,
+                                            image_paths: Vec::new(),
+                                        })
                                     }
                                     web::WebCommand::SlashCommand {
                                         name,
@@ -1914,6 +1917,152 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 }
             }
 
+            tui::TuiCommand::SubmitPrompt(prompt) => {
+                if prompt.image_paths.is_empty() {
+                    agent.conversation.push_user(prompt.text.clone());
+
+                    // Read current settings for this turn
+                    let (model, max_turns) = {
+                        let s = shared_settings.lock().unwrap();
+                        (s.model.clone(), s.max_turns)
+                    };
+
+                    let loop_config = r#loop::LoopConfig {
+                        max_turns,
+                        soft_limit_turns: if max_turns > 0 { max_turns * 2 / 3 } else { 0 },
+                        max_retries: 0,
+                        retry_delay_ms: 750,
+                        model,
+                        cwd: agent.cwd.clone(),
+                        extended_context: false,
+                        settings: Some(shared_settings.clone()),
+                        secrets: Some(agent.secrets.clone()),
+                        force_compact: Some(pending_compact.clone()),
+                    };
+
+                    let cancel = CancellationToken::new();
+                    if let Ok(mut guard) = shared_cancel.lock() {
+                        *guard = Some(cancel.clone());
+                    }
+
+                    let bridge_guard = bridge.read().await;
+                    if let Err(e) = r#loop::run(
+                        bridge_guard.as_ref(),
+                        &mut agent.bus,
+                        &mut agent.context_manager,
+                        &mut agent.conversation,
+                        &events_tx,
+                        cancel,
+                        &loop_config,
+                    )
+                    .await
+                    {
+                        drop(bridge_guard);
+                        let user_msg = format_agent_error(&e);
+                        tracing::error!("Agent loop error: {e}");
+                        let _ = events_tx.send(AgentEvent::SystemNotification { message: user_msg });
+                        let _ = events_tx.send(AgentEvent::AgentEnd);
+                    }
+
+                    if let Ok(mut guard) = shared_cancel.lock() {
+                        guard.take();
+                    }
+                } else {
+                    let image_paths = prompt.image_paths;
+                    let text = prompt.text;
+                    // Encode images and attach to the next LLM call
+                    let mut images = Vec::new();
+                    for path in &image_paths {
+                        if let Ok(data) = std::fs::read(path) {
+                            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png");
+                            let media_type = match ext {
+                                "jpg" | "jpeg" => "image/jpeg",
+                                "gif" => "image/gif",
+                                "webp" => "image/webp",
+                                "bmp" => "image/bmp",
+                                "tiff" | "tif" => "image/tiff",
+                                _ => "image/png",
+                            };
+                            use base64::Engine;
+                            let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+                            images.push(crate::bridge::ImageAttachment {
+                                data: b64,
+                                media_type: media_type.to_string(),
+                                source_path: Some(path.display().to_string()),
+                            });
+                        }
+                    }
+                    agent
+                        .conversation
+                        .push_user_with_images(text.clone(), images);
+
+                    let (model, max_turns) = {
+                        let s = shared_settings.lock().unwrap();
+                        (s.model.clone(), s.max_turns)
+                    };
+
+                    let loop_config = r#loop::LoopConfig {
+                        max_turns,
+                        soft_limit_turns: if max_turns > 0 { max_turns * 2 / 3 } else { 0 },
+                        max_retries: 0,
+                        retry_delay_ms: 750,
+                        model,
+                        cwd: agent.cwd.clone(),
+                        extended_context: false,
+                        settings: Some(shared_settings.clone()),
+                        secrets: Some(agent.secrets.clone()),
+                        force_compact: Some(pending_compact.clone()),
+                    };
+
+                    let cancel = CancellationToken::new();
+                    if let Ok(mut guard) = shared_cancel.lock() {
+                        *guard = Some(cancel.clone());
+                    }
+
+                    let bridge_guard = bridge.read().await;
+                    if let Err(e) = r#loop::run(
+                        bridge_guard.as_ref(),
+                        &mut agent.bus,
+                        &mut agent.context_manager,
+                        &mut agent.conversation,
+                        &events_tx,
+                        cancel,
+                        &loop_config,
+                    )
+                    .await
+                    {
+                        drop(bridge_guard);
+                        let user_msg = format_agent_error(&e);
+                        tracing::error!("Agent loop error: {e}");
+                        let _ = events_tx.send(AgentEvent::SystemNotification { message: user_msg });
+                        let _ = events_tx.send(AgentEvent::AgentEnd);
+                    }
+
+                    {
+                        let est = agent.conversation.estimate_tokens();
+                        let settings = shared_settings.lock().unwrap();
+                        if let Ok(mut metrics) = agent.context_metrics.lock() {
+                            metrics.update(
+                                est,
+                                settings.context_window,
+                                &settings.effective_requested_class().label(),
+                                settings.thinking.as_str(),
+                            );
+                        }
+                        let _ = events_tx.send(AgentEvent::ContextUpdated {
+                            tokens: est as u64,
+                            context_window: settings.context_window as u64,
+                            context_class: settings.effective_requested_class().label().to_string(),
+                            thinking_level: settings.thinking.as_str().to_string(),
+                        });
+                    }
+
+                    if let Ok(mut guard) = shared_cancel.lock() {
+                        guard.take();
+                    }
+                }
+            }
+
             tui::TuiCommand::UserPromptWithImages(text, image_paths) => {
                 // Encode images and attach to the next LLM call
                 let mut images = Vec::new();
@@ -2004,60 +2153,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                         context_class: settings.effective_requested_class().label().to_string(),
                         thinking_level: settings.thinking.as_str().to_string(),
                     });
-                }
-
-                if let Ok(mut guard) = shared_cancel.lock() {
-                    guard.take();
-                }
-            }
-
-            tui::TuiCommand::UserPrompt(text) => {
-                agent.conversation.push_user(text);
-
-                // Read current settings for this turn
-                let (model, max_turns) = {
-                    let s = shared_settings.lock().unwrap();
-                    (s.model.clone(), s.max_turns)
-                };
-
-                let loop_config = r#loop::LoopConfig {
-                    max_turns,
-                    soft_limit_turns: if max_turns > 0 { max_turns * 2 / 3 } else { 0 },
-                    max_retries: 0, // TUI: retry indefinitely, operator switches manually
-                    retry_delay_ms: 750,
-                    model,
-                    cwd: agent.cwd.clone(),
-                    extended_context: false,
-                    settings: Some(shared_settings.clone()),
-                    secrets: Some(agent.secrets.clone()),
-                    force_compact: Some(pending_compact.clone()),
-                };
-
-                let cancel = CancellationToken::new();
-                if let Ok(mut guard) = shared_cancel.lock() {
-                    *guard = Some(cancel.clone());
-                }
-
-                let bridge_guard = bridge.read().await;
-                if let Err(e) = r#loop::run(
-                    bridge_guard.as_ref(),
-                    &mut agent.bus,
-                    &mut agent.context_manager,
-                    &mut agent.conversation,
-                    &events_tx,
-                    cancel,
-                    &loop_config,
-                )
-                .await
-                {
-                    drop(bridge_guard);
-                    // Surface a concise error to the user, not the raw JSON blob
-                    let user_msg = format_agent_error(&e);
-                    tracing::error!("Agent loop error: {e}");
-                    let _ = events_tx.send(AgentEvent::SystemNotification { message: user_msg });
-                    // The loop emits AgentEnd on success but not on error —
-                    // emit it here so the TUI exits the "working" state.
-                    let _ = events_tx.send(AgentEvent::AgentEnd);
                 }
 
                 if let Ok(mut guard) = shared_cancel.lock() {

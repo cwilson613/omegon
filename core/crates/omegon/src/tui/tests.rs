@@ -108,7 +108,10 @@ async fn submit_editor_buffer_sends_plain_prompt_after_attachment_token_removed(
 
     let command = rx.recv().await.expect("submission command");
     match command {
-        TuiCommand::UserPrompt(text) => assert_eq!(text, "please inspect this"),
+        TuiCommand::SubmitPrompt(PromptSubmission { text, image_paths }) => {
+            assert_eq!(text, "please inspect this");
+            assert!(image_paths.is_empty());
+        }
         other => panic!("expected plain prompt after removing attachment token, got {other:?}"),
     }
     assert!(rx.try_recv().is_err(), "unexpected extra command emitted");
@@ -126,9 +129,9 @@ async fn submit_editor_buffer_sends_prompt_with_images_when_attachment_token_pre
 
     let command = rx.recv().await.expect("submission command");
     match command {
-        TuiCommand::UserPromptWithImages(text, attachments) => {
+        TuiCommand::SubmitPrompt(PromptSubmission { text, image_paths }) => {
             assert_eq!(text, "please inspect this");
-            assert_eq!(attachments, vec![std::path::PathBuf::from("/tmp/paste.png")]);
+            assert_eq!(image_paths, vec![std::path::PathBuf::from("/tmp/paste.png")]);
         }
         other => panic!("expected multimodal prompt, got {other:?}"),
     }

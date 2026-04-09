@@ -238,7 +238,10 @@ impl IpcConnection {
                     }
                     let accepted = cfg
                         .command_tx
-                        .send(TuiCommand::UserPrompt(req.prompt))
+                        .send(TuiCommand::SubmitPrompt(crate::tui::PromptSubmission {
+                            text: req.prompt,
+                            image_paths: Vec::new(),
+                        }))
                         .await
                         .is_ok();
                     send_response(

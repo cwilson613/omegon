@@ -60,11 +60,17 @@ use self::footer::{FooterData, SessionUsageSlice};
 use self::instruments::InstrumentPanel;
 use self::segments::{SegmentContent, SegmentExportMode};
 
+#[derive(Debug, Clone)]
+pub struct PromptSubmission {
+    pub text: String,
+    pub image_paths: Vec<std::path::PathBuf>,
+}
+
 /// Messages from TUI to the agent coordinator.
 #[derive(Debug)]
 pub enum TuiCommand {
     /// User submitted a prompt with optional image attachments.
-    UserPrompt(String),
+    SubmitPrompt(PromptSubmission),
     /// User submitted a prompt with image attachments (paths).
     UserPromptWithImages(String, Vec<std::path::PathBuf>),
     /// User wants to quit (double Ctrl+C, or /exit).
@@ -1819,10 +1825,18 @@ impl App {
                             ss.busy = true;
                         }
                         if attachments.is_empty() {
-                            let _ = command_tx.send(TuiCommand::UserPrompt(text)).await;
+                            let _ = command_tx
+                                .send(TuiCommand::SubmitPrompt(PromptSubmission {
+                                    text,
+                                    image_paths: Vec::new(),
+                                }))
+                                .await;
                         } else {
                             let _ = command_tx
-                                .send(TuiCommand::UserPromptWithImages(text, attachments))
+                                .send(TuiCommand::SubmitPrompt(PromptSubmission {
+                                    text,
+                                    image_paths: attachments,
+                                }))
                                 .await;
                         }
                     }
@@ -1851,13 +1865,12 @@ impl App {
         if let Ok(mut ss) = self.dashboard_handles.session.lock() {
             ss.busy = true;
         }
-        if !attachments.is_empty() {
-            let _ = command_tx
-                .send(TuiCommand::UserPromptWithImages(text, attachments))
-                .await;
-        } else {
-            let _ = command_tx.send(TuiCommand::UserPrompt(text)).await;
-        }
+        let _ = command_tx
+            .send(TuiCommand::SubmitPrompt(PromptSubmission {
+                text,
+                image_paths: attachments,
+            }))
+            .await;
         if let Some(ref mut overlay) = self.tutorial_overlay {
             overlay.check_any_input();
         }
@@ -5747,7 +5760,10 @@ pub async fn run_tui(
                                                         ss.busy = true;
                                                     }
                                                     let _ = command_tx
-                                                        .send(TuiCommand::UserPrompt(prompt))
+                                                        .send(TuiCommand::SubmitPrompt(PromptSubmission {
+                                                            text: prompt,
+                                                            image_paths: Vec::new(),
+                                                        }))
                                                         .await;
                                                 } else {
                                                     app.queue_prompt(prompt, Vec::new());
@@ -5772,7 +5788,10 @@ pub async fn run_tui(
                                                         ss.busy = true;
                                                     }
                                                     let _ = command_tx
-                                                        .send(TuiCommand::UserPrompt(prompt))
+                                                        .send(TuiCommand::SubmitPrompt(PromptSubmission {
+                                                            text: prompt,
+                                                            image_paths: Vec::new(),
+                                                        }))
                                                         .await;
                                                 } else {
                                                     app.queue_prompt(prompt, Vec::new());
@@ -6160,10 +6179,18 @@ pub async fn run_tui(
                 ss.busy = true;
             }
             if attachments.is_empty() {
-                let _ = command_tx.send(TuiCommand::UserPrompt(text)).await;
+                let _ = command_tx
+                    .send(TuiCommand::SubmitPrompt(PromptSubmission {
+                        text,
+                        image_paths: Vec::new(),
+                    }))
+                    .await;
             } else {
                 let _ = command_tx
-                    .send(TuiCommand::UserPromptWithImages(text, attachments))
+                    .send(TuiCommand::SubmitPrompt(PromptSubmission {
+                        text,
+                        image_paths: attachments,
+                    }))
                     .await;
             }
         }
