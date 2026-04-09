@@ -437,7 +437,12 @@ def run_acceptance(commands: list[str], repo_path: Path) -> tuple[str, float, li
 
 
 def compute_total_tokens(usage: dict[str, Any]) -> int | None:
-    values = [usage.get("input_tokens"), usage.get("output_tokens"), usage.get("cache_tokens")]
+    values = [
+        usage.get("input_tokens"),
+        usage.get("output_tokens"),
+        usage.get("cache_tokens"),
+        usage.get("cache_write_tokens"),
+    ]
     if all(v is None for v in values):
         return None
     return int(sum(v or 0 for v in values))

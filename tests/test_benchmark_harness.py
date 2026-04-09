@@ -181,7 +181,7 @@ acceptance:
             self.assertEqual(payload["harness"], "pi")
             self.assertEqual(payload["benchmark_mode"]["adapter_profile"], "minimal")
             self.assertEqual(payload["model"], "openai/gpt-4o")
-            self.assertEqual(payload["tokens"]["total"], 136)
+            self.assertEqual(payload["tokens"]["total"], 145)
             self.assertEqual(payload["tokens"]["cache_write"], 9)
 
     def test_claude_adapter_normalizes_json_usage(self) -> None:
@@ -223,7 +223,7 @@ acceptance:
             self.assertEqual(payload["harness"], "claude-code")
             self.assertEqual(payload["benchmark_mode"]["adapter_profile"], "default")
             self.assertEqual(payload["model"], "claude-sonnet-4-6")
-            self.assertEqual(payload["tokens"]["total"], 249)
+            self.assertEqual(payload["tokens"]["total"], 393)
             self.assertEqual(payload["tokens"]["cache"], 5)
             self.assertEqual(payload["tokens"]["cache_write"], 144)
 
