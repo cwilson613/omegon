@@ -565,7 +565,7 @@ impl InstrumentPanel {
         let split = Layout::horizontal([
             Constraint::Percentage(55),
             Constraint::Length(1),
-            Constraint::Percentage(45),
+            Constraint::Min(20),
         ])
         .split(area);
 
@@ -2011,7 +2011,7 @@ mod tests {
                 let panels = Layout::horizontal([
                     Constraint::Percentage(55),
                     Constraint::Length(1),
-                    Constraint::Percentage(45),
+                    Constraint::Min(20),
                 ])
                 .split(area);
                 let inference_inner = Block::default().borders(Borders::ALL).inner(panels[0]);
@@ -2058,7 +2058,7 @@ mod tests {
         let panels = Layout::horizontal([
             Constraint::Percentage(55),
             Constraint::Length(1),
-            Constraint::Percentage(45),
+            Constraint::Min(20),
         ])
         .split(area);
         let inference_inner = Block::default().borders(Borders::ALL).inner(panels[0]);
@@ -2124,7 +2124,7 @@ mod tests {
         let panels = Layout::horizontal([
             Constraint::Percentage(55),
             Constraint::Length(1),
-            Constraint::Percentage(45),
+            Constraint::Min(20),
         ])
         .split(area);
         let tools_inner = Block::default().borders(Borders::ALL).inner(panels[2]);
