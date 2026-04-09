@@ -739,14 +739,16 @@ impl App {
         }
         self.focus_mode = enabled;
         if enabled {
-            if let Some(idx) = self.conversation.selected_or_focused_segment() {
+            if self.conversation.selected_or_focused_segment().is_none()
+                && let Some(idx) = self.conversation.last_selectable_segment()
+            {
                 self.conversation.select_segment(idx);
-                self.pane_focus = PaneFocus::Conversation;
             }
+            self.pane_focus = PaneFocus::Conversation;
             self.terminal_copy_mode = false;
             self.set_mouse_capture(false);
             self.show_toast(
-                "Focus mode active — selected segment isolated for terminal-native selection",
+                "Focus mode active — conversation expanded for terminal-native reading and selection",
                 ratatui_toaster::ToastType::Info,
             );
         } else {
@@ -1905,9 +1907,6 @@ impl App {
 
         // ── Focus mode: isolate the selected conversation segment ─────────
         if self.focus_mode && self.conversation.tabs.is_conversation_active() {
-            self.conversation_area = Some(area);
-            self.editor_area = None;
-            self.dashboard_area = None;
             self.render_focus_view(frame, area);
 
             let now = std::time::Instant::now();
@@ -2418,82 +2417,51 @@ impl App {
         }
     }
 
-    fn render_focus_view(&self, frame: &mut Frame, area: Rect) {
-        let selected = self.conversation.selected_or_focused_segment();
-        let selectable_count = self
-            .conversation
-            .segments()
-            .iter()
-            .filter(|segment| !matches!(segment.content, SegmentContent::TurnSeparator))
-            .count();
-        let ordinal = selected.map(|idx| {
-            self.conversation.segments()[..=idx]
-                .iter()
-                .filter(|segment| !matches!(segment.content, SegmentContent::TurnSeparator))
-                .count()
-        });
-        let title = match (ordinal, selectable_count) {
-            (Some(position), total) if total > 0 => {
-                format!(" focus — segment {position}/{total} ")
-            }
-            _ => " focus — no selectable segment ".to_string(),
-        };
-        let block = Block::default()
-            .borders(Borders::TOP | Borders::BOTTOM)
-            .border_type(ratatui::widgets::BorderType::Rounded)
-            .border_style(
-                Style::default()
-                    .fg(self.theme.accent_muted())
-                    .bg(self.theme.surface_bg()),
-            )
-            .title(Span::styled(
-                title,
-                Style::default()
-                    .fg(self.theme.accent())
-                    .bg(self.theme.surface_bg())
-                    .add_modifier(Modifier::BOLD),
-            ))
-            .title_bottom(
-                Line::from(Span::styled(
-                    " ↑/↓ move between segments · drag to select · Ctrl+Y copy · Esc or /focus to return ",
-                    Style::default()
-                        .fg(self.theme.dim())
-                        .bg(self.theme.surface_bg()),
-                ))
-                .centered(),
-            )
-            .padding(Padding {
-                left: 0,
-                right: 0,
-                top: 1,
-                bottom: 1,
-            })
-            .style(Style::default().bg(self.theme.surface_bg()));
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
+    fn render_focus_view(&mut self, frame: &mut Frame, area: Rect) {
+        self.conversation_area = Some(area);
+        self.editor_area = None;
+        self.dashboard_area = None;
 
-        let Some(idx) = selected else {
-            let empty = Paragraph::new("No segment selected.").style(
+        let t = &self.theme;
+        let conv_widget = conv_widget::ConversationWidget::new(self.conversation.segments(), t.as_ref());
+        let conv_state = &mut self.conversation.conv_state;
+        frame.render_stateful_widget(conv_widget, area, conv_state);
+
+        let image_renders: Vec<(usize, Rect, std::path::PathBuf)> = {
+            let segments = self.conversation.segments();
+            conv_state
+                .visible_image_areas(segments, area)
+                .into_iter()
+                .filter_map(|(idx, image_area)| {
+                    if let SegmentContent::Image { ref path, .. } = segments[idx].content {
+                        Some((idx, image_area, path.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+
+        for (seg_idx, image_area, path) in image_renders {
+            if let Some(protocol) = self.conversation.image_cache.get_or_create(seg_idx, &path) {
+                image::render_image(image_area, frame, protocol);
+            }
+        }
+
+        let overlay = Paragraph::new("↑/↓ scroll · PgUp/PgDn jump · Home/End top/bottom · drag to select · Ctrl+Y copy segment · Esc or /focus to return")
+            .style(
                 Style::default()
                     .fg(self.theme.dim())
                     .bg(self.theme.surface_bg()),
-            );
-            frame.render_widget(empty, inner);
-            return;
-        };
-
-        let Some(segment) = self.conversation.segments().get(idx).cloned() else {
-            return;
-        };
-        let content = segment.export_text(SegmentExportMode::Raw);
-        let paragraph = Paragraph::new(content)
-            .style(
-                Style::default()
-                    .fg(self.theme.fg())
-                    .bg(self.theme.surface_bg()),
             )
-            .wrap(ratatui::widgets::Wrap { trim: false });
-        frame.render_widget(paragraph, inner);
+            .alignment(Alignment::Center);
+        let overlay_area = Rect {
+            x: area.x,
+            y: area.bottom().saturating_sub(1),
+            width: area.width,
+            height: 1,
+        };
+        frame.render_widget(overlay, overlay_area);
     }
 
     /// Render an ephemeral modal from an extension widget.
@@ -5797,24 +5765,29 @@ pub async fn run_tui(
 
                     if app.focus_mode {
                         match (key.code, key.modifiers) {
-                            (KeyCode::Up, _) | (KeyCode::Left, _) | (KeyCode::PageUp, _) => {
-                                app.conversation.move_selected_segment_prev();
+                            (KeyCode::Up, _) | (KeyCode::Left, _) => {
+                                app.conversation.scroll_up(3);
                                 continue;
                             }
-                            (KeyCode::Down, _) | (KeyCode::Right, _) | (KeyCode::PageDown, _) => {
-                                app.conversation.move_selected_segment_next();
+                            (KeyCode::Down, _) | (KeyCode::Right, _) => {
+                                app.conversation.scroll_down(3);
+                                continue;
+                            }
+                            (KeyCode::PageUp, _) => {
+                                app.conversation.scroll_up(20);
+                                continue;
+                            }
+                            (KeyCode::PageDown, _) => {
+                                app.conversation.scroll_down(20);
                                 continue;
                             }
                             (KeyCode::Home, _) => {
-                                if let Some(idx) = app.conversation.first_selectable_segment() {
-                                    app.conversation.select_segment(idx);
-                                }
+                                app.conversation.conv_state.scroll_offset = u16::MAX;
+                                app.conversation.conv_state.user_scrolled = true;
                                 continue;
                             }
                             (KeyCode::End, _) => {
-                                if let Some(idx) = app.conversation.last_selectable_segment() {
-                                    app.conversation.select_segment(idx);
-                                }
+                                app.conversation.scroll_down(u16::MAX);
                                 continue;
                             }
                             _ => {}

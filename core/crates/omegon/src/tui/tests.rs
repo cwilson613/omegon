@@ -59,7 +59,7 @@ fn editor_inline_attachment_tokens_submit_as_multimodal_prompt() {
     app.conversation.push_user_with_attachments(&text, &attachments);
     let rendered = render_app_to_string(&mut app, 100, 20);
     assert!(rendered.contains("please inspect this"), "{rendered}");
-    assert!(rendered.contains("[image0]"), "{rendered}");
+    assert!(!rendered.contains("[image0]"), "{rendered}");
 }
 
 #[test]
@@ -976,7 +976,7 @@ fn toggle_pin_prefers_selected_tool_card() {
 }
 
 #[test]
-fn slash_focus_toggles_segment_isolation_mode() {
+fn slash_focus_toggles_fullscreen_conversation_mode() {
     let mut app = test_app();
     let tx = test_tx();
     app.conversation.push_user("operator prompt");
@@ -1016,6 +1016,7 @@ fn focus_mode_selects_last_real_segment_when_none_was_selected() {
 
     assert!(app.focus_mode);
     assert_eq!(app.conversation.selected_or_focused_segment(), Some(1));
+    assert_eq!(app.pane_focus, PaneFocus::Conversation);
 }
 
 #[test]
@@ -1041,7 +1042,7 @@ fn focus_mode_navigation_skips_turn_separators() {
 }
 
 #[test]
-fn focus_mode_render_shows_segment_position() {
+fn focus_mode_render_shows_fullscreen_conversation_instructions() {
     let mut app = test_app();
     app.conversation.push_user("operator prompt");
     app.conversation.append_streaming("assistant answer");
@@ -1050,8 +1051,9 @@ fn focus_mode_render_shows_segment_position() {
     app.set_focus_mode(true);
 
     let rendered = render_app_to_string(&mut app, 80, 20);
-    assert!(rendered.contains("focus — segment 2/2"), "{rendered}");
     assert!(rendered.contains("assistant answer"), "{rendered}");
+    assert!(rendered.contains("PgUp/PgDn jump"), "{rendered}");
+    assert!(!rendered.contains("focus — segment"), "{rendered}");
 }
 
 #[test]

@@ -1,0 +1,18 @@
+id: example-shadow-context
+repo: .
+base_ref: main
+prompt: |
+  Finish the shadow-context assembly wiring.
+harnesses:
+  - omegon
+  - claude-code
+  - pi
+acceptance:
+  - cargo test -p omegon shadow_context --manifest-path core/Cargo.toml
+success_files:
+  - core/crates/omegon/src/context.rs
+budget:
+  max_turns: 20
+  max_minutes: 30
+notes: |
+  Example benchmark task spec for the token-efficiency comparison harness.

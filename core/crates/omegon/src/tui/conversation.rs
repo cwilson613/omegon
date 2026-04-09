@@ -107,20 +107,24 @@ fn attachment_placeholder(path: &std::path::Path, idx: usize) -> String {
     format!("[{kind}{idx}]")
 }
 
-fn format_user_prompt_with_attachments(text: &str, attachments: &[std::path::PathBuf]) -> String {
-    if attachments.is_empty() {
-        return text.to_string();
-    }
+fn attachment_alt_text(path: &std::path::Path, idx: usize) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| format!("{} {name}", attachment_placeholder(path, idx)))
+        .unwrap_or_else(|| attachment_placeholder(path, idx))
+}
+
+fn non_image_attachment_summary(attachments: &[std::path::PathBuf]) -> Option<String> {
     let placeholders = attachments
         .iter()
         .enumerate()
+        .filter(|(_, path)| !super::image::is_image_path(&path.to_string_lossy()))
         .map(|(idx, path)| attachment_placeholder(path, idx))
-        .collect::<Vec<_>>()
-        .join(" ");
-    if text.trim().is_empty() {
-        placeholders
+        .collect::<Vec<_>>();
+    if placeholders.is_empty() {
+        None
     } else {
-        format!("{text}\n{placeholders}")
+        Some(placeholders.join(" "))
     }
 }
 
@@ -164,12 +168,27 @@ impl ConversationView {
         if !self.segments.is_empty() {
             self.segments.push(Segment::separator());
         }
-        let rendered = if attachments.is_empty() {
-            text.to_string()
-        } else {
-            format_user_prompt_with_attachments(text, attachments)
+
+        let text = text.trim_end();
+        let non_image_summary = non_image_attachment_summary(attachments);
+        let rendered = match (text.is_empty(), non_image_summary) {
+            (false, Some(summary)) => format!("{text}\n{summary}"),
+            (false, None) => text.to_string(),
+            (true, Some(summary)) => summary,
+            (true, None) => String::new(),
         };
-        self.segments.push(Segment::user_prompt(rendered));
+
+        if !rendered.is_empty() || attachments.is_empty() {
+            self.segments.push(Segment::user_prompt(rendered));
+        }
+
+        for (idx, path) in attachments.iter().enumerate() {
+            if super::image::is_image_path(&path.to_string_lossy()) {
+                self.segments
+                    .push(Segment::image(path.clone(), attachment_alt_text(path, idx)));
+            }
+        }
+
         self.conv_state.invalidate();
         self.conv_state.force_scroll_to_bottom();
     }
@@ -573,7 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn attachment_placeholders_render_inline_in_user_prompt() {
+    fn image_attachments_render_as_structured_segments() {
         let mut cv = ConversationView::new();
         cv.push_user_with_attachments(
             "describe this",
@@ -583,37 +602,40 @@ mod tests {
                 std::path::PathBuf::from("/tmp/blob.bin"),
             ],
         );
-        assert_eq!(cv.segments.len(), 1);
+        assert_eq!(cv.segments.len(), 2);
         assert!(matches!(
             &cv.segments[0],
             Segment {
                 content: SegmentContent::UserPrompt { text },
                 ..
             } if text.contains("describe this")
-                && text.contains("[image0]")
                 && text.contains("[pdf1]")
                 && text.contains("[attachment2]")
+                && !text.contains("[image0]")
+        ));
+        assert!(matches!(
+            &cv.segments[1],
+            Segment {
+                content: SegmentContent::Image { path, alt },
+                ..
+            } if path == &std::path::PathBuf::from("/tmp/paste.png")
+                && alt.contains("[image0]")
         ));
     }
 
     #[test]
-    fn attachment_placeholders_without_text_render_cleanly() {
+    fn image_only_attachments_render_without_placeholder_prompt() {
         let mut cv = ConversationView::new();
         cv.push_user_with_attachments(
             "",
             &[
                 std::path::PathBuf::from("/tmp/paste.png"),
-                std::path::PathBuf::from("/tmp/spec.pdf"),
+                std::path::PathBuf::from("/tmp/other.jpg"),
             ],
         );
-        assert_eq!(cv.segments.len(), 1);
-        assert!(matches!(
-            &cv.segments[0],
-            Segment {
-                content: SegmentContent::UserPrompt { text },
-                ..
-            } if text == "[image0] [pdf1]"
-        ));
+        assert_eq!(cv.segments.len(), 2);
+        assert!(matches!(&cv.segments[0].content, SegmentContent::Image { .. }));
+        assert!(matches!(&cv.segments[1].content, SegmentContent::Image { .. }));
     }
 
     #[test]

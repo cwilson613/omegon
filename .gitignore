@@ -28,6 +28,9 @@ __pycache__/
 # Sessions (runtime state)
 sessions/
 
+# Local benchmark run artifacts
+ai/benchmarks/runs/
+
 # Jujutsu VCS (co-located with git)
 .jj/
 .omegon/history
