@@ -4,13 +4,16 @@
 This runner stays deliberately small:
 - loads a task spec
 - validates declared harnesses
-- runs a single adapter (default: first harness in the task)
+- runs a single adapter (default: first declared harness)
 - executes deterministic acceptance commands
 - writes a JSON result artifact
 
-Only the Omegon adapter is implemented in v1.
-Claude Code and default pi are declared targets but intentionally fail closed until
-we add their runner surfaces.
+All target harnesses share the same adapter contract:
+- omegon
+- claude-code
+- pi
+
+Adapters may differ in telemetry richness, but not in output shape.
 """
 
 from __future__ import annotations
@@ -23,14 +26,14 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from shutil import which
 from typing import Any
 
 import yaml
 
 SUPPORTED_HARNESSES = {"omegon", "claude-code", "pi"}
-IMPLEMENTED_HARNESSES = {"omegon"}
 
 
 class TaskSpecError(ValueError):
@@ -57,6 +60,25 @@ class AdapterResult:
     extra: dict[str, Any]
     log_path: Path | None = None
     patch_path: Path | None = None
+
+
+class AdapterError(RuntimeError):
+    pass
+
+
+class HarnessAdapter:
+    harness_name: str
+
+    def __init__(self, repo_path: Path, spec: TaskSpec, model: str | None) -> None:
+        self.repo_path = repo_path
+        self.spec = spec
+        self.model = model
+
+    def validate_environment(self) -> None:
+        raise NotImplementedError
+
+    def run(self) -> AdapterResult:
+        raise NotImplementedError
 
 
 def parse_args() -> argparse.Namespace:
@@ -123,55 +145,207 @@ def select_harness(spec: TaskSpec, explicit: str | None) -> str:
     harness = explicit or spec.harnesses[0]
     if harness not in spec.harnesses:
         raise TaskSpecError(f"harness '{harness}' not declared in task harnesses")
-    if harness not in IMPLEMENTED_HARNESSES:
-        raise NotImplementedError(f"harness '{harness}' is declared but not implemented in v1")
     return harness
 
 
-def run_omegon(spec: TaskSpec, repo_path: Path, *, model: str | None) -> AdapterResult:
-    usage_file = Path(tempfile.NamedTemporaryFile(prefix="benchmark-usage-", suffix=".json", delete=False).name)
-    log_file = Path(tempfile.NamedTemporaryFile(prefix="benchmark-omegon-", suffix=".log", delete=False).name)
-    cmd = [
-        "cargo",
-        "run",
-        "--manifest-path",
-        str((repo_path / "core" / "Cargo.toml").resolve()),
-        "-p",
-        "omegon",
-        "--",
-        "bench",
-        "run-task",
-        "--prompt",
-        spec.prompt,
-        "--usage-json",
-        str(usage_file),
-    ]
-    if model:
-        cmd.extend(["--model", model])
+class OmegonAdapter(HarnessAdapter):
+    harness_name = "omegon"
 
-    # v1 contract: if the CLI surface doesn't exist yet, operators can replace `cargo`
-    # in PATH with a fixture binary/script during tests. Real implementation wiring comes next.
-    with log_file.open("w") as handle:
-        proc = subprocess.run(cmd, cwd=repo_path, check=False, stdout=handle, stderr=subprocess.STDOUT, text=True)
+    def validate_environment(self) -> None:
+        cargo_toml = self.repo_path / "core" / "Cargo.toml"
+        if not cargo_toml.exists():
+            raise AdapterError(f"omegon adapter requires {cargo_toml}")
+        if which("cargo") is None:
+            raise AdapterError("omegon adapter requires cargo in PATH")
 
-    usage: dict[str, Any] = {}
-    if usage_file.exists():
+    def run(self) -> AdapterResult:
+        usage_file = Path(tempfile.NamedTemporaryFile(prefix="benchmark-usage-", suffix=".json", delete=False).name)
+        log_file = Path(tempfile.NamedTemporaryFile(prefix="benchmark-omegon-", suffix=".log", delete=False).name)
+        cmd = [
+            "cargo",
+            "run",
+            "--manifest-path",
+            str((self.repo_path / "core" / "Cargo.toml").resolve()),
+            "-p",
+            "omegon",
+            "--",
+            "bench",
+            "run-task",
+            "--prompt",
+            self.spec.prompt,
+            "--usage-json",
+            str(usage_file),
+        ]
+        if self.model:
+            cmd.extend(["--model", self.model])
+
+        with log_file.open("w") as handle:
+            proc = subprocess.run(cmd, cwd=self.repo_path, check=False, stdout=handle, stderr=subprocess.STDOUT, text=True)
+
+        usage: dict[str, Any] = {}
+        if usage_file.exists():
+            try:
+                usage = json.loads(usage_file.read_text())
+            except json.JSONDecodeError:
+                usage = {"raw_usage_error": "invalid json"}
+        usage.setdefault("input_tokens", None)
+        usage.setdefault("output_tokens", None)
+        usage.setdefault("cache_tokens", None)
+        usage["exit_code"] = proc.returncode
+
+        return AdapterResult(
+            model=self.model or usage.get("model") or "omegon-default",
+            usage=usage,
+            extra=usage.get("extra", {}),
+            log_path=log_file,
+            patch_path=None,
+        )
+
+
+class PiAdapter(HarnessAdapter):
+    harness_name = "pi"
+
+    def validate_environment(self) -> None:
+        if which("pi") is None:
+            raise AdapterError("pi adapter requires 'pi' in PATH")
+
+    def run(self) -> AdapterResult:
+        log_file = Path(tempfile.NamedTemporaryFile(prefix="benchmark-pi-", suffix=".log", delete=False).name)
+        cmd = ["pi", "--print", "--mode", "json", "--no-session"]
+        if self.model:
+            cmd.extend(["--model", self.model])
+        cmd.append(self.spec.prompt)
+        proc = subprocess.run(cmd, cwd=self.repo_path, check=False, capture_output=True, text=True)
+        log_file.write_text(proc.stdout + ("\n" if proc.stdout and proc.stderr else "") + proc.stderr)
+
+        payload: dict[str, Any] | None = None
         try:
-            usage = json.loads(usage_file.read_text())
+            payload = json.loads(proc.stdout) if proc.stdout.strip() else None
         except json.JSONDecodeError:
-            usage = {"raw_usage_error": "invalid json"}
-    usage.setdefault("input_tokens", None)
-    usage.setdefault("output_tokens", None)
-    usage.setdefault("cache_tokens", None)
-    usage["exit_code"] = proc.returncode
+            payload = None
 
-    return AdapterResult(
-        model=model or usage.get("model") or "omegon-default",
-        usage=usage,
-        extra=usage.get("extra", {}),
-        log_path=log_file,
-        patch_path=None,
+        usage = extract_usage(payload)
+        usage["exit_code"] = proc.returncode
+        usage.setdefault("input_tokens", None)
+        usage.setdefault("output_tokens", None)
+        usage.setdefault("cache_tokens", None)
+        extra = {"raw_json": payload} if payload is not None else {"raw_stdout": proc.stdout}
+        model = self.model or extract_model(payload) or "pi-default"
+        return AdapterResult(model=model, usage=usage, extra=extra, log_path=log_file)
+
+
+class ClaudeCodeAdapter(HarnessAdapter):
+    harness_name = "claude-code"
+
+    def validate_environment(self) -> None:
+        if which("claude") is None:
+            raise AdapterError("claude-code adapter requires 'claude' in PATH")
+
+    def run(self) -> AdapterResult:
+        log_file = Path(tempfile.NamedTemporaryFile(prefix="benchmark-claude-", suffix=".log", delete=False).name)
+        cmd = ["claude", "--print", "--output-format", "json", "--permission-mode", "acceptEdits"]
+        if self.model:
+            cmd.extend(["--model", self.model])
+        cmd.append(self.spec.prompt)
+        proc = subprocess.run(cmd, cwd=self.repo_path, check=False, capture_output=True, text=True)
+        log_file.write_text(proc.stdout + ("\n" if proc.stdout and proc.stderr else "") + proc.stderr)
+
+        payload: dict[str, Any] | None = None
+        try:
+            payload = json.loads(proc.stdout) if proc.stdout.strip() else None
+        except json.JSONDecodeError:
+            payload = None
+
+        usage = extract_usage(payload)
+        usage["exit_code"] = proc.returncode
+        usage.setdefault("input_tokens", None)
+        usage.setdefault("output_tokens", None)
+        usage.setdefault("cache_tokens", None)
+        extra = {"raw_json": payload} if payload is not None else {"raw_stdout": proc.stdout}
+        model = self.model or extract_model(payload) or "claude-code-default"
+        return AdapterResult(model=model, usage=usage, extra=extra, log_path=log_file)
+
+
+def extract_nested(payload: dict[str, Any] | None, *paths: tuple[str, ...]) -> Any:
+    if not isinstance(payload, dict):
+        return None
+    for path in paths:
+        current: Any = payload
+        ok = True
+        for part in path:
+            if not isinstance(current, dict) or part not in current:
+                ok = False
+                break
+            current = current[part]
+        if ok:
+            return current
+    return None
+
+
+def coerce_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def extract_usage(payload: dict[str, Any] | None) -> dict[str, Any]:
+    input_tokens = coerce_int(
+        extract_nested(
+            payload,
+            ("input_tokens",),
+            ("usage", "input_tokens"),
+            ("usage", "inputTokens"),
+            ("usage", "prompt_tokens"),
+            ("usage", "promptTokens"),
+            ("result", "usage", "input_tokens"),
+        )
     )
+    output_tokens = coerce_int(
+        extract_nested(
+            payload,
+            ("output_tokens",),
+            ("usage", "output_tokens"),
+            ("usage", "outputTokens"),
+            ("usage", "completion_tokens"),
+            ("usage", "completionTokens"),
+            ("result", "usage", "output_tokens"),
+        )
+    )
+    cache_tokens = coerce_int(
+        extract_nested(
+            payload,
+            ("cache_tokens",),
+            ("usage", "cache_tokens"),
+            ("usage", "cacheTokens"),
+            ("result", "usage", "cache_tokens"),
+        )
+    )
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cache_tokens": cache_tokens,
+    }
+
+
+def extract_model(payload: dict[str, Any] | None) -> str | None:
+    value = extract_nested(payload, ("model",), ("result", "model"), ("message", "model"))
+    return value if isinstance(value, str) else None
+
+
+def adapter_for(harness: str, repo_path: Path, spec: TaskSpec, model: str | None) -> HarnessAdapter:
+    if harness == "omegon":
+        return OmegonAdapter(repo_path, spec, model)
+    if harness == "pi":
+        return PiAdapter(repo_path, spec, model)
+    if harness == "claude-code":
+        return ClaudeCodeAdapter(repo_path, spec, model)
+    raise TaskSpecError(f"unsupported harness: {harness}")
 
 
 def run_acceptance(commands: list[str], repo_path: Path) -> tuple[str, float, list[dict[str, Any]]]:
@@ -237,7 +411,7 @@ def build_result(
 
 
 def write_result(out_dir: Path, spec: TaskSpec, harness: str, payload: dict[str, Any]) -> Path:
-    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     out_path = out_dir / f"{timestamp}-{spec.id}-{harness}.json"
     out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return out_path
@@ -254,19 +428,19 @@ def main() -> int:
     except TaskSpecError as err:
         print(str(err), file=sys.stderr)
         return 1
-    except NotImplementedError as err:
-        print(str(err), file=sys.stderr)
-        return 2
 
     repo_path = resolve_repo_path(root, spec)
     out_dir = ensure_clean_out_dir(root, args.out_dir)
 
-    run_started = time.monotonic()
-    if harness == "omegon":
-        adapter = run_omegon(spec, repo_path, model=args.model)
-    else:
-        print(f"harness '{harness}' is not implemented", file=sys.stderr)
+    try:
+        adapter_impl = adapter_for(harness, repo_path, spec, args.model)
+        adapter_impl.validate_environment()
+    except (TaskSpecError, AdapterError) as err:
+        print(str(err), file=sys.stderr)
         return 2
+
+    run_started = time.monotonic()
+    adapter = adapter_impl.run()
 
     acceptance_status, acceptance_elapsed, acceptance_results = run_acceptance(spec.acceptance, repo_path)
     payload = build_result(

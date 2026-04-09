@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,7 +59,7 @@ acceptance: [echo ok]
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("unsupported harness", result.stderr)
 
-    def test_declared_but_unimplemented_harness_fails_closed(self) -> None:
+    def test_declared_harness_without_binary_fails_usefully(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir)
             self.init_repo(repo)
@@ -73,9 +74,18 @@ harnesses: [claude-code]
 acceptance: [echo ok]
 """,
             )
-            result = self.run_script(str(task), "--root", str(repo), "--harness", "claude-code")
+            env = dict(os.environ)
+            env["PATH"] = f"{repo / 'scripts'}:/usr/bin:/bin"
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(task), "--root", str(repo), "--harness", "claude-code"],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
             self.assertEqual(result.returncode, 2)
-            self.assertIn("not implemented in v1", result.stderr)
+            self.assertIn("claude-code adapter requires 'claude' in PATH", result.stderr)
 
     def test_writes_result_for_mocked_omegon_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -128,6 +138,86 @@ acceptance:
             self.assertEqual(payload["tokens"]["total"], 1500)
             self.assertEqual(payload["harness"], "omegon")
             self.assertEqual(payload["extra"]["context"]["sys"], 100)
+
+    def test_pi_adapter_normalizes_json_usage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            self.init_repo(repo)
+            fake_pi = repo / "scripts" / "pi"
+            fake_pi.write_text(
+                "#!/bin/sh\n"
+                "cat <<'JSON'\n"
+                '{"model":"openai/gpt-4o","usage":{"inputTokens":111,"outputTokens":22,"cacheTokens":3}}\n'
+                "JSON\n"
+            )
+            fake_pi.chmod(0o755)
+            task = self.write_task(
+                repo,
+                """
+id: t4
+repo: .
+base_ref: main
+prompt: hi
+harnesses: [pi]
+acceptance:
+  - python3 -c \"print('ok')\"
+""",
+            )
+            env = dict(os.environ)
+            env["PATH"] = f"{repo / 'scripts'}:{env['PATH']}"
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(task), "--root", str(repo), "--harness", "pi"],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(Path(result.stdout.strip()).read_text())
+            self.assertEqual(payload["harness"], "pi")
+            self.assertEqual(payload["model"], "openai/gpt-4o")
+            self.assertEqual(payload["tokens"]["total"], 136)
+
+    def test_claude_adapter_normalizes_json_usage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            self.init_repo(repo)
+            fake_claude = repo / "scripts" / "claude"
+            fake_claude.write_text(
+                "#!/bin/sh\n"
+                "cat <<'JSON'\n"
+                '{"model":"claude-sonnet-4-6","usage":{"input_tokens":210,"output_tokens":34,"cache_tokens":5}}\n'
+                "JSON\n"
+            )
+            fake_claude.chmod(0o755)
+            task = self.write_task(
+                repo,
+                """
+id: t5
+repo: .
+base_ref: main
+prompt: hi
+harnesses: [claude-code]
+acceptance:
+  - python3 -c \"print('ok')\"
+""",
+            )
+            env = dict(os.environ)
+            env["PATH"] = f"{repo / 'scripts'}:{env['PATH']}"
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(task), "--root", str(repo), "--harness", "claude-code"],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(Path(result.stdout.strip()).read_text())
+            self.assertEqual(payload["harness"], "claude-code")
+            self.assertEqual(payload["model"], "claude-sonnet-4-6")
+            self.assertEqual(payload["tokens"]["total"], 249)
 
 
 if __name__ == "__main__":

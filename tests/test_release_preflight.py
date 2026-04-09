@@ -90,5 +90,21 @@ class ReleasePreflightTests(unittest.TestCase):
             self.assertIn("release-manifest.json", result.stderr)
 
 
+class ReleaseRecipeTests(unittest.TestCase):
+    def test_rc_recipe_relinks_local_binary_after_build(self) -> None:
+        justfile = (ROOT / "justfile").read_text()
+        rc_start = justfile.index("rc:\n")
+        preflight_start = justfile.index("# Release preflight:")
+        rc_block = justfile[rc_start:preflight_start]
+
+        self.assertIn('echo "Linking freshly built RC into PATH..."', rc_block)
+        self.assertIn("just link", rc_block)
+        self.assertLess(
+            rc_block.index('echo "Linking freshly built RC into PATH..."'),
+            rc_block.index('echo "Pushing rc tag..."'),
+            "rc recipe should relink the local binary before pushing/tag completion output",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

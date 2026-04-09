@@ -339,6 +339,11 @@ rc:
         echo "Ad-hoc signed (run 'just sign' to sign with Developer ID)"
     fi
 
+    # Re-link the freshly cut RC so the operator's local `omegon` matches the
+    # version that was just committed/tagged/built.
+    echo "Linking freshly built RC into PATH..."
+    just link
+
     # Push immediately — don't accumulate local tags. Pushing many tags at once
     # causes GitHub Actions to silently drop workflow triggers.
     echo "Pushing rc tag..."
