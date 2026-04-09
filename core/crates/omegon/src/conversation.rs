@@ -911,7 +911,7 @@ impl ConversationState {
 
         let error_limit = if self.slim_mode { 180 } else { 300 };
         let generic_limit = if self.slim_mode { 80 } else { 120 };
-        let bash_tail_lines = if self.slim_mode { 2 } else { 3 };
+        let bash_tail_lines = if self.slim_mode { 3 } else { 3 };
 
         if result.is_error {
             let error_preview = if text.len() > error_limit {
@@ -930,8 +930,8 @@ impl ConversationState {
             "read" => {
                 let lines = text.lines().count();
                 let bytes = text.len();
-                if self.slim_mode {
-                    format!("[Read{ctx_suffix}: {lines} lines]")
+                if self.slim_mode && ctx.is_empty() {
+                    format!("[Read: {lines} lines]")
                 } else {
                     format!("[Read{ctx_suffix}: {lines} lines, {bytes} bytes]")
                 }
@@ -945,8 +945,8 @@ impl ConversationState {
                 };
                 let tail: Vec<&str> = text.lines().rev().take(bash_tail_lines).collect();
                 let tail_str: String = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
-                if self.slim_mode {
-                    format!("[bash{ctx_suffix}: {lines} lines{exit_hint}. Tail: {tail_str}]")
+                if self.slim_mode && lines > 20 {
+                    format!("[bash{ctx_suffix}: {lines} lines{exit_hint}. Tail:\n{tail_str}]")
                 } else if lines <= 5 {
                     format!("[bash{ctx_suffix}{exit_hint}: {text}]")
                 } else {
@@ -975,8 +975,8 @@ impl ConversationState {
                 } else {
                     first_line.to_string()
                 };
-                if self.slim_mode {
-                    format!("[{}{ctx_suffix}: {preview}]", result.tool_name)
+                if self.slim_mode && ctx.is_empty() {
+                    format!("[{}: {preview}]", result.tool_name)
                 } else if lines <= 3 {
                     format!("[{}{ctx_suffix}: {}]", result.tool_name, text.trim())
                 } else {
@@ -1679,6 +1679,30 @@ mod tests {
             );
             assert!(content.contains("line 20"), "should preserve tail");
             assert!(!content.contains("line 5"), "should strip middle");
+        }
+    }
+
+    #[test]
+    fn slim_decay_preserves_path_bearing_generic_results() {
+        let mut conv = ConversationState::new();
+        conv.set_slim_mode(true);
+        conv.decay_window = 0;
+
+        push_matching_assistant(&mut conv, "t1");
+        conv.push_tool_result(ToolResultEntry {
+            call_id: "t1".into(),
+            tool_name: "codebase_search".into(),
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: "found src/auth.rs and src/setup.rs".into(),
+            }],
+            is_error: false,
+            args_summary: Some("query: anthropic auth persistence".into()),
+        });
+        conv.intent.stats.turns = 1;
+
+        let view = conv.build_llm_view();
+        if let LlmMessage::ToolResult { content, .. } = &view[1] {
+            assert!(content.contains("query: anthropic auth persistence"));
         }
     }
 
