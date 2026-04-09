@@ -244,6 +244,9 @@ pub struct ConversationState {
     /// Canonical, unmodified history. Source of truth for persistence.
     canonical: Vec<AgentMessage>,
 
+    /// Slim runtime mode — enables more aggressive history decay.
+    slim_mode: bool,
+
     /// The IntentDocument — survives compaction verbatim.
     pub intent: IntentDocument,
 
@@ -264,11 +267,16 @@ impl ConversationState {
     pub fn new() -> Self {
         Self {
             canonical: Vec::new(),
+            slim_mode: false,
             intent: IntentDocument::default(),
             decay_window: 10,
             referenced_turns: std::collections::HashSet::new(),
             compaction_summary: None,
         }
+    }
+
+    pub fn set_slim_mode(&mut self, slim: bool) {
+        self.slim_mode = slim;
     }
 
     /// Estimate token count of the LLM-facing view (chars / 4 heuristic).
@@ -875,6 +883,7 @@ impl ConversationState {
 
         Ok(Self {
             canonical,
+            slim_mode: false,
             intent: snapshot.intent,
             decay_window: snapshot.decay_window,
             referenced_turns: std::collections::HashSet::new(),
@@ -900,10 +909,13 @@ impl ConversationState {
             format!(" ({ctx})")
         };
 
+        let error_limit = if self.slim_mode { 180 } else { 300 };
+        let generic_limit = if self.slim_mode { 80 } else { 120 };
+        let bash_tail_lines = if self.slim_mode { 2 } else { 3 };
+
         if result.is_error {
-            // Preserve error message — errors are high-signal
-            let error_preview = if text.len() > 300 {
-                let mut end = 300;
+            let error_preview = if text.len() > error_limit {
+                let mut end = error_limit;
                 while end > 0 && !text.is_char_boundary(end) {
                     end -= 1;
                 }
@@ -918,7 +930,11 @@ impl ConversationState {
             "read" => {
                 let lines = text.lines().count();
                 let bytes = text.len();
-                format!("[Read{ctx_suffix}: {lines} lines, {bytes} bytes]")
+                if self.slim_mode {
+                    format!("[Read{ctx_suffix}: {lines} lines]")
+                } else {
+                    format!("[Read{ctx_suffix}: {lines} lines, {bytes} bytes]")
+                }
             }
             "bash" | "execute" => {
                 let lines = text.lines().count();
@@ -927,9 +943,11 @@ impl ConversationState {
                 } else {
                     ""
                 };
-                let tail: Vec<&str> = text.lines().rev().take(3).collect();
+                let tail: Vec<&str> = text.lines().rev().take(bash_tail_lines).collect();
                 let tail_str: String = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
-                if lines <= 5 {
+                if self.slim_mode {
+                    format!("[bash{ctx_suffix}: {lines} lines{exit_hint}. Tail: {tail_str}]")
+                } else if lines <= 5 {
                     format!("[bash{ctx_suffix}{exit_hint}: {text}]")
                 } else {
                     format!("[bash{ctx_suffix}: {lines} lines{exit_hint}. Tail:\n{tail_str}]")
@@ -948,8 +966,8 @@ impl ConversationState {
             _ => {
                 let lines = text.lines().count();
                 let first_line = text.lines().next().unwrap_or("").trim();
-                let preview = if first_line.len() > 120 {
-                    let mut end = 120;
+                let preview = if first_line.len() > generic_limit {
+                    let mut end = generic_limit;
                     while end > 0 && !first_line.is_char_boundary(end) {
                         end -= 1;
                     }
@@ -957,13 +975,12 @@ impl ConversationState {
                 } else {
                     first_line.to_string()
                 };
-                if lines <= 3 {
+                if self.slim_mode {
+                    format!("[{}{ctx_suffix}: {preview}]", result.tool_name)
+                } else if lines <= 3 {
                     format!("[{}{ctx_suffix}: {}]", result.tool_name, text.trim())
                 } else {
-                    format!(
-                        "[{}{ctx_suffix}: {lines} lines. {preview}]",
-                        result.tool_name
-                    )
+                    format!("[{}{ctx_suffix}: {lines} lines. {preview}]", result.tool_name)
                 }
             }
         }

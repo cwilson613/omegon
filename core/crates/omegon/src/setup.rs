@@ -624,7 +624,7 @@ impl AgentSetup {
 
         // ─── Conversation ───────────────────────────────────────────────
         let mut resume_info: Option<ResumeInfo> = None;
-        let conversation = if let Some(resume_arg) = resume {
+        let mut conversation = if let Some(resume_arg) = resume {
             let resume_id = resume_arg;
             // find_session returns the .json path; meta lives at .meta.json
             match session::find_session(&cwd, resume_id) {
@@ -668,6 +668,10 @@ impl AgentSetup {
         } else {
             ConversationState::new()
         };
+
+        if slim_mode {
+            conversation.set_slim_mode(true);
+        }
 
         let startup_snapshot = StartupSnapshot {
             total_facts: initial_memory_status.total_facts,
