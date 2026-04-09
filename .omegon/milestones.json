@@ -420,13 +420,14 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 51,
+    "rc_count": 52,
     "notes": [
       "feat(anthropic): prefer adaptive thinking for claude 4.6",
       "feat(auspex): add mode-aware local handoff probe",
       "feat(auspex): launch desktop handoff from cached startup payload",
       "feat(benchmark): add omegon bench run-task adapter",
       "feat(benchmark): add shared adapter contract for pi and claude",
+      "feat(benchmark): run adapters in clean-room mode",
       "feat(benchmark): scaffold token efficiency harness v1",
       "feat(cleave): add per-child cancel registry and command",
       "feat(cleave): add structured child runtime controls",
@@ -462,6 +463,7 @@
       "feat(providers): wire ollama-cloud through runtime routing",
       "feat(reasoning): improve upstream thinking fidelity",
       "feat(runtime): add daemon event-ingress skeleton",
+      "feat(runtime): add interactive turn supervisor scaffold",
       "feat(runtime): surface child runtime metadata in daemon status",
       "feat(runtime-matrix): Inspect and extend the Rust live upstream smoke/drift test surface. Define or add a checked-in expectation matrix and determine the minimal viable assertions for provider-specific endpoint drift (not just round-trip OK), plus tests or validation around the matrix parsing/execution path.",
       "feat(runtime-state): Implement persistent daemon runtime state for the serve/embedded runtime: runtime directory layout, persisted daemon instance/session metadata as appropriate, durable queued-event storage replacing in-memory-only queue, and ownership/runtime mode metadata in shared descriptors. Reuse the existing embedded/web runtime rather than introducing a new stack.",
@@ -492,6 +494,7 @@
       "fix(auspex): report chosen local handoff mode",
       "fix(auth): expose ollama-cloud in login surfaces",
       "fix(auth): route ollama-cloud login through hidden key entry",
+      "fix(benchmark): count cache writes in total tokens",
       "fix(benchmark): parse real Claude Code usage fields",
       "fix(brew): fail early on unsupported Linux glibc",
       "fix(cleave): add bootstrap supervisor token to restart adoption",
@@ -546,6 +549,7 @@
       "fix(tui): align footer context state with inference composition",
       "fix(tui): attribute session pricing to per-turn model usage",
       "fix(tui): calm inference activity row glyphs",
+      "fix(tui): clamp engine limit rows before panel overflow",
       "fix(tui): clear conversation viewport before segment repaint",
       "fix(tui): clear footer surfaces before repaint",
       "fix(tui): clear overlay bodies when popup content shrinks",
@@ -603,7 +607,7 @@
       "refactor(tui): remove activity-row phase labels",
       "refactor(tui): simplify slash command auth and context paths"
     ],
-    "rc_version": "0.15.10-rc.56",
-    "last_rc": "2026-04-09T01:56:16Z"
+    "rc_version": "0.15.10-rc.57",
+    "last_rc": "2026-04-09T02:26:44Z"
   }
 }
