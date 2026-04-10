@@ -23,6 +23,7 @@ mod cleave;
 mod cleave_smoke;
 mod context;
 mod control_actions;
+mod control_runtime;
 mod shadow_context;
 pub mod extensions;
 pub mod features;
@@ -1211,180 +1212,63 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             tui::TuiCommand::Quit => break,
 
             tui::TuiCommand::ModelView { respond_to } => {
-                let s = shared_settings.lock().unwrap().clone();
-                let provider = s.provider().to_string();
-                let connected = if s.provider_connected { "Yes" } else { "No" };
-                let thinking = {
-                    let raw = s.thinking.as_str();
-                    let mut chars = raw.chars();
-                    match chars.next() {
-                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                        None => String::new(),
-                    }
-                };
-                let message = format!(
-                    "Model\n  Current Model:   {}\n  Provider:        {}\n  Connected:       {}\n  Context Window:  {} tokens\n  Context Class:   {}\n  Thinking Level:  {}\n\nActions\n  /model list                Show available models\n  /model <provider:model>    Switch model\n  /think <level>             Change reasoning depth\n  /context                   Show context posture",
-                    s.model,
-                    provider,
-                    connected,
-                    s.context_window,
-                    s.context_class.label(),
-                    thinking,
-                );
-                let _ = events_tx.send(AgentEvent::SystemNotification {
-                    message: message.clone(),
-                });
+                let response = control_runtime::model_view_response(&shared_settings).await;
+                if let Some(output) = response.output.clone() {
+                    let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
+                }
                 if let Some(respond_to) = respond_to {
                     let _ = respond_to.send(omegon_traits::ControlOutputResponse {
-                        accepted: true,
-                        output: Some(message),
+                        accepted: response.accepted,
+                        output: response.output,
                     });
                 }
             }
 
             tui::TuiCommand::ModelList { respond_to } => {
-                let catalog = crate::tui::model_catalog::ModelCatalog::discover();
-                let mut output = String::from("Available Models\n");
-                for (provider_name, models) in &catalog.providers {
-                    output.push_str(&format!("\n{}\n", provider_name));
-                    for model in models {
-                        output.push_str(&format!("  {} ({})\n", model.name, model.id));
-                    }
+                let response = control_runtime::model_list_response().await;
+                if let Some(output) = response.output.clone() {
+                    let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
                 }
-                let _ = events_tx.send(AgentEvent::SystemNotification {
-                    message: output.clone(),
-                });
                 if let Some(respond_to) = respond_to {
                     let _ = respond_to.send(omegon_traits::ControlOutputResponse {
-                        accepted: true,
-                        output: Some(output),
+                        accepted: response.accepted,
+                        output: response.output,
                     });
                 }
             }
 
             tui::TuiCommand::SetModel { model, respond_to } => {
-                tracing::info!(model = %model, "model switched via /model command");
-
-                let requested_model = model.clone();
-                let effective_model = providers::resolve_execution_model_spec(&requested_model)
-                    .await
-                    .unwrap_or_else(|| requested_model.clone());
-
-                // Detect provider change — swap bridge if needed
-                let (old_model, old_provider) = shared_settings
-                    .lock()
-                    .ok()
-                    .map(|s| {
-                        (
-                            s.model.clone(),
-                            crate::providers::infer_provider_id(&s.model),
-                        )
-                    })
-                    .unwrap_or_else(|| (String::new(), String::new()));
-                let new_provider = crate::providers::infer_provider_id(&effective_model);
-
-                if let Ok(mut s) = shared_settings.lock() {
-                    s.set_model(&effective_model);
-                    // Persist to project profile
-                    let mut profile = settings::Profile::load(&agent.cwd);
-                    profile.capture_from(&s);
-                    let _ = profile.save(&agent.cwd);
-                }
-
-                let mut response_messages = Vec::new();
-                if effective_model != requested_model {
-                    let provider_label = crate::auth::provider_by_id(&new_provider)
-                        .map(|p| p.display_name)
-                        .unwrap_or(new_provider.as_str());
-                    let message = format!(
-                        "Requested {requested_model}; using executable route {effective_model} via {provider_label}."
-                    );
-                    let _ = events_tx.send(AgentEvent::SystemNotification {
-                        message: message.clone(),
-                    });
-                    response_messages.push(message);
-                }
-
-                // If provider changed, re-detect and hot-swap the bridge
-                if old_provider != new_provider {
-                    tracing::info!(
-                        old = %old_provider, new = %new_provider,
-                        "provider changed — re-detecting bridge"
-                    );
-                    // Bridge swap is awaited (not spawned) to prevent a race
-                    // where the user sends a message before the new bridge is
-                    // installed, causing the old provider to receive requests
-                    // with the new model name.
-                    let provider = crate::providers::infer_provider_id(&effective_model);
-                    if let Some(new_bridge) = providers::auto_detect_bridge(&effective_model).await
-                    {
-                        let mut guard = bridge.write().await;
-                        *guard = new_bridge;
-                        if let Ok(mut s) = shared_settings.lock() {
-                            s.provider_connected = true;
-                        }
-                        let provider_label = crate::auth::provider_by_id(&provider)
-                            .map(|p| p.display_name)
-                            .unwrap_or(provider.as_str());
-                        tracing::info!("bridge hot-swapped for provider {}", provider);
-                        let message = format!(
-                            "Provider switched to {provider_label} ({effective_model})."
-                        );
+                let response = control_runtime::set_model_response(
+                    &mut agent,
+                    &shared_settings,
+                    &bridge,
+                    &model,
+                )
+                .await;
+                if let Some(output) = response.output.clone() {
+                    for line in output.split('\n') {
                         let _ = events_tx.send(AgentEvent::SystemNotification {
-                            message: message.clone(),
+                            message: line.to_string(),
                         });
-                        response_messages.push(message);
-                    } else {
-                        if let Ok(mut s) = shared_settings.lock() {
-                            s.provider_connected = false;
-                        }
-                        let provider_label = crate::auth::provider_by_id(&provider)
-                            .map(|p| p.display_name)
-                            .unwrap_or(provider.as_str());
-                        let message = format!(
-                            "⚠ No credentials for {provider_label}. Use /login to authenticate."
-                        );
-                        let _ = events_tx.send(AgentEvent::SystemNotification {
-                            message: message.clone(),
-                        });
-                        response_messages.push(message);
                     }
-                } else if old_model != effective_model {
-                    let provider_label = crate::auth::provider_by_id(&new_provider)
-                        .map(|p| p.display_name)
-                        .unwrap_or(new_provider.as_str());
-                    let message = format!("Model switched to {effective_model} via {provider_label}.");
-                    let _ = events_tx.send(AgentEvent::SystemNotification {
-                        message: message.clone(),
-                    });
-                    response_messages.push(message);
                 }
-
                 if let Some(respond_to) = respond_to {
-                    let output = if response_messages.is_empty() {
-                        Some(format!("Model unchanged: {effective_model}"))
-                    } else {
-                        Some(response_messages.join("\n"))
-                    };
                     let _ = respond_to.send(omegon_traits::ControlOutputResponse {
-                        accepted: true,
-                        output,
+                        accepted: response.accepted,
+                        output: response.output,
                     });
                 }
             }
 
             tui::TuiCommand::SetThinking { level, respond_to } => {
-                if let Ok(mut s) = shared_settings.lock() {
-                    s.thinking = level;
+                let response = control_runtime::set_thinking_response(&shared_settings, level).await;
+                if let Some(output) = response.output.clone() {
+                    let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
                 }
-                let message = format!("Thinking → {} {}", level.icon(), level.as_str());
-                let _ = events_tx.send(AgentEvent::SystemNotification {
-                    message: message.clone(),
-                });
                 if let Some(respond_to) = respond_to {
                     let _ = respond_to.send(omegon_traits::ControlOutputResponse {
-                        accepted: true,
-                        output: Some(message),
+                        accepted: response.accepted,
+                        output: response.output,
                     });
                 }
             }
@@ -1642,47 +1526,47 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             }
 
             tui::TuiCommand::NewSession { respond_to } => {
-                // Save the current session before resetting
-                if !cli.no_session {
-                    let _ = session::save_session(
-                        &runtime_state.conversation,
-                        &agent.cwd,
-                        Some(agent.session_id.as_str()),
-                    );
-                }
-                runtime_state.conversation = crate::conversation::ConversationState::new();
-                agent.session_id = crate::session::allocate_session_id();
-                agent.resume_info = None;
-                let _ = events_tx.send(AgentEvent::SessionReset);
+                let response = control_runtime::new_session_response(
+                    &mut runtime_state,
+                    &mut agent,
+                    &CliRuntimeView {
+                        no_session: cli.no_session,
+                        model: &cli.model,
+                    },
+                    &events_tx,
+                )
+                .await;
                 if let Some(respond_to) = respond_to {
                     let _ = respond_to.send(omegon_traits::ControlOutputResponse {
-                        accepted: true,
-                        output: Some("Started a fresh session.".to_string()),
+                        accepted: response.accepted,
+                        output: response.output,
                     });
                 }
             }
 
             tui::TuiCommand::AuthStatus { respond_to } => {
-                let status = auth::probe_all_providers().await;
-                let message = format_auth_status(&status);
-                let _ = events_tx.send(AgentEvent::SystemNotification {
-                    message: message.clone(),
-                });
+                let response = control_runtime::auth_status_response().await;
+                if let Some(output) = response.output.clone() {
+                    let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
+                }
                 if let Some(respond_to) = respond_to {
                     let _ = respond_to.send(omegon_traits::ControlOutputResponse {
-                        accepted: true,
-                        output: Some(message),
+                        accepted: response.accepted,
+                        output: response.output,
                     });
                 }
             }
 
             tui::TuiCommand::AuthLogin { provider, respond_to } => {
-                let response = remote_auth_login_response(
+                let response = control_runtime::auth_login_response(
                     &shared_settings,
                     &bridge,
                     &login_prompt_tx,
                     &events_tx,
-                    &cli,
+                    &CliRuntimeView {
+                        no_session: cli.no_session,
+                        model: &cli.model,
+                    },
                     &provider,
                 )
                 .await;
@@ -1695,7 +1579,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             }
 
             tui::TuiCommand::AuthLogout { provider, respond_to } => {
-                let response = remote_auth_logout_response(&provider).await;
+                let response = control_runtime::auth_logout_response(&provider).await;
                 if let Some(output) = response.output.clone() {
                     let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
                 }
@@ -1708,7 +1592,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             }
 
             tui::TuiCommand::AuthUnlock { respond_to } => {
-                let response = remote_auth_unlock_response().await;
+                let response = control_runtime::auth_unlock_response().await;
                 if let Some(output) = response.output.clone() {
                     let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
                 }
@@ -2027,7 +1911,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     match name.as_str() {
                         "auth_status" => {
                             let status = auth::probe_all_providers().await;
-                            let message = format_auth_status(&status);
+                            let message = control_runtime::format_auth_status(&status);
                             let _ = events_tx.send(AgentEvent::SystemNotification { message });
                         }
                         "auth_login" => {
@@ -2544,21 +2428,26 @@ fn control_surface_from_via(via: &str) -> ControlSurface {
     }
 }
 
-struct InteractiveAgentState {
-    bus: crate::bus::EventBus,
-    context_manager: crate::context::ContextManager,
-    conversation: crate::conversation::ConversationState,
+pub(crate) struct InteractiveAgentState {
+    pub(crate) bus: crate::bus::EventBus,
+    pub(crate) context_manager: crate::context::ContextManager,
+    pub(crate) conversation: crate::conversation::ConversationState,
 }
 
-struct InteractiveAgentHost {
-    session_id: String,
-    context_metrics:
+pub(crate) struct InteractiveAgentHost {
+    pub(crate) session_id: String,
+    pub(crate) context_metrics:
         std::sync::Arc<std::sync::Mutex<crate::features::context::SharedContextMetrics>>,
-    cwd: PathBuf,
-    secrets: std::sync::Arc<omegon_secrets::SecretsManager>,
-    web_auth_state: crate::web::WebAuthState,
-    dashboard_handles: crate::tui::dashboard::DashboardHandles,
-    resume_info: Option<setup::ResumeInfo>,
+    pub(crate) cwd: PathBuf,
+    pub(crate) secrets: std::sync::Arc<omegon_secrets::SecretsManager>,
+    pub(crate) web_auth_state: crate::web::WebAuthState,
+    pub(crate) dashboard_handles: crate::tui::dashboard::DashboardHandles,
+    pub(crate) resume_info: Option<setup::ResumeInfo>,
+}
+
+pub(crate) struct CliRuntimeView<'a> {
+    pub(crate) no_session: bool,
+    pub(crate) model: &'a str,
 }
 
 fn split_interactive_agent(agent: setup::AgentSetup) -> (InteractiveAgentHost, InteractiveAgentState) {
@@ -3188,7 +3077,7 @@ async fn run_auth_command(action: &AuthAction) -> anyhow::Result<()> {
     match action {
         AuthAction::Status => {
             let status = auth::probe_all_providers().await;
-            println!("{}", format_auth_status(&status));
+            println!("{}", control_runtime::format_auth_status(&status));
             Ok(())
         }
         AuthAction::Login { provider } => run_auth_login(provider).await,
@@ -3273,344 +3162,6 @@ fn list_sessions_message(cwd: &Path) -> String {
     }
 }
 
-async fn remote_model_view_response(
-    shared_settings: &settings::SharedSettings,
-) -> omegon_traits::SlashCommandResponse {
-    let s = shared_settings.lock().unwrap().clone();
-    let provider = s.provider().to_string();
-    let connected = if s.provider_connected { "Yes" } else { "No" };
-    let thinking = {
-        let raw = s.thinking.as_str();
-        let mut chars = raw.chars();
-        match chars.next() {
-            Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-            None => String::new(),
-        }
-    };
-    omegon_traits::SlashCommandResponse {
-        accepted: true,
-        output: Some(format!(
-            "Model\n  Current Model:   {}\n  Provider:        {}\n  Connected:       {}\n  Context Window:  {} tokens\n  Context Class:   {}\n  Thinking Level:  {}\n\nActions\n  /model list                Show available models\n  /model <provider:model>    Switch model\n  /think <level>             Change reasoning depth\n  /context                   Show context posture",
-            s.model,
-            provider,
-            connected,
-            s.context_window,
-            s.context_class.label(),
-            thinking,
-        )),
-    }
-}
-
-async fn remote_model_list_response() -> omegon_traits::SlashCommandResponse {
-    let catalog = crate::tui::model_catalog::ModelCatalog::discover();
-    let mut output = String::from("Available Models\n");
-    for (provider_name, models) in &catalog.providers {
-        output.push_str(&format!("\n{}\n", provider_name));
-        for model in models {
-            output.push_str(&format!("  {} ({})\n", model.name, model.id));
-        }
-    }
-    omegon_traits::SlashCommandResponse {
-        accepted: true,
-        output: Some(output),
-    }
-}
-
-async fn remote_set_model_response(
-    agent: &mut InteractiveAgentHost,
-    shared_settings: &settings::SharedSettings,
-    bridge: &Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>>,
-    requested_model: &str,
-) -> omegon_traits::SlashCommandResponse {
-    let effective_model = providers::resolve_execution_model_spec(requested_model)
-        .await
-        .unwrap_or_else(|| requested_model.to_string());
-    let (old_model, old_provider) = shared_settings
-        .lock()
-        .ok()
-        .map(|s| {
-            (
-                s.model.clone(),
-                crate::providers::infer_provider_id(&s.model),
-            )
-        })
-        .unwrap_or_else(|| (String::new(), String::new()));
-    let new_provider = crate::providers::infer_provider_id(&effective_model);
-    if let Ok(mut s) = shared_settings.lock() {
-        s.set_model(&effective_model);
-        let mut profile = settings::Profile::load(&agent.cwd);
-        profile.capture_from(&s);
-        let _ = profile.save(&agent.cwd);
-    }
-    let mut messages = Vec::new();
-    if effective_model != requested_model {
-        let provider_label = crate::auth::provider_by_id(&new_provider)
-            .map(|p| p.display_name)
-            .unwrap_or(new_provider.as_str());
-        messages.push(format!(
-            "Requested {requested_model}; using executable route {effective_model} via {provider_label}."
-        ));
-    }
-    if old_provider != new_provider {
-        let provider = crate::providers::infer_provider_id(&effective_model);
-        if let Some(new_bridge) = providers::auto_detect_bridge(&effective_model).await {
-            let mut guard = bridge.write().await;
-            *guard = new_bridge;
-            if let Ok(mut s) = shared_settings.lock() {
-                s.provider_connected = true;
-            }
-            let provider_label = crate::auth::provider_by_id(&provider)
-                .map(|p| p.display_name)
-                .unwrap_or(provider.as_str());
-            messages.push(format!(
-                "Provider switched to {provider_label} ({effective_model})."
-            ));
-        } else {
-            if let Ok(mut s) = shared_settings.lock() {
-                s.provider_connected = false;
-            }
-            let provider_label = crate::auth::provider_by_id(&provider)
-                .map(|p| p.display_name)
-                .unwrap_or(provider.as_str());
-            messages.push(format!(
-                "⚠ No credentials for {provider_label}. Use /login to authenticate."
-            ));
-        }
-    } else if old_model != effective_model {
-        let provider_label = crate::auth::provider_by_id(&new_provider)
-            .map(|p| p.display_name)
-            .unwrap_or(new_provider.as_str());
-        messages.push(format!(
-            "Model switched to {effective_model} via {provider_label}."
-        ));
-    }
-    omegon_traits::SlashCommandResponse {
-        accepted: true,
-        output: Some(if messages.is_empty() {
-            format!("Model unchanged: {effective_model}")
-        } else {
-            messages.join("\n")
-        }),
-    }
-}
-
-async fn remote_set_thinking_response(
-    shared_settings: &settings::SharedSettings,
-    level: crate::settings::ThinkingLevel,
-) -> omegon_traits::SlashCommandResponse {
-    if let Ok(mut s) = shared_settings.lock() {
-        s.thinking = level;
-    }
-    omegon_traits::SlashCommandResponse {
-        accepted: true,
-        output: Some(format!("Thinking → {} {}", level.icon(), level.as_str())),
-    }
-}
-
-async fn remote_context_status_response(
-    runtime_state: &InteractiveAgentState,
-    shared_settings: &settings::SharedSettings,
-) -> omegon_traits::SlashCommandResponse {
-    let est = runtime_state.conversation.estimate_tokens();
-    let settings = shared_settings.lock().unwrap();
-    let ctx_window = settings.context_window;
-    let pct = if ctx_window > 0 {
-        ((est as f64 / ctx_window as f64) * 100.0).min(100.0) as u32
-    } else {
-        0
-    };
-    omegon_traits::SlashCommandResponse {
-        accepted: true,
-        output: Some(format!(
-            "Context: {}/{} tokens ({}%)\nPolicy: {}\nModel: {}\nThinking: {}",
-            est,
-            ctx_window,
-            pct,
-            settings.effective_requested_class().label(),
-            settings.context_class.label(),
-            settings.thinking.as_str()
-        )),
-    }
-}
-
-async fn remote_new_session_response(
-    runtime_state: &mut InteractiveAgentState,
-    agent: &mut InteractiveAgentHost,
-    cli: &Cli,
-    events_tx: &broadcast::Sender<AgentEvent>,
-) -> omegon_traits::SlashCommandResponse {
-    if !cli.no_session {
-        let _ = session::save_session(
-            &runtime_state.conversation,
-            &agent.cwd,
-            Some(agent.session_id.as_str()),
-        );
-    }
-    runtime_state.conversation = crate::conversation::ConversationState::new();
-    agent.session_id = crate::session::allocate_session_id();
-    agent.resume_info = None;
-    let _ = events_tx.send(AgentEvent::SessionReset);
-    omegon_traits::SlashCommandResponse {
-        accepted: true,
-        output: Some("Started a fresh session.".to_string()),
-    }
-}
-
-async fn remote_list_sessions_response(
-    agent: &InteractiveAgentHost,
-) -> omegon_traits::SlashCommandResponse {
-    omegon_traits::SlashCommandResponse {
-        accepted: true,
-        output: Some(list_sessions_message(&agent.cwd)),
-    }
-}
-
-async fn remote_auth_status_response() -> omegon_traits::SlashCommandResponse {
-    let status = auth::probe_all_providers().await;
-    omegon_traits::SlashCommandResponse {
-        accepted: true,
-        output: Some(format_auth_status(&status)),
-    }
-}
-
-async fn remote_auth_unlock_response() -> omegon_traits::SlashCommandResponse {
-    omegon_traits::SlashCommandResponse {
-        accepted: true,
-        output: Some("🔒 Secrets store unlock not yet implemented".to_string()),
-    }
-}
-
-async fn remote_auth_login_response(
-    shared_settings: &settings::SharedSettings,
-    bridge: &Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>>,
-    login_prompt_tx: &std::sync::Arc<tokio::sync::Mutex<Option<oneshot::Sender<String>>>>,
-    events_tx: &broadcast::Sender<AgentEvent>,
-    cli: &Cli,
-    provider: &str,
-) -> omegon_traits::SlashCommandResponse {
-    let provider = provider.trim();
-    let provider = if provider.is_empty() { "anthropic" } else { provider };
-    if provider == "openai" {
-        return omegon_traits::SlashCommandResponse {
-            accepted: false,
-            output: Some(
-                "OpenAI API login is interactive-only in the TUI. Use /login in the terminal session or set OPENAI_API_KEY."
-                    .to_string(),
-            ),
-        };
-    }
-    if login_prompt_tx.lock().await.is_some() {
-        return omegon_traits::SlashCommandResponse {
-            accepted: false,
-            output: Some("Login is already waiting for interactive input in the TUI.".to_string()),
-        };
-    }
-    let events_tx_clone = events_tx.clone();
-    let progress_tx = events_tx.clone();
-    let prompt_tx_for_login = events_tx.clone();
-    let login_prompt_slot = login_prompt_tx.clone();
-    let provider_clone = provider.to_string();
-    let bridge_clone = bridge.clone();
-    let model_for_redetect = shared_settings
-        .lock()
-        .ok()
-        .map(|s| s.model.clone())
-        .unwrap_or_else(|| cli.model.clone());
-    let settings_for_login = shared_settings.clone();
-    tokio::spawn(async move {
-        let progress: auth::LoginProgress = Box::new(move |msg| {
-            let _ = progress_tx.send(AgentEvent::SystemNotification {
-                message: msg.to_string(),
-            });
-        });
-        let prompt: auth::LoginPrompt = Box::new(move |msg| {
-            let slot = login_prompt_slot.clone();
-            let tx = prompt_tx_for_login.clone();
-            Box::pin(async move {
-                let (otx, orx) = tokio::sync::oneshot::channel();
-                {
-                    let mut guard = slot.lock().await;
-                    *guard = Some(otx);
-                }
-                let _ = tx.send(AgentEvent::SystemNotification { message: msg });
-                orx.await
-                    .map_err(|_| anyhow::anyhow!("Login prompt cancelled"))
-            })
-        });
-        let result = match provider_clone.as_str() {
-            "anthropic" | "claude" => {
-                auth::login_anthropic_with_callbacks(progress, prompt).await
-            }
-            "openai-codex" | "chatgpt" | "codex" => {
-                auth::login_openai_with_callbacks(progress, prompt).await
-            }
-            "openai" => Err(anyhow::anyhow!(
-                "OpenAI API login in the TUI uses hidden API-key entry. Run /login and choose OpenAI API, or set OPENAI_API_KEY."
-            )),
-            "openrouter" => Err(anyhow::anyhow!(
-                "OpenRouter login in the TUI uses hidden API-key entry. Run /login and choose OpenRouter, or set OPENROUTER_API_KEY."
-            )),
-            "ollama-cloud" => Err(anyhow::anyhow!(
-                "Ollama Cloud login in the TUI uses hidden API-key entry. Run /login and choose Ollama Cloud, or set OLLAMA_API_KEY."
-            )),
-            _ => Err(anyhow::anyhow!(
-                "Unknown provider: {}. Use: anthropic, openai, openai-codex, openrouter, ollama-cloud",
-                provider_clone
-            )),
-        };
-        let provider_label = crate::auth::provider_by_id(&provider_clone)
-            .map(|p| p.display_name)
-            .unwrap_or(provider_clone.as_str())
-            .to_string();
-        let message = match &result {
-            Ok(_) => format!("✓ Successfully logged in to {provider_label}"),
-            Err(e) => format!("❌ Login failed: {}", e),
-        };
-        let _ = events_tx_clone.send(AgentEvent::SystemNotification { message });
-        if result.is_ok() {
-            let effective_model = providers::resolve_execution_model_spec(&model_for_redetect)
-                .await
-                .unwrap_or(model_for_redetect.clone());
-            if let Some(new_bridge) = providers::auto_detect_bridge(&effective_model).await {
-                let mut guard = bridge_clone.write().await;
-                *guard = new_bridge;
-                if let Ok(mut s) = settings_for_login.lock() {
-                    s.set_model(&effective_model);
-                    s.provider_connected = true;
-                }
-                let _ = events_tx_clone.send(AgentEvent::SystemNotification {
-                    message: format!("Provider connected — active route {}.", effective_model),
-                });
-            }
-        }
-    });
-    omegon_traits::SlashCommandResponse {
-        accepted: true,
-        output: Some(format!(
-            "Login started for {provider}. Complete any interactive prompts in the TUI."
-        )),
-    }
-}
-
-async fn remote_auth_logout_response(provider: &str) -> omegon_traits::SlashCommandResponse {
-    if provider.trim().is_empty() {
-        return omegon_traits::SlashCommandResponse {
-            accepted: false,
-            output: Some(
-                "Provider required for logout. Use: anthropic, openai, openai-codex, openrouter, ollama-cloud".to_string(),
-            ),
-        };
-    }
-    let message = match auth::logout_provider(provider) {
-        Ok(()) => format!("✓ Logged out from {}", provider),
-        Err(e) => format!("❌ Logout failed: {}", e),
-    };
-    omegon_traits::SlashCommandResponse {
-        accepted: true,
-        output: Some(message),
-    }
-}
-
 async fn execute_remote_slash_command(
     runtime_state: &mut InteractiveAgentState,
     agent: &mut InteractiveAgentHost,
@@ -3635,15 +3186,16 @@ async fn execute_remote_slash_command(
     };
 
     match command {
-        CanonicalSlashCommand::ModelList => remote_model_list_response().await,
+        CanonicalSlashCommand::ModelList => control_runtime::model_list_response().await,
         CanonicalSlashCommand::SetModel(requested_model) => {
-            remote_set_model_response(agent, shared_settings, bridge, &requested_model).await
+            control_runtime::set_model_response(agent, shared_settings, bridge, &requested_model)
+                .await
         }
         CanonicalSlashCommand::SetThinking(level) => {
-            remote_set_thinking_response(shared_settings, level).await
+            control_runtime::set_thinking_response(shared_settings, level).await
         }
         CanonicalSlashCommand::ContextStatus => {
-            remote_context_status_response(runtime_state, shared_settings).await
+            control_runtime::context_status_response(runtime_state, shared_settings).await
         }
         CanonicalSlashCommand::ContextCompact => {
             let bridge_guard = bridge.read().await;
@@ -3825,23 +3377,37 @@ async fn execute_remote_slash_command(
             }
         }
         CanonicalSlashCommand::NewSession => {
-            remote_new_session_response(runtime_state, agent, cli, events_tx).await
+            control_runtime::new_session_response(
+                runtime_state,
+                agent,
+                &CliRuntimeView {
+                    no_session: cli.no_session,
+                    model: &cli.model,
+                },
+                events_tx,
+            )
+            .await
         }
-        CanonicalSlashCommand::ListSessions => remote_list_sessions_response(agent).await,
-        CanonicalSlashCommand::AuthStatus => remote_auth_status_response().await,
-        CanonicalSlashCommand::AuthUnlock => remote_auth_unlock_response().await,
+        CanonicalSlashCommand::ListSessions => control_runtime::list_sessions_response(agent).await,
+        CanonicalSlashCommand::AuthStatus => control_runtime::auth_status_response().await,
+        CanonicalSlashCommand::AuthUnlock => control_runtime::auth_unlock_response().await,
         CanonicalSlashCommand::AuthLogin(provider) => {
-            remote_auth_login_response(
+            control_runtime::auth_login_response(
                 shared_settings,
                 bridge,
                 login_prompt_tx,
                 events_tx,
-                cli,
+                &CliRuntimeView {
+                    no_session: cli.no_session,
+                    model: &cli.model,
+                },
                 &provider,
             )
             .await
         }
-        CanonicalSlashCommand::AuthLogout(provider) => remote_auth_logout_response(&provider).await,
+        CanonicalSlashCommand::AuthLogout(provider) => {
+            control_runtime::auth_logout_response(&provider).await
+        }
     }
 }
 
@@ -3887,74 +3453,6 @@ async fn run_auth_login(provider: &str) -> anyhow::Result<()> {
             std::process::exit(1);
         }
     }
-}
-
-fn format_auth_status(status: &auth::AuthStatus) -> String {
-    let mut lines = vec!["Authentication Status:".to_string()];
-
-    for provider in &status.providers {
-        let icon = match provider.status {
-            auth::ProviderAuthStatus::Authenticated => "✓",
-            auth::ProviderAuthStatus::Expired => "⚠",
-            auth::ProviderAuthStatus::Missing => "✗",
-            auth::ProviderAuthStatus::Error => "❌",
-        };
-
-        let auth_type = if provider.is_oauth {
-            "oauth"
-        } else {
-            "api-key"
-        };
-        let display_name = auth::provider_by_id(&provider.name)
-            .map(|p| p.display_name)
-            .unwrap_or(provider.name.as_str());
-        let mut line = format!("  {icon} {:<16} {auth_type}", display_name);
-
-        if let Some(ref details) = provider.details {
-            line.push_str(&format!(" ({details})"));
-        }
-
-        lines.push(line);
-    }
-
-    if !status.vault.is_empty() || !status.secrets.is_empty() || !status.mcp.is_empty() {
-        lines.push(String::new());
-
-        if !status.vault.is_empty() {
-            lines.push("Vault:".to_string());
-            for vault_info in &status.vault {
-                lines.push(format!(
-                    "  {} {}",
-                    if vault_info.accessible { "✓" } else { "✗" },
-                    vault_info.addr
-                ));
-            }
-        }
-
-        if !status.secrets.is_empty() {
-            lines.push("Secrets Store:".to_string());
-            for secret_info in &status.secrets {
-                lines.push(format!(
-                    "  {} {}",
-                    if secret_info.unlocked { "🔓" } else { "🔒" },
-                    secret_info.store
-                ));
-            }
-        }
-
-        if !status.mcp.is_empty() {
-            lines.push("MCP Servers:".to_string());
-            for mcp_info in &status.mcp {
-                lines.push(format!(
-                    "  {} {}",
-                    if mcp_info.connected { "✓" } else { "✗" },
-                    mcp_info.server
-                ));
-            }
-        }
-    }
-
-    lines.join("\n")
 }
 
 #[cfg(test)]
