@@ -1211,6 +1211,31 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         match cmd {
             tui::TuiCommand::Quit => break,
 
+            tui::TuiCommand::ExecuteControl { request, respond_to } => {
+                let mut ctx = control_runtime::ControlContext {
+                    runtime_state: &mut runtime_state,
+                    agent: &mut agent,
+                    shared_settings: &shared_settings,
+                    bridge: &bridge,
+                    login_prompt_tx: &login_prompt_tx,
+                    events_tx: &events_tx,
+                    cli: &CliRuntimeView {
+                        no_session: cli.no_session,
+                        model: &cli.model,
+                    },
+                };
+                let response = control_runtime::execute_control(&mut ctx, request).await;
+                if let Some(output) = response.output.clone() {
+                    let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
+                }
+                if let Some(respond_to) = respond_to {
+                    let _ = respond_to.send(omegon_traits::ControlOutputResponse {
+                        accepted: response.accepted,
+                        output: response.output,
+                    });
+                }
+            }
+
             tui::TuiCommand::ModelView { respond_to } => {
                 let response = control_runtime::model_view_response(&shared_settings).await;
                 if let Some(output) = response.output.clone() {

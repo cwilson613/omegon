@@ -93,6 +93,11 @@ pub enum TuiCommand {
         level: crate::settings::ThinkingLevel,
         respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
     },
+    /// Execute a canonical control request directly.
+    ExecuteControl {
+        request: crate::control_runtime::ControlRequest,
+        respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
+    },
     /// Execute canonical slash semantics from a non-TUI caller.
     RunSlashCommand {
         name: String,

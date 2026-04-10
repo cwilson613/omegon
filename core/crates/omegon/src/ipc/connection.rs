@@ -376,63 +376,15 @@ impl IpcConnection {
                         continue;
                     }
                     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-                    let accepted = match method.as_str() {
-                        "context_status" => cfg
-                            .command_tx
-                            .send(TuiCommand::ContextStatus {
-                                respond_to: Some(reply_tx),
-                            })
-                            .await
-                            .is_ok(),
-                        "context_compact" => cfg
-                            .command_tx
-                            .send(TuiCommand::ContextCompact {
-                                respond_to: Some(reply_tx),
-                            })
-                            .await
-                            .is_ok(),
-                        "context_clear" => cfg
-                            .command_tx
-                            .send(TuiCommand::ContextClear {
-                                respond_to: Some(reply_tx),
-                            })
-                            .await
-                            .is_ok(),
-                        "new_session" => cfg
-                            .command_tx
-                            .send(TuiCommand::NewSession {
-                                respond_to: Some(reply_tx),
-                            })
-                            .await
-                            .is_ok(),
-                        "auth_status" => cfg
-                            .command_tx
-                            .send(TuiCommand::AuthStatus {
-                                respond_to: Some(reply_tx),
-                            })
-                            .await
-                            .is_ok(),
-                        "model_view" => cfg
-                            .command_tx
-                            .send(TuiCommand::ModelView {
-                                respond_to: Some(reply_tx),
-                            })
-                            .await
-                            .is_ok(),
-                        "model_list" => cfg
-                            .command_tx
-                            .send(TuiCommand::ModelList {
-                                respond_to: Some(reply_tx),
-                            })
-                            .await
-                            .is_ok(),
-                        "list_sessions" => cfg
-                            .command_tx
-                            .send(TuiCommand::ListSessions {
-                                respond_to: Some(reply_tx),
-                            })
-                            .await
-                            .is_ok(),
+                    let request = match method.as_str() {
+                        "context_status" => Some(crate::control_runtime::ControlRequest::ContextStatus),
+                        "context_compact" => Some(crate::control_runtime::ControlRequest::ContextCompact),
+                        "context_clear" => Some(crate::control_runtime::ControlRequest::ContextClear),
+                        "new_session" => Some(crate::control_runtime::ControlRequest::NewSession),
+                        "auth_status" => Some(crate::control_runtime::ControlRequest::AuthStatus),
+                        "model_view" => Some(crate::control_runtime::ControlRequest::ModelView),
+                        "model_list" => Some(crate::control_runtime::ControlRequest::ModelList),
+                        "list_sessions" => Some(crate::control_runtime::ControlRequest::ListSessions),
                         "set_model" => {
                             let model = payload
                                 .get("model")
@@ -440,7 +392,7 @@ impl IpcConnection {
                                 .unwrap_or("")
                                 .to_string();
                             if model.is_empty() {
-                                false
+                                None
                             } else {
                                 let current_model = cfg
                                     .shared_settings
@@ -462,13 +414,9 @@ impl IpcConnection {
                                     .await;
                                     continue;
                                 }
-                                cfg.command_tx
-                                    .send(TuiCommand::SetModel {
-                                        model,
-                                        respond_to: Some(reply_tx),
-                                    })
-                                    .await
-                                    .is_ok()
+                                Some(crate::control_runtime::ControlRequest::SetModel {
+                                    requested_model: model,
+                                })
                             }
                         }
                         "set_thinking" => {
@@ -476,19 +424,22 @@ impl IpcConnection {
                                 .get("level")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
-                            if let Some(level) = crate::settings::ThinkingLevel::parse(level_raw) {
-                                cfg.command_tx
-                                    .send(TuiCommand::SetThinking {
-                                        level,
-                                        respond_to: Some(reply_tx),
-                                    })
-                                    .await
-                                    .is_ok()
-                            } else {
-                                false
-                            }
+                            crate::settings::ThinkingLevel::parse(level_raw).map(|level| {
+                                crate::control_runtime::ControlRequest::SetThinking { level }
+                            })
                         }
-                        _ => false,
+                        _ => None,
+                    };
+                    let accepted = if let Some(request) = request {
+                        cfg.command_tx
+                            .send(TuiCommand::ExecuteControl {
+                                request,
+                                respond_to: Some(reply_tx),
+                            })
+                            .await
+                            .is_ok()
+                    } else {
+                        false
                     };
                     let response = if accepted {
                         match reply_rx.await {

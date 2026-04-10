@@ -22,6 +22,7 @@ pub struct ControlContext<'a> {
     pub cli: &'a CliRuntimeView<'a>,
 }
 
+#[derive(Debug)]
 pub enum ControlRequest {
     ModelView,
     ModelList,
