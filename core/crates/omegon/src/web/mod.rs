@@ -276,6 +276,32 @@ pub enum WebCommand {
     Cancel,
     NewSession,
     Shutdown,
+    ModelView {
+        respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
+    },
+    ModelList {
+        respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
+    },
+    SetModel {
+        model: String,
+        respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
+    },
+    SetThinking {
+        level: crate::settings::ThinkingLevel,
+        respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
+    },
+    AuthStatus {
+        respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
+    },
+    ContextStatus {
+        respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
+    },
+    ContextCompact {
+        respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
+    },
+    ContextClear {
+        respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
+    },
     CancelCleaveChild {
         label: String,
         respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::SlashCommandResponse>>,
@@ -495,6 +521,29 @@ pub(crate) async fn process_next_daemon_event(state: &WebState) -> anyhow::Resul
             }),
         "cancel" => Some(WebCommand::Cancel),
         "new-session" => Some(WebCommand::NewSession),
+        "context-status" => Some(WebCommand::ContextStatus { respond_to: None }),
+        "context-compact" => Some(WebCommand::ContextCompact { respond_to: None }),
+        "context-clear" => Some(WebCommand::ContextClear { respond_to: None }),
+        "auth-status" => Some(WebCommand::AuthStatus { respond_to: None }),
+        "model-view" => Some(WebCommand::ModelView { respond_to: None }),
+        "model-list" => Some(WebCommand::ModelList { respond_to: None }),
+        "set-model" => event
+            .payload
+            .get("model")
+            .and_then(|value| value.as_str())
+            .map(|model| WebCommand::SetModel {
+                model: model.to_string(),
+                respond_to: None,
+            }),
+        "set-thinking" => event
+            .payload
+            .get("level")
+            .and_then(|value| value.as_str())
+            .and_then(crate::settings::ThinkingLevel::parse)
+            .map(|level| WebCommand::SetThinking {
+                level,
+                respond_to: None,
+            }),
         "shutdown" => Some(WebCommand::Shutdown),
         "cancel-cleave-child" => event
             .payload

@@ -165,6 +165,270 @@ async fn handle_client_command(
                     .await;
             }
         }
+        "model_view" => {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let accepted = command_tx
+                .send(WebCommand::ModelView {
+                    respond_to: Some(reply_tx),
+                })
+                .await
+                .is_ok();
+            let message = if accepted {
+                match reply_rx.await {
+                    Ok(response) => control_result_message("model_view", response),
+                    Err(_) => control_result_message(
+                        "model_view",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some(
+                                "model_view executor dropped response before completion".to_string(),
+                            ),
+                        },
+                    ),
+                }
+            } else {
+                control_result_message(
+                    "model_view",
+                    omegon_traits::ControlOutputResponse {
+                        accepted: false,
+                        output: Some("failed to enqueue model_view".to_string()),
+                    },
+                )
+            };
+            let _ = snapshot_tx.send(message).await;
+        }
+        "model_list" => {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let accepted = command_tx
+                .send(WebCommand::ModelList {
+                    respond_to: Some(reply_tx),
+                })
+                .await
+                .is_ok();
+            let message = if accepted {
+                match reply_rx.await {
+                    Ok(response) => control_result_message("model_list", response),
+                    Err(_) => control_result_message(
+                        "model_list",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some(
+                                "model_list executor dropped response before completion".to_string(),
+                            ),
+                        },
+                    ),
+                }
+            } else {
+                control_result_message(
+                    "model_list",
+                    omegon_traits::ControlOutputResponse {
+                        accepted: false,
+                        output: Some("failed to enqueue model_list".to_string()),
+                    },
+                )
+            };
+            let _ = snapshot_tx.send(message).await;
+        }
+        "set_model" => {
+            if let Some(model) = cmd["model"].as_str() {
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                let accepted = command_tx
+                    .send(WebCommand::SetModel {
+                        model: model.to_string(),
+                        respond_to: Some(reply_tx),
+                    })
+                    .await
+                    .is_ok();
+                let message = if accepted {
+                    match reply_rx.await {
+                        Ok(response) => control_result_message("set_model", response),
+                        Err(_) => control_result_message(
+                            "set_model",
+                            omegon_traits::ControlOutputResponse {
+                                accepted: false,
+                                output: Some(
+                                    "set_model executor dropped response before completion".to_string(),
+                                ),
+                            },
+                        ),
+                    }
+                } else {
+                    control_result_message(
+                        "set_model",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some("failed to enqueue set_model".to_string()),
+                        },
+                    )
+                };
+                let _ = snapshot_tx.send(message).await;
+            }
+        }
+        "set_thinking" => {
+            if let Some(level_raw) = cmd["level"].as_str()
+                && let Some(level) = crate::settings::ThinkingLevel::parse(level_raw)
+            {
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                let accepted = command_tx
+                    .send(WebCommand::SetThinking {
+                        level,
+                        respond_to: Some(reply_tx),
+                    })
+                    .await
+                    .is_ok();
+                let message = if accepted {
+                    match reply_rx.await {
+                        Ok(response) => control_result_message("set_thinking", response),
+                        Err(_) => control_result_message(
+                            "set_thinking",
+                            omegon_traits::ControlOutputResponse {
+                                accepted: false,
+                                output: Some(
+                                    "set_thinking executor dropped response before completion".to_string(),
+                                ),
+                            },
+                        ),
+                    }
+                } else {
+                    control_result_message(
+                        "set_thinking",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some("failed to enqueue set_thinking".to_string()),
+                        },
+                    )
+                };
+                let _ = snapshot_tx.send(message).await;
+            }
+        }
+        "auth_status" => {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let accepted = command_tx
+                .send(WebCommand::AuthStatus {
+                    respond_to: Some(reply_tx),
+                })
+                .await
+                .is_ok();
+            let message = if accepted {
+                match reply_rx.await {
+                    Ok(response) => control_result_message("auth_status", response),
+                    Err(_) => control_result_message(
+                        "auth_status",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some(
+                                "auth_status executor dropped response before completion".to_string(),
+                            ),
+                        },
+                    ),
+                }
+            } else {
+                control_result_message(
+                    "auth_status",
+                    omegon_traits::ControlOutputResponse {
+                        accepted: false,
+                        output: Some("failed to enqueue auth_status".to_string()),
+                    },
+                )
+            };
+            let _ = snapshot_tx.send(message).await;
+        }
+        "context_status" => {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let accepted = command_tx
+                .send(WebCommand::ContextStatus {
+                    respond_to: Some(reply_tx),
+                })
+                .await
+                .is_ok();
+            let message = if accepted {
+                match reply_rx.await {
+                    Ok(response) => control_result_message("context_status", response),
+                    Err(_) => control_result_message(
+                        "context_status",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some(
+                                "context_status executor dropped response before completion".to_string(),
+                            ),
+                        },
+                    ),
+                }
+            } else {
+                control_result_message(
+                    "context_status",
+                    omegon_traits::ControlOutputResponse {
+                        accepted: false,
+                        output: Some("failed to enqueue context_status".to_string()),
+                    },
+                )
+            };
+            let _ = snapshot_tx.send(message).await;
+        }
+        "context_compact" => {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let accepted = command_tx
+                .send(WebCommand::ContextCompact {
+                    respond_to: Some(reply_tx),
+                })
+                .await
+                .is_ok();
+            let message = if accepted {
+                match reply_rx.await {
+                    Ok(response) => control_result_message("context_compact", response),
+                    Err(_) => control_result_message(
+                        "context_compact",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some(
+                                "context_compact executor dropped response before completion".to_string(),
+                            ),
+                        },
+                    ),
+                }
+            } else {
+                control_result_message(
+                    "context_compact",
+                    omegon_traits::ControlOutputResponse {
+                        accepted: false,
+                        output: Some("failed to enqueue context_compact".to_string()),
+                    },
+                )
+            };
+            let _ = snapshot_tx.send(message).await;
+        }
+        "context_clear" => {
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let accepted = command_tx
+                .send(WebCommand::ContextClear {
+                    respond_to: Some(reply_tx),
+                })
+                .await
+                .is_ok();
+            let message = if accepted {
+                match reply_rx.await {
+                    Ok(response) => control_result_message("context_clear", response),
+                    Err(_) => control_result_message(
+                        "context_clear",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some(
+                                "context_clear executor dropped response before completion".to_string(),
+                            ),
+                        },
+                    ),
+                }
+            } else {
+                control_result_message(
+                    "context_clear",
+                    omegon_traits::ControlOutputResponse {
+                        accepted: false,
+                        output: Some("failed to enqueue context_clear".to_string()),
+                    },
+                )
+            };
+            let _ = snapshot_tx.send(message).await;
+        }
         "slash_command" => {
             let name = cmd["name"].as_str().unwrap_or("").to_string();
             let args = cmd["args"].as_str().unwrap_or("").to_string();
@@ -321,6 +585,17 @@ fn slash_command_result_message(
         "event_name": "slash.command.result",
         "name": name,
         "args": args,
+        "accepted": response.accepted,
+        "output": escape_html(&output),
+    })
+}
+
+fn control_result_message(name: &str, response: omegon_traits::ControlOutputResponse) -> Value {
+    let output = response.output.unwrap_or_default();
+    json!({
+        "type": "control_result",
+        "event_name": "control.result",
+        "name": name,
         "accepted": response.accepted,
         "output": escape_html(&output),
     })
