@@ -129,6 +129,37 @@ pub fn classify_ipc_set_model_request(current_model: &str, requested_model: &str
     }
 }
 
+pub fn classify_web_method(method: &str) -> ClassifiedAction {
+    let (action, role, remote_safe) = match method {
+        "request_snapshot" => (CanonicalAction::StatusView, ControlRole::Read, true),
+        "user_prompt" => (CanonicalAction::PromptSubmit, ControlRole::Edit, true),
+        "cancel" => (CanonicalAction::TurnCancel, ControlRole::Edit, true),
+        "new_session" => (CanonicalAction::SessionNew, ControlRole::Edit, true),
+        "context_status" => (CanonicalAction::ContextView, ControlRole::Read, true),
+        "context_compact" => (CanonicalAction::ContextCompact, ControlRole::Edit, true),
+        "context_clear" => (CanonicalAction::ContextClear, ControlRole::Edit, true),
+        "auth_status" => (CanonicalAction::AuthStatus, ControlRole::Read, true),
+        "model_view" => (CanonicalAction::ModelView, ControlRole::Read, true),
+        "model_list" => (CanonicalAction::ModelList, ControlRole::Read, true),
+        "set_model" => (CanonicalAction::ProviderSwitch, ControlRole::Admin, false),
+        "set_thinking" => (CanonicalAction::ThinkingSet, ControlRole::Edit, true),
+        "shutdown" => (CanonicalAction::RuntimeShutdown, ControlRole::Admin, true),
+        _ => (CanonicalAction::Unknown, ControlRole::Admin, false),
+    };
+    ClassifiedAction {
+        ingress: ControlIngress::WebDaemon,
+        action,
+        role,
+        remote_safe,
+    }
+}
+
+pub fn classify_web_set_model_request(current_model: &str, requested_model: &str) -> ClassifiedAction {
+    let mut classified = classify_ipc_set_model_request(current_model, requested_model);
+    classified.ingress = ControlIngress::WebDaemon;
+    classified
+}
+
 pub fn classify_daemon_trigger(trigger_kind: &str) -> ClassifiedAction {
     let (action, role, remote_safe) = match trigger_kind {
         "prompt" => (CanonicalAction::PromptSubmit, ControlRole::Edit, true),
@@ -383,6 +414,33 @@ mod tests {
     #[test]
     fn classifies_ipc_set_model_request_explicit_provider_switch_as_admin() {
         let action = classify_ipc_set_model_request(
+            "anthropic:claude-sonnet-4-6",
+            "openai:gpt-5.4",
+        );
+        assert_eq!(action.action, CanonicalAction::ProviderSwitch);
+        assert_eq!(action.role, ControlRole::Admin);
+        assert!(!action.remote_safe);
+    }
+
+    #[test]
+    fn classifies_web_model_view_as_read() {
+        let action = classify_web_method("model_view");
+        assert_eq!(action.action, CanonicalAction::ModelView);
+        assert_eq!(action.role, ControlRole::Read);
+        assert!(action.remote_safe);
+    }
+
+    #[test]
+    fn classifies_web_set_model_request_same_provider_as_edit() {
+        let action = classify_web_set_model_request("anthropic:claude-sonnet-4-6", "claude-opus-4-6");
+        assert_eq!(action.action, CanonicalAction::ModelSetSameProvider);
+        assert_eq!(action.role, ControlRole::Edit);
+        assert!(action.remote_safe);
+    }
+
+    #[test]
+    fn classifies_web_set_model_request_provider_switch_as_admin() {
+        let action = classify_web_set_model_request(
             "anthropic:claude-sonnet-4-6",
             "openai:gpt-5.4",
         );

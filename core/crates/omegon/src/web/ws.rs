@@ -156,6 +156,11 @@ async fn handle_client_command(
     snapshot_tx: &tokio::sync::mpsc::Sender<Value>,
 ) {
     let cmd_type = cmd["type"].as_str().unwrap_or("");
+    let caller_role = match cmd["caller_role"].as_str().unwrap_or("admin") {
+        "read" => crate::control_actions::ControlRole::Read,
+        "edit" => crate::control_actions::ControlRole::Edit,
+        _ => crate::control_actions::ControlRole::Admin,
+    };
 
     match cmd_type {
         "user_prompt" => {
@@ -166,6 +171,17 @@ async fn handle_client_command(
             }
         }
         "model_view" => {
+            let classified = crate::control_actions::classify_web_method("model_view");
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx
+                    .send(serde_json::json!({
+                        "type": "system_message",
+                        "role": "system",
+                        "message": "caller role is insufficient for model_view",
+                    }))
+                    .await;
+                return;
+            }
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
             let accepted = command_tx
                 .send(WebCommand::ModelView {
@@ -198,6 +214,17 @@ async fn handle_client_command(
             let _ = snapshot_tx.send(message).await;
         }
         "model_list" => {
+            let classified = crate::control_actions::classify_web_method("model_list");
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx
+                    .send(serde_json::json!({
+                        "type": "system_message",
+                        "role": "system",
+                        "message": "caller role is insufficient for model_list",
+                    }))
+                    .await;
+                return;
+            }
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
             let accepted = command_tx
                 .send(WebCommand::ModelList {
@@ -231,6 +258,28 @@ async fn handle_client_command(
         }
         "set_model" => {
             if let Some(model) = cmd["model"].as_str() {
+                let current_model: String = state
+                    .handles
+                    .harness
+                    .as_ref()
+                    .and_then(|lock| lock.lock().ok())
+                    .and_then(|h| h.providers.iter().find(|p| p.authenticated).and_then(|p| p.model.clone()))
+                    .unwrap_or_default();
+                let classified = if current_model.is_empty() {
+                    crate::control_actions::classify_web_method("set_model")
+                } else {
+                    crate::control_actions::classify_web_set_model_request(&current_model, model)
+                };
+                if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                    let _ = snapshot_tx
+                        .send(serde_json::json!({
+                            "type": "system_message",
+                            "role": "system",
+                            "message": "caller role is insufficient for set_model",
+                        }))
+                        .await;
+                    return;
+                }
                 let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
                 let accepted = command_tx
                     .send(WebCommand::SetModel {
@@ -268,6 +317,17 @@ async fn handle_client_command(
             if let Some(level_raw) = cmd["level"].as_str()
                 && let Some(level) = crate::settings::ThinkingLevel::parse(level_raw)
             {
+                let classified = crate::control_actions::classify_web_method("set_thinking");
+                if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                    let _ = snapshot_tx
+                        .send(serde_json::json!({
+                            "type": "system_message",
+                            "role": "system",
+                            "message": "caller role is insufficient for set_thinking",
+                        }))
+                        .await;
+                    return;
+                }
                 let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
                 let accepted = command_tx
                     .send(WebCommand::SetThinking {
@@ -302,6 +362,17 @@ async fn handle_client_command(
             }
         }
         "auth_status" => {
+            let classified = crate::control_actions::classify_web_method("auth_status");
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx
+                    .send(serde_json::json!({
+                        "type": "system_message",
+                        "role": "system",
+                        "message": "caller role is insufficient for auth_status",
+                    }))
+                    .await;
+                return;
+            }
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
             let accepted = command_tx
                 .send(WebCommand::AuthStatus {
@@ -334,6 +405,17 @@ async fn handle_client_command(
             let _ = snapshot_tx.send(message).await;
         }
         "context_status" => {
+            let classified = crate::control_actions::classify_web_method("context_status");
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx
+                    .send(serde_json::json!({
+                        "type": "system_message",
+                        "role": "system",
+                        "message": "caller role is insufficient for context_status",
+                    }))
+                    .await;
+                return;
+            }
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
             let accepted = command_tx
                 .send(WebCommand::ContextStatus {
@@ -366,6 +448,17 @@ async fn handle_client_command(
             let _ = snapshot_tx.send(message).await;
         }
         "context_compact" => {
+            let classified = crate::control_actions::classify_web_method("context_compact");
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx
+                    .send(serde_json::json!({
+                        "type": "system_message",
+                        "role": "system",
+                        "message": "caller role is insufficient for context_compact",
+                    }))
+                    .await;
+                return;
+            }
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
             let accepted = command_tx
                 .send(WebCommand::ContextCompact {
@@ -398,6 +491,17 @@ async fn handle_client_command(
             let _ = snapshot_tx.send(message).await;
         }
         "context_clear" => {
+            let classified = crate::control_actions::classify_web_method("context_clear");
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx
+                    .send(serde_json::json!({
+                        "type": "system_message",
+                        "role": "system",
+                        "message": "caller role is insufficient for context_clear",
+                    }))
+                    .await;
+                return;
+            }
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
             let accepted = command_tx
                 .send(WebCommand::ContextClear {
