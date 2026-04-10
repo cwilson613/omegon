@@ -22,6 +22,16 @@ Benchmark task: `example-shadow-context`
 - `omegon` — default harness
 - `om` — `omegon --slim`
 
+## Matrix limitation
+
+This `rc.64` finding is still primarily a **harness/profile comparison**, not a full provider/model matrix.
+
+That limitation matters. Subsequent execution-pressure investigation showed that provider temperament differs materially:
+- `openai-codex:gpt-5.4` exhibits more orientation/inspection churn on this task than the Anthropic/Sonnet reference line.
+- A harness fix that looks good against Anthropic alone can therefore underfit or overfit when evaluated against Codex.
+
+So `rc.64` remains the right cache-aware baseline, but it should no longer be treated as sufficient evidence for cross-provider harness quality on its own.
+
 ## Finding
 
 `0.15.10-rc.64` is the first cache-aware benchmark set where result artifacts explicitly count both cache reads and cache writes. This makes the benchmark more honest, but it does **not** change the competitive conclusion: `pi` remains the decisive baseline, `claude-code` still beats both Omegon variants, and `om` no longer beats default `omegon` on wall clock.
@@ -112,6 +122,9 @@ Priority directions:
 - reduce Omegon's prompt/input inflation relative to `pi`
 - investigate why `om` lost the wall-clock advantage on this task
 - reduce repeated context reconstruction and oversized system/tool overhead
+- expand the benchmark matrix to include provider/model temperament, starting with:
+  - `anthropic:claude-sonnet-4-6`
+  - `openai-codex:gpt-5.4`
 - continue using the cache-aware benchmark matrix as the release gate
 
 ## Artifacts

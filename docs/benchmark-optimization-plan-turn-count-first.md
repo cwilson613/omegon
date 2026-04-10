@@ -27,10 +27,13 @@ This means two things are true at once:
 1. **Too many turns** — 41–51 turns is wildly too high for a task that is already effectively solved in the target tree.
 2. **Too much fresh input per turn** — average fresh input remains ~41k–46k tokens even after cache support lands.
 
+A second lesson is now clear from post-`rc.64` execution-pressure work: **provider temperament is its own benchmark dimension**. Codex/GPT‑5.4 currently exhibits more orientation and inspection churn than Anthropic/Sonnet on the same task, which means single-provider benchmark conclusions can hide harness defects or overfit a fix to one model family.
+
 The highest-value optimization order is therefore:
 
 1. reduce turn count
-2. reduce per-turn prompt mass
+2. validate the turn-count fix across multiple providers/models
+3. reduce per-turn prompt mass
 
 ## Goal for next RC
 
@@ -87,6 +90,45 @@ Once the acceptance command or a narrow validation command succeeds and no contr
 For `example-shadow-context`:
 - reduce `omegon` turn count materially below `51`
 - reduce `om` turn count materially below `41`
+- verify that turn-count improvements hold across at least:
+  - `anthropic:claude-sonnet-4-6`
+  - `openai-codex:gpt-5.4`
+- reject any "fix" that helps one provider by overconstraining another into premature edits or missed evidence gathering
+
+## Track 1A — Provider/model matrix expansion
+
+### Why this is necessary
+
+A harness-level anti-churn or anti-stall heuristic can look good on one provider and still be wrong globally.
+
+Observed pattern:
+- Anthropic/Sonnet parity runs remain useful as the primary reference line.
+- Codex/GPT‑5.4 exposes a different failure mode: more orientation churn and delayed execution after sufficient repo evidence exists.
+
+That means benchmark analysis needs an additional dimension:
+- **harness/profile** (`omegon`, `om`, `pi`, `claude-code`)
+- **provider/model** (`anthropic:claude-sonnet-4-6`, `openai-codex:gpt-5.4`, future additions)
+
+### Immediate matrix recommendation
+
+For release-candidate efficiency work, treat these as the minimum comparison set for Omegon-native runs:
+
+| Dimension | Required values |
+|---|---|
+| Harness profile | `omegon`, `om` |
+| Provider/model | `anthropic:claude-sonnet-4-6`, `openai-codex:gpt-5.4` |
+| Task | `example-shadow-context` |
+
+### What to compare
+
+For each provider/model, compare:
+- turn count
+- early-turn tool pattern
+- time-to-first-edit
+- total tokens
+- wall clock
+- whether execution-pressure heuristics fired
+- whether they helped or overconstrained execution
 
 ## Track 2 — Prompt-mass reduction (second priority)
 
@@ -138,6 +180,8 @@ For `example-shadow-context`:
 - [ ] identify exact loop conditions that permit already-solved tasks to continue for dozens of turns
 - [ ] implement at least one early-stop or completion-bias heuristic
 - [ ] rerun `pi` vs `omegon` vs `om`
+- [ ] rerun Omegon-native profiles on both `anthropic:claude-sonnet-4-6` and `openai-codex:gpt-5.4`
+- [ ] compare early-turn tool patterns and time-to-first-edit across providers
 
 ### Phase C — prompt-mass attack
 - [ ] instrument dynamic prompt segment sizes after `CACHE_BOUNDARY`
