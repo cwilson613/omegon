@@ -465,7 +465,7 @@ The following branches in `web/ws.rs` still use bespoke WebSocket-native
 handling:
 
 - `user_prompt`
-- `slash_command`
+- `slash_command` (hybrid: canonical when promotable, compatibility fallback otherwise)
 - `cancel`
 - `request_snapshot`
 
@@ -491,7 +491,10 @@ These commands represent real control intent and are not merely transport
 mechanics:
 
 - `slash_command`
-  - rationale: compatibility tunnel only
+  - rationale: compatibility tunnel only for residual slash families
+  - current behavior: promoted canonical slash families now normalize into
+    `ControlRequest` first; only residual slash-only UX/local commands fall
+    back to the slash transport path
   - expected lifecycle: shrink over time as remaining slash families are
     promoted into typed control requests
 
@@ -501,7 +504,8 @@ The WebSocket surface is now largely canonicalized. Remaining bespoke commands
 are either:
 
 1. **correctly transport-native** (`user_prompt`, `cancel`, `request_snapshot`)
-2. **explicit migration debt** (`slash_command`)
+2. **explicit migration debt / compatibility fallback** (`slash_command` for
+   residual slash-only families only)
 
 That means Auspex attach/manage readiness is no longer blocked on WebSocket
 control-surface shape. Remaining work is cleanup and convergence, not missing

@@ -1391,9 +1391,9 @@ async fn handle_client_command(
             };
             let _ = snapshot_tx.send(message).await;
         }
-        // Legacy compatibility adapter. Promoted control families should use
-        // typed websocket commands that emit `ExecuteControl`; this path
-        // remains for slash-only commands and older dashboard clients.
+        // Compatibility adapter. If the slash command already canonicalizes to a
+        // `ControlRequest`, route it through `ExecuteControl`; otherwise fall back
+        // to the slash-specific transport path for residual UX/local commands.
         "slash_command" => {
             let name = cmd["name"].as_str().unwrap_or("").to_string();
             let args = cmd["args"].as_str().unwrap_or("").to_string();
@@ -1431,6 +1431,45 @@ async fn handle_client_command(
                     .await;
                 return;
             }
+
+            if let Some(command) = crate::tui::canonical_slash_command(&name, &args)
+                && let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+            {
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                let accepted = command_tx
+                    .send(WebCommand::ExecuteControl {
+                        request,
+                        respond_to: Some(reply_tx),
+                    })
+                    .await
+                    .is_ok();
+                let message = if accepted {
+                    match reply_rx.await {
+                        Ok(response) => control_result_message("slash_command", response),
+                        Err(_) => control_result_message(
+                            "slash_command",
+                            omegon_traits::ControlOutputResponse {
+                                accepted: false,
+                                output: Some(
+                                    "slash command control executor dropped response before completion"
+                                        .to_string(),
+                                ),
+                            },
+                        ),
+                    }
+                } else {
+                    control_result_message(
+                        "slash_command",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some("failed to enqueue slash command control".to_string()),
+                        },
+                    )
+                };
+                let _ = snapshot_tx.send(message).await;
+                return;
+            }
+
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
             let accepted = command_tx
                 .send(WebCommand::SlashCommand {
