@@ -448,6 +448,9 @@ function handleEvent(event) {
     case 'slash_command_result':
       if (event.output) addMessage(event.accepted ? 'system' : 'tool', event.output);
       break;
+    case 'control_result':
+      if (event.output) addMessage(event.accepted ? 'system' : 'tool', event.output);
+      break;
     case 'phase_changed':
       addMessage('system', `Phase → ${event.phase}`);
       break;
@@ -753,8 +756,33 @@ function sendPrompt() {
   if (!text || !ws || ws.readyState !== 1) return;
 
   if (text.startsWith('/')) {
-    const [name, ...rest] = text.substring(1).split(' ');
-    ws.send(JSON.stringify({ type: 'slash_command', name, args: rest.join(' ') }));
+    const [name, ...restParts] = text.substring(1).split(' ');
+    const args = restParts.join(' ').trim();
+    const sub = restParts[0] || '';
+
+    if (name === 'model' && !args) {
+      ws.send(JSON.stringify({ type: 'model_view' }));
+    } else if (name === 'model' && args === 'list') {
+      ws.send(JSON.stringify({ type: 'model_list' }));
+    } else if (name === 'model') {
+      ws.send(JSON.stringify({ type: 'set_model', model: args }));
+    } else if (name === 'think' && args) {
+      ws.send(JSON.stringify({ type: 'set_thinking', level: args }));
+    } else if (name === 'context' && !args) {
+      ws.send(JSON.stringify({ type: 'context_status' }));
+    } else if (name === 'context' && (args === 'compact' || args === 'compress')) {
+      ws.send(JSON.stringify({ type: 'context_compact' }));
+    } else if (name === 'context' && args === 'clear') {
+      ws.send(JSON.stringify({ type: 'context_clear' }));
+    } else if (name === 'new' && !args) {
+      ws.send(JSON.stringify({ type: 'new_session' }));
+    } else if (name === 'auth' && (!args || args === 'status')) {
+      ws.send(JSON.stringify({ type: 'auth_status' }));
+    } else {
+      // Legacy fallback for slash-only commands that do not yet have typed
+      // control messages. Promoted control families should never use this path.
+      ws.send(JSON.stringify({ type: 'slash_command', name, args }));
+    }
   } else {
     ws.send(JSON.stringify({ type: 'user_prompt', text }));
   }
