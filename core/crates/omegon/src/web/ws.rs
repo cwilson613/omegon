@@ -1765,6 +1765,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn handle_client_command_enqueues_cleave_status_and_reports_result() {
+        let (events_tx, _) = tokio::sync::broadcast::channel(4);
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
+        let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::channel(4);
+        let state = WebState::new(crate::tui::dashboard::DashboardHandles::default(), events_tx);
+
+        let cmd = serde_json::json!({
+            "type": "cleave_status",
+            "caller_role": "read"
+        });
+
+        let state_for_handler = state.clone();
+        let handler = tokio::spawn(async move {
+            handle_client_command(&cmd, &command_tx, &state_for_handler, &snapshot_tx).await;
+        });
+
+        match command_rx.recv().await.expect("command") {
+            WebCommand::ExecuteControl { request, respond_to } => {
+                assert!(matches!(request, crate::control_runtime::ControlRequest::CleaveStatus));
+                respond_to
+                    .expect("respond_to")
+                    .send(omegon_traits::ControlOutputResponse {
+                        accepted: true,
+                        output: Some("Cleave idle".into()),
+                    })
+                    .unwrap();
+            }
+            other => panic!("wrong command: {other:?}"),
+        }
+
+        handler.await.unwrap();
+        let msg = snapshot_rx.recv().await.expect("snapshot message");
+        assert_eq!(msg["type"], "control_result");
+        assert_eq!(msg["name"], "cleave_status");
+        assert_eq!(msg["accepted"], true);
+        assert_eq!(msg["output"], "Cleave idle");
+    }
+
+    #[tokio::test]
+    async fn handle_client_command_enqueues_delegate_status_and_reports_result() {
+        let (events_tx, _) = tokio::sync::broadcast::channel(4);
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
+        let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::channel(4);
+        let state = WebState::new(crate::tui::dashboard::DashboardHandles::default(), events_tx);
+
+        let cmd = serde_json::json!({
+            "type": "delegate_status",
+            "caller_role": "read"
+        });
+
+        let state_for_handler = state.clone();
+        let handler = tokio::spawn(async move {
+            handle_client_command(&cmd, &command_tx, &state_for_handler, &snapshot_tx).await;
+        });
+
+        match command_rx.recv().await.expect("command") {
+            WebCommand::ExecuteControl { request, respond_to } => {
+                assert!(matches!(request, crate::control_runtime::ControlRequest::DelegateStatus));
+                respond_to
+                    .expect("respond_to")
+                    .send(omegon_traits::ControlOutputResponse {
+                        accepted: true,
+                        output: Some("No delegates running".into()),
+                    })
+                    .unwrap();
+            }
+            other => panic!("wrong command: {other:?}"),
+        }
+
+        handler.await.unwrap();
+        let msg = snapshot_rx.recv().await.expect("snapshot message");
+        assert_eq!(msg["type"], "control_result");
+        assert_eq!(msg["name"], "delegate_status");
+        assert_eq!(msg["accepted"], true);
+        assert_eq!(msg["output"], "No delegates running");
+    }
+
+    #[tokio::test]
     async fn handle_client_command_rejects_vault_status_for_read_role() {
         let (events_tx, _) = tokio::sync::broadcast::channel(4);
         let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
