@@ -480,12 +480,20 @@ pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
                 creds = new_creds;
             }
             Err(e) => {
+                if oauth_refresh_failure_is_fatal(auth_key) {
+                    tracing::warn!("Token refresh failed: {e} — refusing to use expired {auth_key} credential");
+                    return None;
+                }
                 tracing::warn!("Token refresh failed: {e} — using expired token");
             }
         }
     }
 
     Some((creds.access, true))
+}
+
+fn oauth_refresh_failure_is_fatal(provider: &str) -> bool {
+    matches!(provider, "openai-codex")
 }
 
 /// Refresh an OAuth token.
@@ -1374,6 +1382,12 @@ mod tests {
         let progress = default_progress();
         // This writes to stderr, which is fine in tests
         progress("test message from auth test");
+    }
+
+    #[test]
+    fn codex_refresh_failure_is_fatal() {
+        assert!(oauth_refresh_failure_is_fatal("openai-codex"));
+        assert!(!oauth_refresh_failure_is_fatal("anthropic"));
     }
 
     #[test]

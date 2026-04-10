@@ -1730,16 +1730,23 @@ impl LlmBridge for CodexClient {
         let (jwt_token, account_id) = match crate::auth::resolve_with_refresh("openai-codex").await
         {
             Some((token, true)) if token.starts_with("eyJ") => {
-                let aid = crate::auth::read_credential_extra("openai-codex", "accountId")
-                    .or_else(|| {
-                        crate::auth::extract_jwt_claim(
-                            &token,
-                            "https://api.openai.com/auth",
-                            "chatgpt_account_id",
-                        )
-                    })
-                    .unwrap_or_else(|| self.account_id.clone());
-                (token, aid)
+                let aid = crate::auth::extract_jwt_claim(
+                    &token,
+                    "https://api.openai.com/auth",
+                    "chatgpt_account_id",
+                )
+                .or_else(|| crate::auth::read_credential_extra("openai-codex", "accountId"));
+                match aid {
+                    Some(account_id) => (token, account_id),
+                    None => {
+                        let _ = tx
+                            .send(LlmEvent::Error {
+                                message: "Codex authentication failed: OAuth token did not include a usable account identity. Re-authenticate and retry.".into(),
+                            })
+                            .await;
+                        return Ok(rx);
+                    }
+                }
             }
             _ => (self.jwt_token.clone(), self.account_id.clone()),
         };
