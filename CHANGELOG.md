@@ -5,6 +5,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+- **Typed control promotion across transport surfaces** — operator-facing control families now route through canonical typed requests instead of bespoke slash-only handlers. Recent promotions include `skills/plugin`, `secrets/vault`, and the minimal `cleave/delegate` status surface, with matching TUI, IPC, and WebSocket routing.
+- **Secrets and vault control normalization** — `/secrets` and `/vault` no longer depend on the old bespoke runtime path. Secret view/set/get/delete and vault status/configuration flows now run through shared control responders, and transport policy is explicit and conservative.
+- **Minimal cleave/delegate typed status surface** — `cleave status`, `cleave cancel <label>`, and `delegate status` are now first-class typed control requests. Cleave execution remains feature-owned and continues to route through the orchestration bus by design.
+- **Control matrix and transport-policy reconciliation** — control docs and focused tests now reflect the live transport vocabulary and role posture for the promoted command families, reducing drift between slash, IPC, WebSocket, and runtime behavior.
+
 - **Linux release compatibility path** — release CI now builds GNU/Linux artifacts with `cargo-zigbuild` instead of inheriting the glibc baseline of `ubuntu-latest` from plain `cargo build`. This is intended to lower the Linux ABI floor for Homebrew/GitHub release users rather than forcing a modern-glibc-only support policy.
 
 - **Linux Homebrew install honesty** — install and distribution docs now explicitly warn that Homebrew on Linux does not solve host glibc ABI mismatches for Omegon release binaries. Users hitting `GLIBC_2.38` / `GLIBC_2.39` runtime errors are now directed toward compatible distro/container baselines instead of being left to infer missing dependencies from a failed launch.
