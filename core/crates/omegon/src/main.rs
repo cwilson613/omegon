@@ -3085,7 +3085,7 @@ async fn execute_remote_slash_command(
     name: &str,
     args: &str,
 ) -> omegon_traits::SlashCommandResponse {
-    use crate::tui::{canonical_slash_command, CanonicalSlashCommand};
+    use crate::tui::canonical_slash_command;
     use omegon_traits::SlashCommandResponse;
 
     let Some(command) = canonical_slash_command(name, args) else {
@@ -3113,166 +3113,11 @@ async fn execute_remote_slash_command(
         return control_runtime::execute_control(&mut ctx, control_request).await;
     }
 
-    match command {
-        CanonicalSlashCommand::ContextRequest { kind, query } => {
-            let mut ctx = control_runtime::ControlContext {
-                runtime_state,
-                agent,
-                shared_settings,
-                bridge,
-                login_prompt_tx,
-                events_tx,
-                cli: &CliRuntimeView {
-                    no_session: cli.no_session,
-                    model: &cli.model,
-                },
-            };
-            control_runtime::execute_control(
-                &mut ctx,
-                control_runtime::ControlRequest::ContextRequest { kind, query },
-            )
-            .await
-        }
-        CanonicalSlashCommand::ContextRequestJson(raw) => {
-            let mut ctx = control_runtime::ControlContext {
-                runtime_state,
-                agent,
-                shared_settings,
-                bridge,
-                login_prompt_tx,
-                events_tx,
-                cli: &CliRuntimeView {
-                    no_session: cli.no_session,
-                    model: &cli.model,
-                },
-            };
-            control_runtime::execute_control(
-                &mut ctx,
-                control_runtime::ControlRequest::ContextRequestJson { raw },
-            )
-            .await
-        }
-        CanonicalSlashCommand::SetContextClass(class) => {
-            let mut ctx = control_runtime::ControlContext {
-                runtime_state,
-                agent,
-                shared_settings,
-                bridge,
-                login_prompt_tx,
-                events_tx,
-                cli: &CliRuntimeView {
-                    no_session: cli.no_session,
-                    model: &cli.model,
-                },
-            };
-            control_runtime::execute_control(
-                &mut ctx,
-                control_runtime::ControlRequest::SetContextClass { class },
-            )
-            .await
-        }
-        CanonicalSlashCommand::NewSession => {
-            let mut ctx = control_runtime::ControlContext {
-                runtime_state,
-                agent,
-                shared_settings,
-                bridge,
-                login_prompt_tx,
-                events_tx,
-                cli: &CliRuntimeView {
-                    no_session: cli.no_session,
-                    model: &cli.model,
-                },
-            };
-            control_runtime::execute_control(&mut ctx, control_runtime::ControlRequest::NewSession)
-                .await
-        }
-        CanonicalSlashCommand::ListSessions => {
-            let mut ctx = control_runtime::ControlContext {
-                runtime_state,
-                agent,
-                shared_settings,
-                bridge,
-                login_prompt_tx,
-                events_tx,
-                cli: &CliRuntimeView {
-                    no_session: cli.no_session,
-                    model: &cli.model,
-                },
-            };
-            control_runtime::execute_control(&mut ctx, control_runtime::ControlRequest::ListSessions)
-                .await
-        }
-        CanonicalSlashCommand::AuthStatus => {
-            let mut ctx = control_runtime::ControlContext {
-                runtime_state,
-                agent,
-                shared_settings,
-                bridge,
-                login_prompt_tx,
-                events_tx,
-                cli: &CliRuntimeView {
-                    no_session: cli.no_session,
-                    model: &cli.model,
-                },
-            };
-            control_runtime::execute_control(&mut ctx, control_runtime::ControlRequest::AuthStatus)
-                .await
-        }
-        CanonicalSlashCommand::AuthUnlock => {
-            let mut ctx = control_runtime::ControlContext {
-                runtime_state,
-                agent,
-                shared_settings,
-                bridge,
-                login_prompt_tx,
-                events_tx,
-                cli: &CliRuntimeView {
-                    no_session: cli.no_session,
-                    model: &cli.model,
-                },
-            };
-            control_runtime::execute_control(&mut ctx, control_runtime::ControlRequest::AuthUnlock)
-                .await
-        }
-        CanonicalSlashCommand::AuthLogin(provider) => {
-            let mut ctx = control_runtime::ControlContext {
-                runtime_state,
-                agent,
-                shared_settings,
-                bridge,
-                login_prompt_tx,
-                events_tx,
-                cli: &CliRuntimeView {
-                    no_session: cli.no_session,
-                    model: &cli.model,
-                },
-            };
-            control_runtime::execute_control(
-                &mut ctx,
-                control_runtime::ControlRequest::AuthLogin { provider },
-            )
-            .await
-        }
-        CanonicalSlashCommand::AuthLogout(provider) => {
-            let mut ctx = control_runtime::ControlContext {
-                runtime_state,
-                agent,
-                shared_settings,
-                bridge,
-                login_prompt_tx,
-                events_tx,
-                cli: &CliRuntimeView {
-                    no_session: cli.no_session,
-                    model: &cli.model,
-                },
-            };
-            control_runtime::execute_control(
-                &mut ctx,
-                control_runtime::ControlRequest::AuthLogout { provider },
-            )
-            .await
-        }
+    SlashCommandResponse {
+        accepted: false,
+        output: Some(format!(
+            "Command /{name} is interactive-only or unavailable via remote slash execution."
+        )),
     }
 }
 

@@ -1762,20 +1762,16 @@ fn harness_status_memory_drives_instrument_panel_working_row() {
 }
 
 #[test]
-fn slash_model_no_args_shows_model_status() {
+fn slash_model_no_args_enqueues_model_view() {
     let mut app = test_app();
-    let tx = test_tx();
+    let (tx, mut rx) = test_tx_with_rx();
 
     let result = app.handle_slash_command("/model", &tx);
-    match result {
-        SlashResult::Display(text) => {
-            assert!(text.contains("Model"), "{text}");
-            assert!(text.contains("Current Model:"), "{text}");
-            assert!(text.contains("Provider:"), "{text}");
-            assert!(text.contains("Thinking Level:"), "{text}");
-            assert!(text.contains("/model list"), "{text}");
-        }
-        _ => panic!("/model should display status, got: {result:?}"),
+    assert!(matches!(result, SlashResult::Handled));
+
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ModelView { respond_to: None } => {}
+        other => panic!("expected model view command, got: {other:?}"),
     }
 }
 
@@ -1913,28 +1909,36 @@ fn handled_commands_are_in_commands_table() {
 }
 
 #[test]
-fn slash_plugin_list_returns_display() {
+fn slash_plugin_list_enqueues_execute_control() {
     let mut app = test_app();
-    let tx = test_tx();
+    let (tx, mut rx) = test_tx_with_rx();
 
     let result = app.handle_slash_command("/plugin list", &tx);
-    assert!(matches!(result, SlashResult::Display(_)));
+    assert!(matches!(result, SlashResult::Handled));
+
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::PluginView,
+            ..
+        } => {}
+        other => panic!("expected plugin view control request, got: {other:?}"),
+    }
 }
 
 #[test]
-fn slash_skills_returns_display() {
+fn slash_skills_enqueues_execute_control() {
     let mut app = test_app();
-    let tx = test_tx();
+    let (tx, mut rx) = test_tx_with_rx();
 
     let result = app.handle_slash_command("/skills", &tx);
-    match result {
-        SlashResult::Display(text) => {
-            assert!(text.contains("Skills"), "{text}");
-            assert!(text.contains("Installed:"), "{text}");
-            assert!(text.contains("/skills install"), "{text}");
-            assert!(text.contains("/skills list"), "{text}");
-        }
-        _ => panic!("/skills should display bundled skill summary, got: {result:?}"),
+    assert!(matches!(result, SlashResult::Handled));
+
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::SkillsView,
+            ..
+        } => {}
+        other => panic!("expected skills view control request, got: {other:?}"),
     }
 }
 

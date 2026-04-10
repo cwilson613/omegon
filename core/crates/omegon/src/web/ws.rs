@@ -258,6 +258,139 @@ async fn handle_client_command(
             };
             let _ = snapshot_tx.send(message).await;
         }
+        "skills_view" => {
+            let classified = crate::control_actions::classify_web_method("skills_view");
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx
+                    .send(serde_json::json!({
+                        "type": "system_message",
+                        "role": "system",
+                        "message": "caller role is insufficient for skills_view",
+                    }))
+                    .await;
+                return;
+            }
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let accepted = command_tx
+                .send(WebCommand::ExecuteControl {
+                    request: crate::control_runtime::ControlRequest::SkillsView,
+                    respond_to: Some(reply_tx),
+                })
+                .await
+                .is_ok();
+            let message = if accepted {
+                match reply_rx.await {
+                    Ok(response) => control_result_message("skills_view", response),
+                    Err(_) => control_result_message(
+                        "skills_view",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some(
+                                "skills_view executor dropped response before completion".to_string(),
+                            ),
+                        },
+                    ),
+                }
+            } else {
+                control_result_message(
+                    "skills_view",
+                    omegon_traits::ControlOutputResponse {
+                        accepted: false,
+                        output: Some("failed to enqueue skills_view".to_string()),
+                    },
+                )
+            };
+            let _ = snapshot_tx.send(message).await;
+        }
+        "skills_install" => {
+            let classified = crate::control_actions::classify_web_method("skills_install");
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx
+                    .send(serde_json::json!({
+                        "type": "system_message",
+                        "role": "system",
+                        "message": "caller role is insufficient for skills_install",
+                    }))
+                    .await;
+                return;
+            }
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let accepted = command_tx
+                .send(WebCommand::ExecuteControl {
+                    request: crate::control_runtime::ControlRequest::SkillsInstall,
+                    respond_to: Some(reply_tx),
+                })
+                .await
+                .is_ok();
+            let message = if accepted {
+                match reply_rx.await {
+                    Ok(response) => control_result_message("skills_install", response),
+                    Err(_) => control_result_message(
+                        "skills_install",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some(
+                                "skills_install executor dropped response before completion"
+                                    .to_string(),
+                            ),
+                        },
+                    ),
+                }
+            } else {
+                control_result_message(
+                    "skills_install",
+                    omegon_traits::ControlOutputResponse {
+                        accepted: false,
+                        output: Some("failed to enqueue skills_install".to_string()),
+                    },
+                )
+            };
+            let _ = snapshot_tx.send(message).await;
+        }
+        "plugin_view" => {
+            let classified = crate::control_actions::classify_web_method("plugin_view");
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx
+                    .send(serde_json::json!({
+                        "type": "system_message",
+                        "role": "system",
+                        "message": "caller role is insufficient for plugin_view",
+                    }))
+                    .await;
+                return;
+            }
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let accepted = command_tx
+                .send(WebCommand::ExecuteControl {
+                    request: crate::control_runtime::ControlRequest::PluginView,
+                    respond_to: Some(reply_tx),
+                })
+                .await
+                .is_ok();
+            let message = if accepted {
+                match reply_rx.await {
+                    Ok(response) => control_result_message("plugin_view", response),
+                    Err(_) => control_result_message(
+                        "plugin_view",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some(
+                                "plugin_view executor dropped response before completion".to_string(),
+                            ),
+                        },
+                    ),
+                }
+            } else {
+                control_result_message(
+                    "plugin_view",
+                    omegon_traits::ControlOutputResponse {
+                        accepted: false,
+                        output: Some("failed to enqueue plugin_view".to_string()),
+                    },
+                )
+            };
+            let _ = snapshot_tx.send(message).await;
+        }
         "set_model" => {
             if let Some(model) = cmd["model"].as_str() {
                 let current_model: String = state
@@ -364,6 +497,151 @@ async fn handle_client_command(
                 };
                 let _ = snapshot_tx.send(message).await;
             }
+        }
+        "plugin_install" => {
+            if let Some(uri) = cmd["uri"].as_str() {
+                let classified = crate::control_actions::classify_web_method("plugin_install");
+                if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                    let _ = snapshot_tx
+                        .send(serde_json::json!({
+                            "type": "system_message",
+                            "role": "system",
+                            "message": "caller role is insufficient for plugin_install",
+                        }))
+                        .await;
+                    return;
+                }
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                let accepted = command_tx
+                    .send(WebCommand::ExecuteControl {
+                        request: crate::control_runtime::ControlRequest::PluginInstall {
+                            uri: uri.to_string(),
+                        },
+                        respond_to: Some(reply_tx),
+                    })
+                    .await
+                    .is_ok();
+                let message = if accepted {
+                    match reply_rx.await {
+                        Ok(response) => control_result_message("plugin_install", response),
+                        Err(_) => control_result_message(
+                            "plugin_install",
+                            omegon_traits::ControlOutputResponse {
+                                accepted: false,
+                                output: Some(
+                                    "plugin_install executor dropped response before completion"
+                                        .to_string(),
+                                ),
+                            },
+                        ),
+                    }
+                } else {
+                    control_result_message(
+                        "plugin_install",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some("failed to enqueue plugin_install".to_string()),
+                        },
+                    )
+                };
+                let _ = snapshot_tx.send(message).await;
+            }
+        }
+        "plugin_remove" => {
+            if let Some(name) = cmd["name"].as_str() {
+                let classified = crate::control_actions::classify_web_method("plugin_remove");
+                if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                    let _ = snapshot_tx
+                        .send(serde_json::json!({
+                            "type": "system_message",
+                            "role": "system",
+                            "message": "caller role is insufficient for plugin_remove",
+                        }))
+                        .await;
+                    return;
+                }
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                let accepted = command_tx
+                    .send(WebCommand::ExecuteControl {
+                        request: crate::control_runtime::ControlRequest::PluginRemove {
+                            name: name.to_string(),
+                        },
+                        respond_to: Some(reply_tx),
+                    })
+                    .await
+                    .is_ok();
+                let message = if accepted {
+                    match reply_rx.await {
+                        Ok(response) => control_result_message("plugin_remove", response),
+                        Err(_) => control_result_message(
+                            "plugin_remove",
+                            omegon_traits::ControlOutputResponse {
+                                accepted: false,
+                                output: Some(
+                                    "plugin_remove executor dropped response before completion"
+                                        .to_string(),
+                                ),
+                            },
+                        ),
+                    }
+                } else {
+                    control_result_message(
+                        "plugin_remove",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some("failed to enqueue plugin_remove".to_string()),
+                        },
+                    )
+                };
+                let _ = snapshot_tx.send(message).await;
+            }
+        }
+        "plugin_update" => {
+            let classified = crate::control_actions::classify_web_method("plugin_update");
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx
+                    .send(serde_json::json!({
+                        "type": "system_message",
+                        "role": "system",
+                        "message": "caller role is insufficient for plugin_update",
+                    }))
+                    .await;
+                return;
+            }
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let accepted = command_tx
+                .send(WebCommand::ExecuteControl {
+                    request: crate::control_runtime::ControlRequest::PluginUpdate {
+                        name: cmd["name"].as_str().map(|s| s.to_string()).filter(|s| !s.is_empty()),
+                    },
+                    respond_to: Some(reply_tx),
+                })
+                .await
+                .is_ok();
+            let message = if accepted {
+                match reply_rx.await {
+                    Ok(response) => control_result_message("plugin_update", response),
+                    Err(_) => control_result_message(
+                        "plugin_update",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some(
+                                "plugin_update executor dropped response before completion"
+                                    .to_string(),
+                            ),
+                        },
+                    ),
+                }
+            } else {
+                control_result_message(
+                    "plugin_update",
+                    omegon_traits::ControlOutputResponse {
+                        accepted: false,
+                        output: Some("failed to enqueue plugin_update".to_string()),
+                    },
+                )
+            };
+            let _ = snapshot_tx.send(message).await;
         }
         "auth_status" => {
             let classified = crate::control_actions::classify_web_method("auth_status");

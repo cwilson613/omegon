@@ -40,6 +40,12 @@ pub enum ControlRequest {
     AuthUnlock,
     AuthLogin { provider: String },
     AuthLogout { provider: String },
+    SkillsView,
+    SkillsInstall,
+    PluginView,
+    PluginInstall { uri: String },
+    PluginRemove { name: String },
+    PluginUpdate { name: Option<String> },
 }
 
 pub fn control_request_from_slash(
@@ -79,6 +85,18 @@ pub fn control_request_from_slash(
         },
         crate::tui::CanonicalSlashCommand::AuthLogout(provider) => ControlRequest::AuthLogout {
             provider: provider.clone(),
+        },
+        crate::tui::CanonicalSlashCommand::SkillsView => ControlRequest::SkillsView,
+        crate::tui::CanonicalSlashCommand::SkillsInstall => ControlRequest::SkillsInstall,
+        crate::tui::CanonicalSlashCommand::PluginView => ControlRequest::PluginView,
+        crate::tui::CanonicalSlashCommand::PluginInstall(uri) => ControlRequest::PluginInstall {
+            uri: uri.clone(),
+        },
+        crate::tui::CanonicalSlashCommand::PluginRemove(name) => ControlRequest::PluginRemove {
+            name: name.clone(),
+        },
+        crate::tui::CanonicalSlashCommand::PluginUpdate(name) => ControlRequest::PluginUpdate {
+            name: name.clone(),
         },
     })
 }
@@ -133,6 +151,12 @@ pub async fn execute_control(
             .await
         }
         ControlRequest::AuthLogout { provider } => auth_logout_response(&provider).await,
+        ControlRequest::SkillsView => skills_view_response().await,
+        ControlRequest::SkillsInstall => skills_install_response().await,
+        ControlRequest::PluginView => plugin_view_response().await,
+        ControlRequest::PluginInstall { uri } => plugin_install_response(&uri).await,
+        ControlRequest::PluginRemove { name } => plugin_remove_response(&name).await,
+        ControlRequest::PluginUpdate { name } => plugin_update_response(name.as_deref()).await,
     }
 }
 
@@ -685,6 +709,90 @@ pub async fn auth_logout_response(provider: &str) -> SlashCommandResponse {
     SlashCommandResponse {
         accepted: true,
         output: Some(message),
+    }
+}
+
+pub async fn skills_view_response() -> SlashCommandResponse {
+    match crate::skills::list_summary() {
+        Ok(output) => SlashCommandResponse {
+            accepted: true,
+            output: Some(output),
+        },
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("/skills list failed: {err}")),
+        },
+    }
+}
+
+pub async fn skills_install_response() -> SlashCommandResponse {
+    match crate::skills::cmd_install() {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some(
+                "Installed bundled skills to ~/.omegon/skills. New sessions will load them."
+                    .to_string(),
+            ),
+        },
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("/skills install failed: {err}")),
+        },
+    }
+}
+
+pub async fn plugin_view_response() -> SlashCommandResponse {
+    match crate::plugin_cli::list_summary() {
+        Ok(output) => SlashCommandResponse {
+            accepted: true,
+            output: Some(output),
+        },
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("/plugin list failed: {err}")),
+        },
+    }
+}
+
+pub async fn plugin_install_response(uri: &str) -> SlashCommandResponse {
+    match crate::plugin_cli::install(uri.trim()) {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some(format!("Installed plugin from {}", uri.trim())),
+        },
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("/plugin install failed: {err}")),
+        },
+    }
+}
+
+pub async fn plugin_remove_response(name: &str) -> SlashCommandResponse {
+    match crate::plugin_cli::remove(name.trim()) {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some(format!("Removed plugin {}", name.trim())),
+        },
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("/plugin remove failed: {err}")),
+        },
+    }
+}
+
+pub async fn plugin_update_response(name: Option<&str>) -> SlashCommandResponse {
+    match crate::plugin_cli::update(name.map(str::trim)) {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some(match name.map(str::trim).filter(|s| !s.is_empty()) {
+                Some(name) => format!("Updated plugin {name}"),
+                None => "Updated installed plugins.".to_string(),
+            }),
+        },
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("/plugin update failed: {err}")),
+        },
     }
 }
 

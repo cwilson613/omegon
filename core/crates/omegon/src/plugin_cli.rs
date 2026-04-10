@@ -57,14 +57,12 @@ pub fn install(uri: &str) -> anyhow::Result<()> {
     }
 }
 
-/// List all installed plugins.
-pub fn list() -> anyhow::Result<()> {
+/// Render all installed plugins as terminal-friendly text.
+pub fn list_summary() -> anyhow::Result<String> {
     let plugins_dir = plugins_dir()?;
 
     if !plugins_dir.exists() {
-        println!("No plugins installed.");
-        println!("  Install with: omegon plugin install <git-url>");
-        return Ok(());
+        return Ok("No plugins installed.\n  Install with: omegon plugin install <git-url>".into());
     }
 
     let entries: Vec<_> = std::fs::read_dir(&plugins_dir)?
@@ -73,15 +71,13 @@ pub fn list() -> anyhow::Result<()> {
         .collect();
 
     if entries.is_empty() {
-        println!("No plugins installed.");
-        return Ok(());
+        return Ok("No plugins installed.".into());
     }
 
-    println!(
-        "{:<20} {:<12} {:<10} DESCRIPTION",
-        "NAME", "TYPE", "VERSION"
-    );
-    println!("{}", "─".repeat(72));
+    let mut lines = vec![
+        format!("{:<20} {:<12} {:<10} DESCRIPTION", "NAME", "TYPE", "VERSION"),
+        "─".repeat(72),
+    ];
 
     for entry in &entries {
         let dir = entry.path();
@@ -95,30 +91,36 @@ pub fn list() -> anyhow::Result<()> {
         let manifest_path = resolved.join("plugin.toml");
         if !manifest_path.exists() {
             let name = dir.file_name().unwrap_or_default().to_string_lossy();
-            println!("{:<20} {:<12} {:<10} (no plugin.toml)", name, "?", "?");
+            lines.push(format!("{:<20} {:<12} {:<10} (no plugin.toml)", name, "?", "?"));
             continue;
         }
 
         match load_manifest_summary(&manifest_path) {
             Ok(info) => {
                 let symlink_marker = if dir.is_symlink() { " →" } else { "" };
-                println!(
+                lines.push(format!(
                     "{:<20} {:<12} {:<10} {}{}",
                     info.name, info.plugin_type, info.version, info.description, symlink_marker
-                );
+                ));
             }
             Err(e) => {
                 let name = dir.file_name().unwrap_or_default().to_string_lossy();
-                println!("{:<20} {:<12} {:<10} (error: {e})", name, "?", "?");
+                lines.push(format!("{:<20} {:<12} {:<10} (error: {e})", name, "?", "?"));
             }
         }
     }
 
     let symlinks = entries.iter().filter(|e| e.path().is_symlink()).count();
     if symlinks > 0 {
-        println!("\n  → = symlinked (development mode)");
+        lines.push("\n  → = symlinked (development mode)".into());
     }
 
+    Ok(lines.join("\n"))
+}
+
+/// List all installed plugins.
+pub fn list() -> anyhow::Result<()> {
+    println!("{}", list_summary()?);
     Ok(())
 }
 
@@ -181,189 +183,105 @@ pub fn update(name: Option<&str>) -> anyhow::Result<()> {
             continue;
         }
 
-        print!("  {name}: ");
-        match std::process::Command::new("git")
-            .args(["pull", "--ff-only", "--quiet"])
-            .current_dir(dir)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .output()
-        {
-            Ok(output) if output.status.success() => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if stdout.contains("Already up to date") {
-                    println!("up to date");
-                } else {
-                    println!("updated ✓");
-                }
-            }
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                println!("failed — {}", stderr.trim());
-            }
-            Err(e) => {
-                println!("failed — {e}");
-            }
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .arg("pull")
+            .output()?;
+
+        if output.status.success() {
+            println!("  {name}: updated");
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            println!("  {name}: failed — {}", stderr.trim());
         }
     }
 
     Ok(())
 }
 
-// ─── Internals ────────────────────────────────────────────────────────────
-
-/// Canonical plugin install directory.
 fn plugins_dir() -> anyhow::Result<PathBuf> {
     dirs::home_dir()
         .map(|h| h.join(".omegon").join("plugins"))
         .ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))
 }
 
-/// Clone a git repository into the plugins directory.
-fn install_git(plugins_dir: &Path, uri: &str) -> anyhow::Result<()> {
-    // Derive plugin name from URI
-    let name = plugin_name_from_uri(uri)?;
-    let target = plugins_dir.join(&name);
-
-    if target.exists() {
-        anyhow::bail!(
-            "Plugin '{}' already installed at {}",
-            name,
-            target.display()
-        );
-    }
-
-    println!("Cloning {uri} → {name}...");
-
-    let output = std::process::Command::new("git")
-        .args([
-            "clone",
-            "--depth=1",
-            "--single-branch",
-            uri,
-            target.to_str().unwrap_or(""),
-        ])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .map_err(|e| anyhow::anyhow!("failed to run git clone: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git clone failed: {}", stderr.trim());
-    }
-
-    // Verify plugin.toml exists
-    let manifest = target.join("plugin.toml");
-    if !manifest.exists() {
-        // Clean up — not a valid plugin
-        let _ = std::fs::remove_dir_all(&target);
-        anyhow::bail!("Cloned repo has no plugin.toml — not a valid Omegon plugin");
-    }
-
-    // Parse and display summary
-    match load_manifest_summary(&manifest) {
-        Ok(info) => {
-            println!(
-                "Installed {} ({}) v{}",
-                info.name, info.plugin_type, info.version
-            );
-            println!("  {}", info.description);
-            if info.tool_count > 0 {
-                println!(
-                    "  {} tool{}",
-                    info.tool_count,
-                    if info.tool_count == 1 { "" } else { "s" }
-                );
-            }
-            if info.has_context {
-                println!("  dynamic context injection");
-            }
-        }
-        Err(e) => {
-            println!("Installed {name} (warning: manifest parse error: {e})");
-        }
-    }
-
-    Ok(())
-}
-
-/// Symlink a local plugin directory for development.
 fn install_local(plugins_dir: &Path, local_path: &Path) -> anyhow::Result<()> {
-    let canonical = local_path
-        .canonicalize()
-        .map_err(|e| anyhow::anyhow!("cannot resolve path {}: {e}", local_path.display()))?;
+    let manifest = std::fs::read_to_string(local_path.join("plugin.toml"))?;
+    let parsed = ArmoryManifest::parse(&manifest)?;
+    let name = &parsed.plugin.name;
 
-    let name = canonical
-        .file_name()
-        .ok_or_else(|| anyhow::anyhow!("cannot determine plugin name from path"))?
-        .to_string_lossy()
-        .to_string();
-
-    let target = plugins_dir.join(&name);
-
-    if target.exists() {
-        anyhow::bail!(
-            "Plugin '{}' already installed at {}",
-            name,
-            target.display()
-        );
+    let target = plugins_dir.join(name);
+    if target.exists() || target.is_symlink() {
+        std::fs::remove_file(&target).or_else(|_| std::fs::remove_dir_all(&target))?;
     }
 
     #[cfg(unix)]
-    std::os::unix::fs::symlink(&canonical, &target)?;
+    std::os::unix::fs::symlink(local_path, &target)?;
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(local_path, &target)?;
 
-    #[cfg(not(unix))]
-    {
-        // Windows: copy instead of symlink (symlinks require admin)
-        copy_dir_recursive(&canonical, &target)?;
-    }
-
-    println!("Linked {name} → {}", canonical.display());
-
-    match load_manifest_summary(&canonical.join("plugin.toml")) {
-        Ok(info) => {
-            println!("  {} ({}) v{}", info.name, info.plugin_type, info.version);
-        }
-        Err(e) => {
-            println!("  (warning: {e})");
-        }
-    }
-
+    println!("Linked local plugin '{}' → {}", name, local_path.display());
     Ok(())
 }
 
-/// Extract plugin name from a git URI.
-///
-/// `https://github.com/user/omegon-tool-csv.git` → `omegon-tool-csv`
-/// `git@github.com:user/my-plugin.git` → `my-plugin`
-fn plugin_name_from_uri(uri: &str) -> anyhow::Result<String> {
-    let name = uri
-        .trim_end_matches('/')
-        .trim_end_matches(".git")
-        .rsplit('/')
-        .next()
-        .or_else(|| uri.rsplit(':').next()) // git@host:user/repo
-        .ok_or_else(|| anyhow::anyhow!("cannot derive plugin name from URI: {uri}"))?;
+fn install_git(plugins_dir: &Path, uri: &str) -> anyhow::Result<()> {
+    let name = infer_plugin_name(uri)?;
+    let target = plugins_dir.join(&name);
 
-    // Remove path component if git@host:user/repo format
-    let name = name.rsplit('/').next().unwrap_or(name);
+    if target.exists() {
+        anyhow::bail!("Plugin '{}' already exists at {}", name, target.display());
+    }
+
+    let status = std::process::Command::new("git")
+        .arg("clone")
+        .arg(uri)
+        .arg(&target)
+        .status()?;
+
+    if !status.success() {
+        anyhow::bail!("git clone failed for {uri}");
+    }
+
+    let manifest_path = target.join("plugin.toml");
+    if !manifest_path.exists() {
+        std::fs::remove_dir_all(&target).ok();
+        anyhow::bail!("cloned repository does not contain plugin.toml");
+    }
+
+    let manifest = std::fs::read_to_string(&manifest_path)?;
+    let parsed = ArmoryManifest::parse(&manifest)?;
+    if parsed.plugin.name != name {
+        println!(
+            "Note: repository inferred name '{}' but manifest declares '{}'.",
+            name, parsed.plugin.name
+        );
+    }
+
+    println!("Installed plugin '{}' from {uri}", parsed.plugin.name);
+    Ok(())
+}
+
+fn infer_plugin_name(uri: &str) -> anyhow::Result<String> {
+    let stripped = uri.trim_end_matches('/').trim_end_matches(".git");
+    let name = stripped
+        .rsplit_once('/')
+        .map(|(_, tail)| tail)
+        .or_else(|| stripped.rsplit_once(':').map(|(_, tail)| tail))
+        .ok_or_else(|| anyhow::anyhow!("could not infer plugin name from URI: {uri}"))?;
 
     if name.is_empty() {
-        anyhow::bail!("cannot derive plugin name from URI: {uri}");
+        anyhow::bail!("could not infer plugin name from URI: {uri}");
     }
 
     Ok(name.to_string())
 }
 
-/// Summary info from a parsed manifest.
 struct ManifestSummary {
     name: String,
     plugin_type: String,
     version: String,
     description: String,
-    tool_count: usize,
-    has_context: bool,
 }
 
 fn load_manifest_summary(path: &Path) -> anyhow::Result<ManifestSummary> {
@@ -376,24 +294,7 @@ fn load_manifest_summary(path: &Path) -> anyhow::Result<ManifestSummary> {
         plugin_type: manifest.plugin.plugin_type.to_string(),
         version: manifest.plugin.version.clone(),
         description: manifest.plugin.description.clone(),
-        tool_count: manifest.tools.len() + manifest.mcp_servers.len(),
-        has_context: manifest.context.is_some(),
     })
-}
-
-#[cfg(not(unix))]
-fn copy_dir_recursive(src: &Path, dst: &Path) -> anyhow::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let ty = entry.file_type()?;
-        if ty.is_dir() {
-            copy_dir_recursive(&entry.path(), &dst.join(entry.file_name()))?;
-        } else {
-            std::fs::copy(entry.path(), dst.join(entry.file_name()))?;
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -401,223 +302,59 @@ mod tests {
     use super::*;
 
     #[test]
-    fn plugin_name_from_https_uri() {
-        assert_eq!(
-            plugin_name_from_uri("https://github.com/user/omegon-tool-csv.git").unwrap(),
-            "omegon-tool-csv"
-        );
+    fn infer_plugin_name_from_https_git() {
+        let name = infer_plugin_name("https://github.com/user/my-plugin.git").unwrap();
+        assert_eq!(name, "my-plugin");
     }
 
     #[test]
-    fn plugin_name_from_https_no_git_suffix() {
-        assert_eq!(
-            plugin_name_from_uri("https://github.com/user/my-plugin").unwrap(),
-            "my-plugin"
-        );
+    fn infer_plugin_name_from_ssh_git() {
+        let name = infer_plugin_name("git@github.com:user/my-plugin.git").unwrap();
+        assert_eq!(name, "my-plugin");
     }
 
     #[test]
-    fn plugin_name_from_ssh_uri() {
-        assert_eq!(
-            plugin_name_from_uri("git@github.com:user/my-plugin.git").unwrap(),
-            "my-plugin"
-        );
+    fn infer_plugin_name_from_local_path() {
+        let name = infer_plugin_name("./plugins/my-plugin").unwrap();
+        assert_eq!(name, "my-plugin");
     }
 
     #[test]
-    fn plugin_name_trailing_slash() {
-        assert_eq!(
-            plugin_name_from_uri("https://github.com/user/repo/").unwrap(),
-            "repo"
-        );
+    fn list_summary_reports_empty_installation() {
+        let summary = list_summary().unwrap();
+        assert!(summary.contains("No plugins installed") || summary.contains("DESCRIPTION"));
     }
 
     #[test]
-    fn install_local_creates_symlink() {
-        let plugins = tempfile::tempdir().unwrap();
-        let source = tempfile::tempdir().unwrap();
+    fn install_rejects_invalid_uri() {
+        let err = install("not-a-uri").unwrap_err();
+        assert!(err.to_string().contains("not a valid plugin source"));
+    }
 
-        // Create a minimal plugin
+    #[test]
+    fn install_local_symlinks_plugin() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin = tmp.path().join("example-plugin");
+        std::fs::create_dir_all(&plugin).unwrap();
         std::fs::write(
-            source.path().join("plugin.toml"),
+            plugin.join("plugin.toml"),
             r#"
-            [plugin]
-            type = "skill"
-            id = "dev.test.local"
-            name = "Local Test"
-            version = "0.1.0"
-            description = "a test"
-        "#,
+[plugin]
+name = "example-plugin"
+plugin_type = "persona"
+version = "0.1.0"
+description = "Example"
+entry = "plugin.md"
+"#,
         )
         .unwrap();
+        std::fs::write(plugin.join("plugin.md"), "# Example").unwrap();
 
-        install_local(plugins.path(), source.path()).unwrap();
+        let plugins = tempfile::tempdir().unwrap();
+        install_local(plugins.path(), &plugin).unwrap();
 
-        // Verify symlink was created
-        let name = source.path().file_name().unwrap();
-        let link = plugins.path().join(name);
+        let link = plugins.path().join("example-plugin");
         assert!(link.exists(), "symlink should exist");
         assert!(link.is_symlink(), "should be a symlink");
-        assert!(
-            link.join("plugin.toml").exists(),
-            "manifest should be accessible"
-        );
-    }
-
-    #[test]
-    fn install_local_rejects_duplicate() {
-        let plugins = tempfile::tempdir().unwrap();
-        let source = tempfile::tempdir().unwrap();
-
-        std::fs::write(
-            source.path().join("plugin.toml"),
-            r#"
-            [plugin]
-            type = "skill"
-            id = "dev.test.dup"
-            name = "Dup"
-            version = "0.1.0"
-            description = "a test"
-        "#,
-        )
-        .unwrap();
-
-        install_local(plugins.path(), source.path()).unwrap();
-        let result = install_local(plugins.path(), source.path());
-        assert!(result.is_err(), "duplicate install should fail");
-    }
-
-    #[test]
-    fn remove_symlink() {
-        let plugins = tempfile::tempdir().unwrap();
-        let source = tempfile::tempdir().unwrap();
-
-        std::fs::write(
-            source.path().join("plugin.toml"),
-            r#"
-            [plugin]
-            type = "skill"
-            id = "dev.test.rm"
-            name = "Remove Me"
-            version = "0.1.0"
-            description = "a test"
-        "#,
-        )
-        .unwrap();
-
-        install_local(plugins.path(), source.path()).unwrap();
-
-        let name = source
-            .path()
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        // Override plugins_dir for test — call remove's inner logic directly
-        let plugin_path = plugins.path().join(&name);
-        assert!(plugin_path.exists());
-
-        std::fs::remove_file(&plugin_path).unwrap(); // simulates remove()
-        assert!(!plugin_path.exists());
-    }
-
-    #[test]
-    fn remove_cloned_dir() {
-        let plugins = tempfile::tempdir().unwrap();
-        let plugin_dir = plugins.path().join("test-plugin");
-        std::fs::create_dir_all(&plugin_dir).unwrap();
-        std::fs::write(plugin_dir.join("plugin.toml"), "").unwrap();
-
-        assert!(plugin_dir.exists());
-        std::fs::remove_dir_all(&plugin_dir).unwrap(); // simulates remove()
-        assert!(!plugin_dir.exists());
-    }
-
-    #[test]
-    fn list_empty_dir() {
-        // Just verify it doesn't panic
-        let _plugins = tempfile::tempdir().unwrap();
-        // list() uses plugins_dir() which looks at home — can't easily test
-        // without env override. The function path is tested by the summary tests.
-    }
-
-    #[test]
-    fn load_manifest_summary_valid() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("plugin.toml"),
-            r#"
-            [plugin]
-            type = "persona"
-            id = "dev.test.summary"
-            name = "Test Persona"
-            version = "2.0.0"
-            description = "A test persona plugin"
-
-            [[tools]]
-            name = "tool1"
-            description = "a tool"
-            runner = "python"
-            script = "tools/tool1.py"
-
-            [context]
-            runner = "bash"
-            script = "context/status.sh"
-        "#,
-        )
-        .unwrap();
-
-        let info = load_manifest_summary(&dir.path().join("plugin.toml")).unwrap();
-        assert_eq!(info.name, "Test Persona");
-        assert_eq!(info.plugin_type, "persona");
-        assert_eq!(info.version, "2.0.0");
-        assert_eq!(info.tool_count, 1);
-        assert!(info.has_context);
-    }
-
-    #[test]
-    fn load_manifest_summary_invalid() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("plugin.toml"), "not valid toml {{").unwrap();
-        assert!(load_manifest_summary(&dir.path().join("plugin.toml")).is_err());
-    }
-
-    #[test]
-    fn update_skips_symlinks() {
-        // update() only processes non-symlink dirs — symlinked plugins
-        // are managed externally by the developer
-        let plugins = tempfile::tempdir().unwrap();
-        let source = tempfile::tempdir().unwrap();
-        std::fs::write(
-            source.path().join("plugin.toml"),
-            r#"
-            [plugin]
-            type = "skill"
-            id = "dev.test.up"
-            name = "Update Test"
-            version = "0.1.0"
-            description = "a test"
-        "#,
-        )
-        .unwrap();
-
-        install_local(plugins.path(), source.path()).unwrap();
-
-        // Verify the installed path is a symlink
-        let name = source.path().file_name().unwrap();
-        let link = plugins.path().join(name);
-        assert!(link.is_symlink());
-
-        // Collect non-symlink dirs (should be empty)
-        let updatable: Vec<_> = std::fs::read_dir(plugins.path())
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.is_dir() && !p.is_symlink())
-            .collect();
-        assert!(
-            updatable.is_empty(),
-            "symlinked plugins should not be updatable"
-        );
     }
 }

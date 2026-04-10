@@ -35,11 +35,11 @@ fn skills_dir() -> Option<std::path::PathBuf> {
     dirs::home_dir().map(|h| h.join(".omegon").join("skills"))
 }
 
-/// List bundled skills and their installation status.
-pub fn cmd_list() -> anyhow::Result<()> {
+/// Render bundled skills and their installation status as terminal-friendly text.
+pub fn list_summary() -> anyhow::Result<String> {
     let skills_dir = skills_dir();
 
-    println!("Bundled skills ({}):\n", BUNDLED.len());
+    let mut lines = vec![format!("Bundled skills ({})\n", BUNDLED.len())];
 
     for (name, content) in BUNDLED {
         // Extract description from frontmatter if present
@@ -49,7 +49,7 @@ pub fn cmd_list() -> anyhow::Result<()> {
             .as_ref()
             .map_or(false, |d| d.join(name).join("SKILL.md").exists());
         let status = if installed { "✓" } else { "○" };
-        println!("  {status} {name:<14} {description}");
+        lines.push(format!("  {status} {name:<14} {description}"));
     }
 
     let install_path = skills_dir
@@ -57,9 +57,9 @@ pub fn cmd_list() -> anyhow::Result<()> {
         .map(|d| d.display().to_string())
         .unwrap_or_else(|| "(unknown)".into());
 
-    println!("\nInstall location: {install_path}");
-    println!("  ✓ = installed    ○ = not yet installed");
-    println!("\nRun `omegon skills install` to install all bundled skills.");
+    lines.push(format!("\nInstall location: {install_path}"));
+    lines.push("  ✓ = installed    ○ = not yet installed".into());
+    lines.push("\nRun `omegon skills install` to install all bundled skills.".into());
 
     // Show any project-local skills if cwd has them
     let cwd = std::env::current_dir()?;
@@ -72,13 +72,19 @@ pub fn cmd_list() -> anyhow::Result<()> {
             .collect();
         local.sort();
         if !local.is_empty() {
-            println!("\nProject-local skills (.omegon/skills/):");
+            lines.push("\nProject-local skills (.omegon/skills/):".into());
             for name in &local {
-                println!("  ● {name}");
+                lines.push(format!("  ● {name}"));
             }
         }
     }
 
+    Ok(lines.join("\n"))
+}
+
+/// List bundled skills and their installation status.
+pub fn cmd_list() -> anyhow::Result<()> {
+    println!("{}", list_summary()?);
     Ok(())
 }
 
@@ -184,5 +190,12 @@ mod tests {
     fn extract_description_returns_none_without_frontmatter() {
         let content = "# No frontmatter here";
         assert_eq!(extract_description(content), None);
+    }
+
+    #[test]
+    fn list_summary_mentions_bundled_skills() {
+        let summary = list_summary().unwrap();
+        assert!(summary.contains("Bundled skills"));
+        assert!(summary.contains("Run `omegon skills install`"));
     }
 }

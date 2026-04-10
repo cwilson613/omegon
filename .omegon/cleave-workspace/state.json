@@ -17,14 +17,14 @@
         "core/crates/omegon-traits/src/lib.rs"
       ],
       "dependsOn": [],
-      "status": "running",
+      "status": "completed",
       "branch": "cleave/0-control-core",
-      "worktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/0-wt-control-core",
       "backend": "native",
       "executeModel": "openai-codex:gpt-5.4",
-      "pid": 39613,
-      "startedAtUnixMs": 1775789623977,
-      "lastActivityUnixMs": 1775789623977,
+      "durationSecs": 516.590829416,
+      "stdout": "",
+      "startedAtUnixMs": 1775790140514,
+      "lastActivityUnixMs": 1775790140514,
       "adoptionWorktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/0-wt-control-core",
       "adoptionModel": "openai-codex:gpt-5.4",
       "supervisorToken": "supv-18a4df410e7142b0"
@@ -43,7 +43,8 @@
       "dependsOn": [
         "control-core"
       ],
-      "status": "pending",
+      "status": "failed",
+      "error": "scope file(s) not accessible after submodule init: core/crates/omegon/src/**/*.test.ts, core/crates/omegon/src/**/*.rs, core/tests/**/*",
       "branch": "cleave/1-web-tests",
       "backend": "native",
       "executeModel": "openai-codex:gpt-5.4"

@@ -359,8 +359,9 @@ impl IpcConnection {
                 }
 
                 "context_status" | "context_compact" | "context_clear" | "new_session"
-                | "auth_status" | "model_view" | "model_list" | "set_model"
-                | "set_thinking" | "list_sessions" => {
+                | "auth_status" | "model_view" | "model_list" | "skills_view"
+                | "skills_install" | "plugin_view" | "plugin_install" | "plugin_remove"
+                | "plugin_update" | "set_model" | "set_thinking" | "list_sessions" => {
                     let req = serde_json::from_value::<ControlRequest>(payload.clone())
                         .unwrap_or_default();
                     let caller_role = parse_caller_role(req.caller_role.as_deref());
@@ -384,6 +385,32 @@ impl IpcConnection {
                         "auth_status" => Some(crate::control_runtime::ControlRequest::AuthStatus),
                         "model_view" => Some(crate::control_runtime::ControlRequest::ModelView),
                         "model_list" => Some(crate::control_runtime::ControlRequest::ModelList),
+                        "skills_view" => Some(crate::control_runtime::ControlRequest::SkillsView),
+                        "skills_install" => {
+                            Some(crate::control_runtime::ControlRequest::SkillsInstall)
+                        }
+                        "plugin_view" => Some(crate::control_runtime::ControlRequest::PluginView),
+                        "plugin_install" => payload
+                            .get("uri")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                            .map(|uri| crate::control_runtime::ControlRequest::PluginInstall {
+                                uri: uri.to_string(),
+                            }),
+                        "plugin_remove" => payload
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                            .map(|name| crate::control_runtime::ControlRequest::PluginRemove {
+                                name: name.to_string(),
+                            }),
+                        "plugin_update" => Some(crate::control_runtime::ControlRequest::PluginUpdate {
+                            name: payload
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string())
+                                .filter(|s| !s.is_empty()),
+                        }),
                         "list_sessions" => Some(crate::control_runtime::ControlRequest::ListSessions),
                         "set_model" => {
                             let model = payload
