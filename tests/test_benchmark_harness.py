@@ -172,6 +172,55 @@ acceptance:
             self.assertEqual(payload["telemetry"]["estimated_tokens"], 1700)
             self.assertEqual(payload["telemetry"]["context_window"], 200000)
 
+    def test_slim_omegon_results_are_labeled_om(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            self.init_repo(repo)
+            fake_cargo = repo / "scripts" / "cargo"
+            fake_cargo.write_text(
+                "#!/bin/sh\n"
+                "usage_json=''\n"
+                "prev=''\n"
+                "for arg in \"$@\"; do\n"
+                "  if [ \"$prev\" = \"--usage-json\" ]; then usage_json=\"$arg\"; fi\n"
+                "  prev=\"$arg\"\n"
+                "done\n"
+                "if [ -n \"$usage_json\" ]; then\n"
+                "  cat > \"$usage_json\" <<'JSON'\n"
+                '{"input_tokens": 10, "output_tokens": 5, "cache_tokens": 0}\n'
+                "JSON\n"
+                "fi\n"
+                "exit 0\n"
+            )
+            fake_cargo.chmod(0o755)
+            task = self.write_task(
+                repo,
+                """
+id: t-slim
+repo: .
+base_ref: main
+prompt: hi
+harnesses: [omegon]
+acceptance:
+  - python3 -c \"print('ok')\"
+""",
+            )
+            env = dict(os.environ)
+            env["PATH"] = f"{repo / 'scripts'}:{env['PATH']}"
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(task), "--root", str(repo), "--slim"],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result_path = Path(result.stdout.strip())
+            payload = json.loads(result_path.read_text())
+            self.assertEqual(payload["harness"], "om")
+            self.assertTrue(result_path.name.endswith("-om.json"))
+
     def test_acceptance_runs_in_clean_repo_not_source_repo(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir)

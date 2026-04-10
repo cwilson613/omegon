@@ -638,10 +638,17 @@ def derive_final_status(adapter: AdapterResult, acceptance_status: str) -> tuple
     return acceptance_status, 0.0
 
 
+def result_harness_label(harness: str, slim: bool) -> str:
+    if harness == "omegon" and slim:
+        return "om"
+    return harness
+
+
 def build_result(
     *,
     spec: TaskSpec,
     harness: str,
+    slim: bool,
     adapter: AdapterResult,
     acceptance_status: str,
     acceptance_results: list[dict[str, Any]],
@@ -651,7 +658,7 @@ def build_result(
     final_status, final_score = derive_final_status(adapter, acceptance_status)
     payload = {
         "task_id": spec.id,
-        "harness": harness,
+        "harness": result_harness_label(harness, slim),
         "model": adapter.model,
         "status": final_status,
         "score": final_score,
@@ -693,9 +700,10 @@ def build_result(
     return payload
 
 
-def write_result(out_dir: Path, spec: TaskSpec, harness: str, payload: dict[str, Any]) -> Path:
+def write_result(out_dir: Path, spec: TaskSpec, harness: str, slim: bool, payload: dict[str, Any]) -> Path:
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-    out_path = out_dir / f"{timestamp}-{spec.id}-{harness}.json"
+    label = result_harness_label(harness, slim)
+    out_path = out_dir / f"{timestamp}-{spec.id}-{label}.json"
     out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return out_path
 
@@ -899,6 +907,7 @@ def main() -> int:
     payload = build_result(
         spec=spec,
         harness=harness,
+        slim=slim,
         adapter=adapter,
         acceptance_status=acceptance_status,
         acceptance_results=acceptance_results,
@@ -906,7 +915,7 @@ def main() -> int:
     )
     payload.setdefault("timing", {})
     payload["timing"] = {"acceptance_wall_clock_sec": round(acceptance_elapsed, 3)}
-    result_path = write_result(out_dir, spec, harness, payload)
+    result_path = write_result(out_dir, spec, harness, slim, payload)
     audit(
         "benchmark done: "
         f"task={spec.id} harness={harness} status={payload.get('status')} "
