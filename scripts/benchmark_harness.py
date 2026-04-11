@@ -255,7 +255,7 @@ def select_slim(spec: TaskSpec, explicit: bool) -> bool:
 def normalize_model_for_harness(harness: str, model: str | None) -> str | None:
     if model is None:
         return None
-    if harness == "claude-code" and model.startswith("anthropic:"):
+    if harness in {"claude-code", "pi"} and model.startswith("anthropic:"):
         return model.split(":", 1)[1]
     return model
 
@@ -263,9 +263,9 @@ def normalize_model_for_harness(harness: str, model: str | None) -> str | None:
 def ensure_model_supported_for_harness(harness: str, model: str | None) -> None:
     if model is None:
         return
-    if harness == "claude-code" and ":" in model and not model.startswith("anthropic:"):
+    if harness in {"claude-code", "pi"} and ":" in model and not model.startswith("anthropic:"):
         raise TaskSpecError(
-            f"claude-code benchmark runs do not support provider-prefixed non-Anthropic model specs: {model}"
+            f"{harness} benchmark runs do not support provider-prefixed non-Anthropic model specs: {model}"
         )
 
 

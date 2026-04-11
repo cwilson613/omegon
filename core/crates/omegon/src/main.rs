@@ -4384,7 +4384,7 @@ mod tests {
         }
         let s = shared_settings.lock().unwrap();
         assert!(s.slim_mode);
-        assert_eq!(s.thinking, crate::settings::ThinkingLevel::Low);
+        assert_eq!(s.thinking, crate::settings::ThinkingLevel::Minimal);
         assert_eq!(s.requested_context_class, Some(crate::settings::ContextClass::Squad));
     }
 

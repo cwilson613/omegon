@@ -606,6 +606,18 @@ impl AgentSetup {
                 disabled.insert(reg::cleave::CLEAVE_RUN.into());
                 disabled.insert(reg::codescan::CODEBASE_INDEX.into());
                 disabled.insert(reg::session_log::SESSION_LOG.into());
+                // OM research mode keeps local repo inspection and direct shell validation,
+                // but drops heavier orchestration/meta-control surfaces by default.
+                disabled.insert(reg::core::WHOAMI.into());
+                disabled.insert(reg::core::SERVE.into());
+                disabled.insert(reg::core::CHRONOS.into());
+                disabled.insert(reg::view::VIEW.into());
+                disabled.insert(reg::context::REQUEST_CONTEXT.into());
+                disabled.insert(reg::context::CONTEXT_COMPACT.into());
+                disabled.insert(reg::context::CONTEXT_CLEAR.into());
+                disabled.insert(reg::model_budget::SET_MODEL_TIER.into());
+                disabled.insert(reg::model_budget::SWITCH_TO_OFFLINE_DRIVER.into());
+                disabled.insert(reg::model_budget::SET_THINKING_LEVEL.into());
             }
             tracing::info!(
                 disabled = disabled.len(),

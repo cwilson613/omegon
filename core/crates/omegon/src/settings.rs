@@ -355,7 +355,7 @@ impl Settings {
     pub fn set_slim_mode(&mut self, slim: bool) {
         self.slim_mode = slim;
         if slim {
-            self.thinking = ThinkingLevel::Low;
+            self.thinking = ThinkingLevel::Minimal;
             if self.requested_context_class.is_none() {
                 self.requested_context_class = Some(ContextClass::Squad);
             }
@@ -365,6 +365,15 @@ impl Settings {
     /// Derive a SelectorPolicy for this turn's context assembly.
     pub fn selector_policy(&self) -> SelectorPolicy {
         let thinking_reserve = self.thinking.budget_tokens().unwrap_or(0) as usize;
+        if self.slim_mode {
+            let slim_window = self.context_window.min(ContextClass::Squad.nominal_tokens());
+            return SelectorPolicy {
+                model_window: slim_window,
+                requested_class: ContextClass::Squad,
+                reply_reserve: 4_096 + thinking_reserve,
+                tool_schema_reserve: 2_048,
+            };
+        }
         SelectorPolicy {
             model_window: self.context_window,
             requested_class: self.effective_requested_class(),
@@ -813,8 +822,13 @@ mod tests {
         let mut s = Settings::new("anthropic:claude-sonnet-4-6");
         s.set_slim_mode(true);
         assert!(s.slim_mode);
-        assert_eq!(s.thinking, ThinkingLevel::Low);
+        assert_eq!(s.thinking, ThinkingLevel::Minimal);
         assert_eq!(s.requested_context_class, Some(ContextClass::Squad));
+        let policy = s.selector_policy();
+        assert_eq!(policy.requested_class, ContextClass::Squad);
+        assert_eq!(policy.model_window, ContextClass::Squad.nominal_tokens());
+        assert!(policy.reply_reserve < 8_192);
+        assert!(policy.tool_schema_reserve < 4_096);
     }
 
     #[test]
