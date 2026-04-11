@@ -15,6 +15,137 @@
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
+/// Posture preset — behavioral stance for the harness.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PosturePreset {
+    /// Cheap-first reconnaissance and local hypothesis testing.
+    Explorator,
+    /// Balanced implementation posture.
+    Fabricator,
+    /// Systems-engineering posture.
+    #[default]
+    Architect,
+    /// Maximum-force posture.
+    Devastator,
+}
+
+impl PosturePreset {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Explorator => "explorator",
+            Self::Fabricator => "fabricator",
+            Self::Architect => "architect",
+            Self::Devastator => "devastator",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "explorator" => Some(Self::Explorator),
+            "fabricator" => Some(Self::Fabricator),
+            "architect" => Some(Self::Architect),
+            "devastator" => Some(Self::Devastator),
+            _ => None,
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Explorator => "Explorator",
+            Self::Fabricator => "Fabricator",
+            Self::Architect => "Architect",
+            Self::Devastator => "Devastator",
+        }
+    }
+
+    /// First-pass resource defaults for the posture.
+    ///
+    /// This intentionally covers only the axes already modeled in `settings.rs`.
+    /// Model-tier unification remains in `model_budget.rs` for now.
+    pub fn default_resource_envelope(self) -> ResourceEnvelope {
+        match self {
+            Self::Explorator => ResourceEnvelope {
+                thinking: ThinkingLevel::Minimal,
+                requested_context_class: ContextClass::Squad,
+                effective_context_cap_tokens: Some(ContextClass::Squad.nominal_tokens()),
+                compact_reply_reserve: true,
+                compact_tool_schema_reserve: true,
+            },
+            Self::Fabricator => ResourceEnvelope {
+                thinking: ThinkingLevel::Low,
+                requested_context_class: ContextClass::Maniple,
+                effective_context_cap_tokens: None,
+                compact_reply_reserve: false,
+                compact_tool_schema_reserve: false,
+            },
+            Self::Architect => ResourceEnvelope {
+                thinking: ThinkingLevel::Medium,
+                requested_context_class: ContextClass::Clan,
+                effective_context_cap_tokens: None,
+                compact_reply_reserve: false,
+                compact_tool_schema_reserve: false,
+            },
+            Self::Devastator => ResourceEnvelope {
+                thinking: ThinkingLevel::High,
+                requested_context_class: ContextClass::Legion,
+                effective_context_cap_tokens: None,
+                compact_reply_reserve: false,
+                compact_tool_schema_reserve: false,
+            },
+        }
+    }
+}
+
+/// Posture mode — fixed or adaptive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "lowercase")]
+pub enum PostureMode {
+    Fixed { preset: PosturePreset },
+    Adaptive { baseline: PosturePreset },
+}
+
+impl Default for PostureMode {
+    fn default() -> Self {
+        Self::Fixed {
+            preset: PosturePreset::Architect,
+        }
+    }
+}
+
+/// Effective behavioral posture state.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BehavioralPosture {
+    pub mode: PostureMode,
+    pub effective: PosturePreset,
+}
+
+impl BehavioralPosture {
+    pub fn fixed(preset: PosturePreset) -> Self {
+        Self {
+            mode: PostureMode::Fixed { preset },
+            effective: preset,
+        }
+    }
+
+    pub fn adaptive(baseline: PosturePreset) -> Self {
+        Self {
+            mode: PostureMode::Adaptive { baseline },
+            effective: baseline,
+        }
+    }
+}
+
+/// First-pass execution envelope derived from posture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceEnvelope {
+    pub thinking: ThinkingLevel,
+    pub requested_context_class: ContextClass,
+    pub effective_context_cap_tokens: Option<usize>,
+    pub compact_reply_reserve: bool,
+    pub compact_tool_schema_reserve: bool,
+}
+
 /// Runtime settings that can change mid-session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -24,6 +155,10 @@ pub struct Settings {
     /// Slim runtime mode — reduce prompt and tool surface for quick interactive work.
     #[serde(default)]
     pub slim_mode: bool,
+
+    /// Behavioral posture for the current session/runtime.
+    #[serde(default)]
+    pub posture: BehavioralPosture,
 
     /// Thinking level: off, minimal, low, medium, high.
     pub thinking: ThinkingLevel,
@@ -296,6 +431,7 @@ impl Default for Settings {
         Self {
             model: "anthropic:claude-sonnet-4-6".into(),
             slim_mode: false,
+            posture: BehavioralPosture::fixed(PosturePreset::Architect),
             thinking: ThinkingLevel::Medium,
             max_turns: 50,
             compaction_threshold: 0.75,
@@ -352,33 +488,65 @@ impl Settings {
         self.requested_context_class = Some(class);
     }
 
+    /// Resource envelope currently implied by posture.
+    pub fn resource_envelope(&self) -> ResourceEnvelope {
+        if self.slim_mode {
+            PosturePreset::Explorator.default_resource_envelope()
+        } else {
+            self.posture.effective.default_resource_envelope()
+        }
+    }
+
+    pub fn set_posture(&mut self, preset: PosturePreset) {
+        self.posture = BehavioralPosture::fixed(preset);
+        self.slim_mode = matches!(preset, PosturePreset::Explorator);
+
+        let envelope = self.resource_envelope();
+        self.thinking = envelope.thinking;
+        self.requested_context_class = Some(envelope.requested_context_class);
+    }
+
     pub fn set_slim_mode(&mut self, slim: bool) {
         self.slim_mode = slim;
         if slim {
-            self.thinking = ThinkingLevel::Minimal;
+            self.posture = BehavioralPosture::fixed(PosturePreset::Explorator);
+            let envelope = self.resource_envelope();
+            self.thinking = envelope.thinking;
             if self.requested_context_class.is_none() {
-                self.requested_context_class = Some(ContextClass::Squad);
+                self.requested_context_class = Some(envelope.requested_context_class);
             }
         }
     }
 
     /// Derive a SelectorPolicy for this turn's context assembly.
     pub fn selector_policy(&self) -> SelectorPolicy {
+        let envelope = self.resource_envelope();
         let thinking_reserve = self.thinking.budget_tokens().unwrap_or(0) as usize;
-        if self.slim_mode {
-            let slim_window = self.context_window.min(ContextClass::Squad.nominal_tokens());
-            return SelectorPolicy {
-                model_window: slim_window,
-                requested_class: ContextClass::Squad,
-                reply_reserve: 4_096 + thinking_reserve,
-                tool_schema_reserve: 2_048,
-            };
-        }
+        let model_window = envelope
+            .effective_context_cap_tokens
+            .map(|cap| self.context_window.min(cap))
+            .unwrap_or(self.context_window);
+        let requested_class = if self.slim_mode {
+            envelope.requested_context_class
+        } else {
+            self.requested_context_class
+                .unwrap_or(envelope.requested_context_class)
+        };
+        let reply_reserve = if envelope.compact_reply_reserve {
+            4_096 + thinking_reserve
+        } else {
+            8_192 + thinking_reserve
+        };
+        let tool_schema_reserve = if envelope.compact_tool_schema_reserve {
+            2_048
+        } else {
+            4_096
+        };
         SelectorPolicy {
-            model_window: self.context_window,
-            requested_class: self.effective_requested_class(),
-            reply_reserve: 8_192 + thinking_reserve,
-            tool_schema_reserve: 4_096,
+            model_window,
+            requested_class,
+            reply_reserve,
+            tool_schema_reserve,
         }
     }
 
@@ -816,6 +984,57 @@ fn global_profile_path() -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn posture_default_is_architect() {
+        let s = Settings::default();
+        assert_eq!(s.posture, BehavioralPosture::fixed(PosturePreset::Architect));
+        assert_eq!(s.resource_envelope().thinking, ThinkingLevel::Medium);
+        assert_eq!(
+            s.resource_envelope().requested_context_class,
+            ContextClass::Clan
+        );
+    }
+
+    #[test]
+    fn posture_preset_resource_defaults_are_stable() {
+        let explorator = PosturePreset::Explorator.default_resource_envelope();
+        assert_eq!(explorator.thinking, ThinkingLevel::Minimal);
+        assert_eq!(explorator.requested_context_class, ContextClass::Squad);
+        assert_eq!(
+            explorator.effective_context_cap_tokens,
+            Some(ContextClass::Squad.nominal_tokens())
+        );
+        assert!(explorator.compact_reply_reserve);
+        assert!(explorator.compact_tool_schema_reserve);
+
+        let fabricator = PosturePreset::Fabricator.default_resource_envelope();
+        assert_eq!(fabricator.thinking, ThinkingLevel::Low);
+        assert_eq!(fabricator.requested_context_class, ContextClass::Maniple);
+
+        let architect = PosturePreset::Architect.default_resource_envelope();
+        assert_eq!(architect.thinking, ThinkingLevel::Medium);
+        assert_eq!(architect.requested_context_class, ContextClass::Clan);
+
+        let devastator = PosturePreset::Devastator.default_resource_envelope();
+        assert_eq!(devastator.thinking, ThinkingLevel::High);
+        assert_eq!(devastator.requested_context_class, ContextClass::Legion);
+    }
+
+    #[test]
+    fn set_posture_updates_behavioral_defaults() {
+        let mut s = Settings::new("anthropic:claude-sonnet-4-6");
+        s.set_posture(PosturePreset::Fabricator);
+        assert_eq!(s.posture, BehavioralPosture::fixed(PosturePreset::Fabricator));
+        assert!(!s.slim_mode);
+        assert_eq!(s.thinking, ThinkingLevel::Low);
+        assert_eq!(s.requested_context_class, Some(ContextClass::Maniple));
+
+        s.set_posture(PosturePreset::Devastator);
+        assert_eq!(s.posture, BehavioralPosture::fixed(PosturePreset::Devastator));
+        assert_eq!(s.thinking, ThinkingLevel::High);
+        assert_eq!(s.requested_context_class, Some(ContextClass::Legion));
+    }
 
     #[test]
     fn slim_mode_reduces_defaults() {
