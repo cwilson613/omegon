@@ -1572,40 +1572,24 @@ impl CodexClient {
     }
 
     pub fn from_env() -> Option<Self> {
-        // 1. Try CHATGPT_OAUTH_TOKEN env var
-        if let Ok(token) = std::env::var("CHATGPT_OAUTH_TOKEN") {
-            if !token.is_empty() && token.starts_with("eyJ") {
-                if let Some(account_id) = crate::auth::extract_jwt_claim(
-                    &token,
-                    "https://api.openai.com/auth",
-                    "chatgpt_account_id",
-                ) {
-                    tracing::debug!("CodexClient: resolved from CHATGPT_OAUTH_TOKEN env var");
-                    return Some(Self::new(token, account_id));
-                }
-            }
+        // Resolve using canonical provider/auth.json mapping so persisted
+        // Codex auth is recognized across restarts without depending on the
+        // legacy CHATGPT_OAUTH_TOKEN check.
+        let (token, is_oauth) = crate::providers::resolve_api_key_sync("openai-codex")?;
+        if !is_oauth || !token.starts_with("eyJ") {
+            return None;
         }
 
-        // 2. Try auth.json (openai-codex entry)
-        let creds = crate::auth::read_credentials("openai-codex")?;
-        if creds.cred_type != "oauth" || creds.access.is_empty() || !creds.access.starts_with("eyJ")
-        {
-            return None;
-        }
-        if creds.is_expired() {
-            tracing::debug!("CodexClient: auth.json token expired — needs refresh");
-            return None;
-        }
-        let account_id =
-            crate::auth::read_credential_extra("openai-codex", "accountId").or_else(|| {
-                crate::auth::extract_jwt_claim(
-                    &creds.access,
-                    "https://api.openai.com/auth",
-                    "chatgpt_account_id",
-                )
-            })?;
-        tracing::debug!("CodexClient: resolved from auth.json");
-        Some(Self::new(creds.access, account_id))
+        let account_id = crate::auth::read_credential_extra("openai-codex", "accountId").or_else(|| {
+            crate::auth::extract_jwt_claim(
+                &token,
+                "https://api.openai.com/auth",
+                "chatgpt_account_id",
+            )
+        })?;
+
+        tracing::debug!("CodexClient: resolved via canonical provider lookup");
+        Some(Self::new(token, account_id))
     }
 
     pub async fn from_env_async() -> Option<Self> {

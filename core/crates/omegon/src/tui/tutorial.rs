@@ -8,6 +8,8 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
+use crate::providers::resolve_api_key_sync;
+
 /// Where to anchor the tutorial callout.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Anchor {
@@ -42,11 +44,11 @@ pub enum TutorialMode {
 /// Checks env vars directly — does not depend on startup probe results,
 /// which may not be set yet. Called at `/tutorial` invocation time.
 pub fn tutorial_gate() -> TutorialMode {
-    let has_anthropic_api_key = std::env::var("ANTHROPIC_API_KEY").is_ok_and(|v| !v.is_empty());
-    let has_openai_api_key = std::env::var("OPENAI_API_KEY").is_ok_and(|v| !v.is_empty());
-    let has_codex_oauth = std::env::var("CHATGPT_OAUTH_TOKEN").is_ok_and(|v| !v.is_empty());
-    let has_openrouter = std::env::var("OPENROUTER_API_KEY").is_ok_and(|v| !v.is_empty());
-    let has_anthropic_oauth = std::env::var("ANTHROPIC_OAUTH_TOKEN").is_ok_and(|v| !v.is_empty());
+    let has_anthropic_api_key = resolve_api_key_sync("anthropic").is_some_and(|(_, oauth)| !oauth);
+    let has_openai_api_key = resolve_api_key_sync("openai").is_some_and(|(_, oauth)| !oauth);
+    let has_openrouter = resolve_api_key_sync("openrouter").is_some();
+    let has_anthropic_oauth = resolve_api_key_sync("anthropic").is_some_and(|(_, oauth)| oauth);
+    let has_codex_oauth = resolve_api_key_sync("openai-codex").is_some();
 
     // Direct API-key-style routes are the clear happy path for AutoPrompt.
     if has_anthropic_api_key || has_openai_api_key || has_openrouter {
