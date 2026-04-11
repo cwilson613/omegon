@@ -126,6 +126,15 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         help="Print a plain-text comparison report from one or more result JSON artifacts or directories",
     )
+    parser.add_argument(
+        "--baseline",
+        nargs="+",
+        help=(
+            "Compute regressions vs the supplied baseline result artifacts or "
+            "directories. Only meaningful with --report. Cells are matched by "
+            "(task_id, harness, model)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -1506,12 +1515,224 @@ def group_results_for_report(results: list[dict[str, Any]]) -> Iterable[list[dic
         yield grouped[task_id]
 
 
-def run_report_mode(paths: list[str]) -> int:
+# Default regression thresholds. These are deliberately tight so a clean
+# RC vs the prior RC produces zero regressions; loosen at the call site
+# rather than here if a particular task is known to be noisy.
+REGRESSION_TOKEN_PCT = 10.0      # > +10% total tokens vs baseline → regression
+REGRESSION_TURNS_DELTA = 1       # +1 or more turns vs baseline → regression
+REGRESSION_WALL_PCT = 15.0       # > +15% wall clock vs baseline → regression
+
+
+def _result_key(result: dict[str, Any]) -> tuple[str, str, str]:
+    """Index key for matching current results against baseline cells."""
+    return (
+        str(result.get("task_id") or "unknown-task"),
+        str(result.get("harness") or "unknown-harness"),
+        str(result.get("model") or "unknown-model"),
+    )
+
+
+def _index_results_by_key(results: list[dict[str, Any]]) -> dict[tuple[str, str, str], dict[str, Any]]:
+    """Build a (task_id, harness, model) → result lookup.
+
+    When the same key appears more than once (e.g. a directory containing
+    multiple runs of the same cell), the *latest-mtime* artifact wins. This
+    matches the operator's intuition: "compare against the most recent
+    baseline run for that cell."
+    """
+    indexed: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for result in results:
+        key = _result_key(result)
+        # The artifacts are loaded from disk in expand_report_inputs sorted
+        # order; without per-result mtime we treat "later in the list" as
+        # "more recent." expand_report_inputs already sorts by name, which
+        # for our timestamp-prefixed filenames coincides with chronological.
+        indexed[key] = result
+    return indexed
+
+
+def compute_regressions(
+    current: dict[str, Any],
+    baseline: dict[str, Any] | None,
+    *,
+    token_pct: float = REGRESSION_TOKEN_PCT,
+    turns_delta: int = REGRESSION_TURNS_DELTA,
+    wall_pct: float = REGRESSION_WALL_PCT,
+) -> list[dict[str, Any]]:
+    """Compare a current result against a baseline result and flag regressions.
+
+    Returns a list of regression records, each with `kind`, `before`, `after`,
+    and a human-readable `message`. An empty list means "no regression
+    detected." When the baseline is None, returns an empty list (the cell
+    is new and has nothing to regress against).
+    """
+    if baseline is None:
+        return []
+    regressions: list[dict[str, Any]] = []
+
+    # Status regression: pass → fail/error.
+    base_status = baseline.get("status")
+    cur_status = current.get("status")
+    if base_status == "pass" and cur_status in {"fail", "error"}:
+        regressions.append(
+            {
+                "kind": "status",
+                "before": base_status,
+                "after": cur_status,
+                "message": f"status: {base_status} → {cur_status}",
+            }
+        )
+
+    # Token regression: total tokens up by more than the configured percent.
+    base_tokens = ((baseline.get("tokens") or {}) or {}).get("total")
+    cur_tokens = ((current.get("tokens") or {}) or {}).get("total")
+    if isinstance(base_tokens, int) and isinstance(cur_tokens, int) and base_tokens > 0:
+        delta_pct = (cur_tokens - base_tokens) / base_tokens * 100.0
+        if delta_pct > token_pct:
+            regressions.append(
+                {
+                    "kind": "tokens",
+                    "before": base_tokens,
+                    "after": cur_tokens,
+                    "delta_pct": round(delta_pct, 1),
+                    "message": (
+                        f"tokens: {base_tokens:,} → {cur_tokens:,} "
+                        f"(+{delta_pct:.1f}%, threshold +{token_pct:.0f}%)"
+                    ),
+                }
+            )
+
+    # Turn-count regression: any non-trivial increase. The optimization plan
+    # treats turn count as the primary harness-quality signal, so we are
+    # deliberately strict here.
+    base_turns = ((baseline.get("process") or {}) or {}).get("turn_count")
+    cur_turns = ((current.get("process") or {}) or {}).get("turn_count")
+    if isinstance(base_turns, int) and isinstance(cur_turns, int):
+        delta = cur_turns - base_turns
+        if delta >= turns_delta:
+            regressions.append(
+                {
+                    "kind": "turns",
+                    "before": base_turns,
+                    "after": cur_turns,
+                    "delta": delta,
+                    "message": f"turns: {base_turns} → {cur_turns} (+{delta})",
+                }
+            )
+
+    # Wall-clock regression: longer than baseline by more than the configured
+    # percent.
+    base_wall = baseline.get("wall_clock_sec")
+    cur_wall = current.get("wall_clock_sec")
+    if isinstance(base_wall, (int, float)) and isinstance(cur_wall, (int, float)) and base_wall > 0:
+        delta_pct = (cur_wall - base_wall) / base_wall * 100.0
+        if delta_pct > wall_pct:
+            regressions.append(
+                {
+                    "kind": "wall_clock",
+                    "before": round(base_wall, 1),
+                    "after": round(cur_wall, 1),
+                    "delta_pct": round(delta_pct, 1),
+                    "message": (
+                        f"wall clock: {base_wall:.1f}s → {cur_wall:.1f}s "
+                        f"(+{delta_pct:.1f}%, threshold +{wall_pct:.0f}%)"
+                    ),
+                }
+            )
+
+    # Process-violation regression: violation count went up.
+    base_violations = (
+        ((baseline.get("process") or {}).get("grading") or {}).get("violations") or []
+    )
+    cur_violations = (
+        ((current.get("process") or {}).get("grading") or {}).get("violations") or []
+    )
+    if len(cur_violations) > len(base_violations):
+        regressions.append(
+            {
+                "kind": "process_violations",
+                "before": len(base_violations),
+                "after": len(cur_violations),
+                "message": (
+                    f"process violations: {len(base_violations)} → {len(cur_violations)}"
+                ),
+            }
+        )
+
+    # Four-axis score regressions: any decrease in any axis score.
+    base_scores = baseline.get("scores") or {}
+    cur_scores = current.get("scores") or {}
+    for axis in ("outcome", "process", "efficiency", "discipline"):
+        before = (base_scores.get(axis) or {}).get("score")
+        after = (cur_scores.get(axis) or {}).get("score")
+        if isinstance(before, (int, float)) and isinstance(after, (int, float)) and after < before:
+            regressions.append(
+                {
+                    "kind": f"score_{axis}",
+                    "before": before,
+                    "after": after,
+                    "message": f"scores.{axis}: {before} → {after}",
+                }
+            )
+
+    return regressions
+
+
+def render_regressions(
+    current_results: list[dict[str, Any]],
+    baseline_index: dict[tuple[str, str, str], dict[str, Any]],
+) -> str:
+    """Render the regressions section of a baseline-aware report.
+
+    Cells with no regressions are quietly omitted. Cells whose key is not
+    present in the baseline are listed as "new cell — no baseline" so the
+    operator knows what is and is not being compared.
+    """
+    lines: list[str] = ["Regressions vs baseline"]
+    any_regression = False
+    new_cells: list[tuple[str, str, str]] = []
+
+    for result in current_results:
+        key = _result_key(result)
+        baseline = baseline_index.get(key)
+        if baseline is None:
+            new_cells.append(key)
+            continue
+        regressions = compute_regressions(result, baseline)
+        if not regressions:
+            continue
+        any_regression = True
+        task_id, harness, model = key
+        lines.append(f"- {task_id} / {harness} / {model}")
+        for reg in regressions:
+            lines.append(f"    {reg['message']}")
+
+    if not any_regression:
+        lines.append("- none detected")
+
+    if new_cells:
+        lines.append("")
+        lines.append("New cells (no baseline match)")
+        for task_id, harness, model in new_cells:
+            lines.append(f"- {task_id} / {harness} / {model}")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def run_report_mode(paths: list[str], baseline_paths: list[str] | None = None) -> int:
     try:
         expanded_paths = expand_report_inputs(paths)
         results = [load_result(path) for path in expanded_paths]
         report_sections = [render_report(group) for group in group_results_for_report(results)]
-        print("\n".join(section.rstrip() for section in report_sections if section.strip()) + "\n", end="")
+        output = "\n".join(section.rstrip() for section in report_sections if section.strip()) + "\n"
+
+        if baseline_paths:
+            baseline_files = expand_report_inputs(baseline_paths)
+            baseline_results = [load_result(path) for path in baseline_files]
+            baseline_index = _index_results_by_key(baseline_results)
+            output += "\n" + render_regressions(results, baseline_index)
+
+        print(output, end="")
         return 0
     except (OSError, json.JSONDecodeError, TaskSpecError) as err:
         print(str(err), file=sys.stderr)
@@ -1525,7 +1746,10 @@ def main() -> int:
         pass
     args = parse_args()
     if args.report:
-        return run_report_mode(args.report)
+        return run_report_mode(args.report, baseline_paths=args.baseline)
+    if args.baseline:
+        print("--baseline is only meaningful with --report", file=sys.stderr)
+        return 1
     if not args.task:
         print("task is required unless --report is used", file=sys.stderr)
         return 1

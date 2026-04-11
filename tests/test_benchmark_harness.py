@@ -971,6 +971,187 @@ acceptance:
             self.assertEqual(payload["telemetry"]["per_turn"]["avg_input_tokens"], 300)
             self.assertEqual(payload["telemetry"]["per_turn"]["avg_cache_write_tokens"], 6)
 
+    @staticmethod
+    def _make_result(
+        *,
+        task_id: str = "t-baseline",
+        harness: str = "omegon",
+        model: str = "anthropic:claude-sonnet-4-6",
+        status: str = "pass",
+        total_tokens: int | None = 1_000_000,
+        wall: float | None = 100.0,
+        turn_count: int | None = 10,
+        process_violations: int = 0,
+        scores: dict | None = None,
+    ) -> dict:
+        violations = [{"expectation": f"v{i}"} for i in range(process_violations)]
+        return {
+            "task_id": task_id,
+            "harness": harness,
+            "model": model,
+            "status": status,
+            "tokens": {"total": total_tokens},
+            "wall_clock_sec": wall,
+            "process": {
+                "turn_count": turn_count,
+                "grading": {"status": "fail" if violations else "pass", "violations": violations},
+            },
+            "scores": scores
+            or {
+                "outcome": {"status": status, "score": 1.0 if status == "pass" else 0.0},
+                "process": {"status": "pass", "score": 1.0},
+                "efficiency": {"status": "pass", "score": 1.0},
+                "discipline": {"status": "pass", "score": 1.0},
+            },
+        }
+
+    def test_compute_regressions_returns_empty_for_clean_run(self) -> None:
+        baseline = self._make_result()
+        current = self._make_result()  # identical
+        self.assertEqual(BENCHMARK_HARNESS.compute_regressions(current, baseline), [])
+
+    def test_compute_regressions_no_baseline_returns_empty(self) -> None:
+        current = self._make_result()
+        self.assertEqual(BENCHMARK_HARNESS.compute_regressions(current, None), [])
+
+    def test_compute_regressions_flags_status_pass_to_fail(self) -> None:
+        baseline = self._make_result(status="pass")
+        current = self._make_result(status="fail")
+        regs = BENCHMARK_HARNESS.compute_regressions(current, baseline)
+        kinds = {r["kind"] for r in regs}
+        self.assertIn("status", kinds)
+        self.assertIn("score_outcome", kinds)  # outcome score also drops 1.0 → 0.0
+
+    def test_compute_regressions_token_threshold_is_strictly_greater(self) -> None:
+        baseline = self._make_result(total_tokens=1_000_000)
+        # Exactly 10% bump should not trigger (threshold is strictly > 10%).
+        not_yet = self._make_result(total_tokens=1_100_000)
+        self.assertEqual(
+            [r["kind"] for r in BENCHMARK_HARNESS.compute_regressions(not_yet, baseline)],
+            [],
+        )
+        # Just over 10% triggers.
+        regs = BENCHMARK_HARNESS.compute_regressions(
+            self._make_result(total_tokens=1_110_000), baseline
+        )
+        self.assertEqual([r["kind"] for r in regs], ["tokens"])
+        self.assertGreater(regs[0]["delta_pct"], 10.0)
+
+    def test_compute_regressions_turn_count_increase_is_strict(self) -> None:
+        baseline = self._make_result(turn_count=10)
+        # Same turn count: no regression.
+        same = self._make_result(turn_count=10)
+        self.assertEqual(BENCHMARK_HARNESS.compute_regressions(same, baseline), [])
+        # +1 turn: regression (turns_delta default = 1).
+        more = self._make_result(turn_count=11)
+        regs = BENCHMARK_HARNESS.compute_regressions(more, baseline)
+        self.assertEqual([r["kind"] for r in regs], ["turns"])
+        self.assertEqual(regs[0]["delta"], 1)
+
+    def test_compute_regressions_wall_clock_threshold(self) -> None:
+        baseline = self._make_result(wall=100.0)
+        # +14% should not trigger (threshold > 15%).
+        self.assertEqual(
+            BENCHMARK_HARNESS.compute_regressions(self._make_result(wall=114.0), baseline),
+            [],
+        )
+        regs = BENCHMARK_HARNESS.compute_regressions(self._make_result(wall=120.0), baseline)
+        self.assertEqual([r["kind"] for r in regs], ["wall_clock"])
+
+    def test_compute_regressions_process_violations_increase(self) -> None:
+        baseline = self._make_result(process_violations=0)
+        current = self._make_result(process_violations=2)
+        regs = BENCHMARK_HARNESS.compute_regressions(current, baseline)
+        kinds = [r["kind"] for r in regs]
+        self.assertIn("process_violations", kinds)
+        violation_reg = next(r for r in regs if r["kind"] == "process_violations")
+        self.assertEqual(violation_reg["before"], 0)
+        self.assertEqual(violation_reg["after"], 2)
+
+    def test_compute_regressions_score_axis_decrease(self) -> None:
+        baseline = self._make_result(
+            scores={
+                "outcome": {"score": 1.0},
+                "process": {"score": 1.0},
+                "efficiency": {"score": 1.0},
+                "discipline": {"score": 1.0},
+            }
+        )
+        current = self._make_result(
+            scores={
+                "outcome": {"score": 1.0},
+                "process": {"score": 0.5},
+                "efficiency": {"score": 0.75},
+                "discipline": {"score": 1.0},
+            }
+        )
+        kinds = {r["kind"] for r in BENCHMARK_HARNESS.compute_regressions(current, baseline)}
+        self.assertIn("score_process", kinds)
+        self.assertIn("score_efficiency", kinds)
+        self.assertNotIn("score_outcome", kinds)
+        self.assertNotIn("score_discipline", kinds)
+
+    def test_render_regressions_emits_none_detected_when_clean(self) -> None:
+        baseline = [self._make_result()]
+        current = [self._make_result()]
+        index = BENCHMARK_HARNESS._index_results_by_key(baseline)
+        text = BENCHMARK_HARNESS.render_regressions(current, index)
+        self.assertIn("Regressions vs baseline", text)
+        self.assertIn("none detected", text)
+
+    def test_render_regressions_lists_new_cells_separately(self) -> None:
+        baseline = [self._make_result(harness="omegon")]
+        current = [
+            self._make_result(harness="omegon"),
+            self._make_result(harness="pi"),  # not in baseline
+        ]
+        index = BENCHMARK_HARNESS._index_results_by_key(baseline)
+        text = BENCHMARK_HARNESS.render_regressions(current, index)
+        self.assertIn("New cells", text)
+        self.assertIn("/ pi /", text)
+
+    def test_baseline_cli_flag_emits_regression_section(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            baseline_dir = Path(tmpdir) / "baseline"
+            current_dir = Path(tmpdir) / "current"
+            baseline_dir.mkdir()
+            current_dir.mkdir()
+
+            baseline = self._make_result(turn_count=10, total_tokens=1_000_000)
+            current = self._make_result(turn_count=15, total_tokens=1_500_000)
+            (baseline_dir / "b.json").write_text(json.dumps(baseline))
+            (current_dir / "c.json").write_text(json.dumps(current))
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--report",
+                    str(current_dir),
+                    "--baseline",
+                    str(baseline_dir),
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Regressions vs baseline", result.stdout)
+            self.assertIn("turns: 10 → 15", result.stdout)
+            self.assertIn("tokens: 1,000,000 → 1,500,000", result.stdout)
+
+    def test_baseline_without_report_is_rejected(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--baseline", "/tmp/whatever.json"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--baseline is only meaningful with --report", result.stderr)
+
     def test_load_task_spec_accepts_om_alias_in_matrix(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir)
