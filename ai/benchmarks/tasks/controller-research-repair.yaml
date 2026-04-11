@@ -1,0 +1,27 @@
+id: controller-research-repair
+kind: implementation
+repo: .
+base_ref: f03c031df30c063f87038d4124705dec57e18f77
+model: anthropic:claude-sonnet-4-6
+slim: false
+prompt: |
+  Tighten the turn controller so it stops falsely escalating on narrowly targeted inspection while still escalating genuine broad orientation churn. Preserve the execution-bias behavior for headless runs, but reduce false-positive pressure against single-file, evidence-backed local inspection.
+harnesses:
+  - omegon
+  - claude-code
+  - pi
+acceptance:
+  required:
+    - cargo test -p omegon classify_drift_kind --manifest-path core/Cargo.toml -- --nocapture
+    - cargo test -p omegon continuation_pressure --manifest-path core/Cargo.toml -- --nocapture
+success_files:
+  - core/crates/omegon/src/loop.rs
+budget:
+  max_turns: 20
+  max_minutes: 30
+process_expectations:
+  prefer_targeted_inspection: true
+  avoid_broad_orientation_churn: true
+notes: |
+  Light benchmark rung B: research-repair. This task is intentionally more ambiguous than a local patch canary.
+  It requires controller reasoning and localized policy edits, but stays bounded to a small runtime surface.
