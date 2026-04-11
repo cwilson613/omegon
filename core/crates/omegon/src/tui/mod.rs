@@ -2381,6 +2381,7 @@ impl App {
             self.footer_data.context_window = s.context_window;
             self.footer_data.thinking_level = s.thinking.as_str().to_string();
             self.footer_data.posture = s.posture.effective.display_name().to_string();
+            self.footer_data.principal_id = s.operating_profile().identity.summary_principal().to_string();
             self.footer_data.provider_connected = s.provider_connected;
             self.footer_data.is_oauth = crate::providers::resolve_api_key_sync(s.provider())
                 .is_some_and(|(_, is_oauth)| is_oauth);

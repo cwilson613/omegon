@@ -67,6 +67,8 @@ pub struct FooterData {
     pub thinking_level: String,
     /// Current posture name (for engine panel display).
     pub posture: String,
+    /// Current runtime principal (descriptive identity only).
+    pub principal_id: String,
     /// Current model tier name (for engine panel display).
     pub model_tier: String,
     /// Whether a live LLM provider is connected. False when NullBridge is active.
@@ -218,6 +220,18 @@ impl FooterData {
                 t.border_dim(),
                 t.accent(),
                 true,
+            );
+        }
+
+        if !self.principal_id.is_empty() {
+            push_row(
+                &mut lines,
+                "who",
+                self.principal_id.clone(),
+                value_width,
+                t.border_dim(),
+                t.fg(),
+                false,
             );
         }
 

@@ -46,6 +46,9 @@ pub struct HarnessStatus {
     pub capability_tier: String, // "retribution" / "victory" / "gloriana"
     pub posture: String,         // "Explorator" / "Fabricator" / "Architect" / "Devastator"
     pub operating_profile: String,
+    pub principal_id: String,
+    pub identity_issuer: String,
+    pub session_kind: String,
     pub runtime_profile: omegon_traits::OmegonRuntimeProfile,
     pub autonomy_mode: omegon_traits::OmegonAutonomyMode,
     pub dispatcher: DispatcherStatus,
@@ -490,12 +493,18 @@ impl HarnessStatus {
         capability_tier: &str,
         posture: &str,
         operating_profile: &str,
+        principal_id: &str,
+        identity_issuer: &str,
+        session_kind: &str,
     ) {
         self.context_class = context_class.into();
         self.thinking_level = thinking_level.into();
         self.capability_tier = capability_tier.into();
         self.posture = posture.into();
         self.operating_profile = operating_profile.into();
+        self.principal_id = principal_id.into();
+        self.identity_issuer = identity_issuer.into();
+        self.session_kind = session_kind.into();
     }
 
     /// Update deployment/autonomy posture exported to IPC/Web/Auspex surfaces.
@@ -713,6 +722,9 @@ impl Default for HarnessStatus {
             capability_tier: "victory".into(),
             posture: "Architect".into(),
             operating_profile: "anonymous / Architect / Medium / Clan".into(),
+            principal_id: "local-operator".into(),
+            identity_issuer: "local-session".into(),
+            session_kind: "interactive".into(),
             runtime_profile: omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
             autonomy_mode: omegon_traits::OmegonAutonomyMode::OperatorDriven,
             dispatcher: DispatcherStatus {

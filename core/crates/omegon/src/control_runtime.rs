@@ -576,14 +576,27 @@ pub async fn switch_dispatcher_response(
 
     let mut status = crate::status::HarnessStatus::assemble();
     let settings_snapshot = shared_settings.lock().ok().map(|s| s.clone());
-    let (context_class, thinking_level, posture, operating_profile) =
-        if let Some(settings) = settings_snapshot {
+    let (
+        context_class,
+        thinking_level,
+        posture,
+        operating_profile,
+        principal_id,
+        identity_issuer,
+        session_kind,
+    ) = if let Some(settings) = settings_snapshot {
             let profile = settings.operating_profile();
+            let principal_id = profile.identity.principal_id.clone().unwrap_or_else(|| "anonymous".into());
+            let identity_issuer = profile.identity.issuer.clone().unwrap_or_else(|| "unknown".into());
+            let session_kind = profile.identity.session_kind.clone().unwrap_or_else(|| "unknown".into());
             (
                 settings.effective_requested_class().label().to_string(),
                 settings.thinking.as_str().to_string(),
                 profile.posture.effective.display_name().to_string(),
                 profile.summary(),
+                principal_id,
+                identity_issuer,
+                session_kind,
             )
         } else {
             (
@@ -591,6 +604,9 @@ pub async fn switch_dispatcher_response(
                 status.thinking_level.clone(),
                 status.posture.clone(),
                 status.operating_profile.clone(),
+                status.principal_id.clone(),
+                status.identity_issuer.clone(),
+                status.session_kind.clone(),
             )
         };
     status.update_routing(
@@ -599,6 +615,9 @@ pub async fn switch_dispatcher_response(
         &normalized_profile,
         &posture,
         &operating_profile,
+        &principal_id,
+        &identity_issuer,
+        &session_kind,
     );
     status.update_runtime_posture(
         omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
@@ -661,12 +680,30 @@ pub async fn status_view_response(
     let settings = shared_settings.lock().unwrap().clone();
     let operating_profile = settings.operating_profile();
     let operating_profile_label = operating_profile.summary();
+    let principal_id = operating_profile
+        .identity
+        .principal_id
+        .clone()
+        .unwrap_or_else(|| "anonymous".into());
+    let identity_issuer = operating_profile
+        .identity
+        .issuer
+        .clone()
+        .unwrap_or_else(|| "unknown".into());
+    let session_kind = operating_profile
+        .identity
+        .session_kind
+        .clone()
+        .unwrap_or_else(|| "unknown".into());
     status.update_routing(
         settings.effective_requested_class().label(),
         settings.thinking.as_str(),
         &status.capability_tier.clone(),
         operating_profile.posture.effective.display_name(),
         &operating_profile_label,
+        &principal_id,
+        &identity_issuer,
+        &session_kind,
     );
     let panel = crate::tui::bootstrap::render_bootstrap(&status, false);
     SlashCommandResponse {
