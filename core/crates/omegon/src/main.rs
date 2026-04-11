@@ -698,10 +698,11 @@ async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::R
     let bridge: Box<dyn LlmBridge> = match providers::auto_detect_bridge(&model).await {
         Some(native) => native,
         None => {
-            anyhow::bail!(
-                "No LLM provider available for daemon mode. \
-                 Set ANTHROPIC_API_KEY or another provider credential."
+            tracing::warn!(
+                model = %model,
+                "no LLM provider available for daemon mode — starting control plane with NullBridge"
             );
+            Box::new(crate::bridge::NullBridge)
         }
     };
 
@@ -792,9 +793,9 @@ async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::R
                             enforce_first_turn_execution_bias: false,
                         };
 
-                        // Apply workflow phase config if implementing
+                        // Apply workflow phase config if available
                         if let Some(ref wf) = daemon_workflow {
-                            let phase = &agent.context_manager.phase();
+                            let phase = agent.context_manager.phase();
                             if let Some(pc) = wf.phase_config(phase) {
                                 workflow::apply_phase_config(
                                     &mut loop_config,
@@ -4016,7 +4017,12 @@ mod tests {
         ));
 
         assert!(response.accepted);
-        assert!(response.output.unwrap().contains("openai-codex"));
+        let output = response.output.unwrap();
+        assert!(output.contains("Logged out"), "got: {output}");
+        assert!(
+            output.contains("OpenAI/Codex") || output.contains("openai-codex"),
+            "got: {output}"
+        );
     }
 
     #[test]

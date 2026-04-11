@@ -168,8 +168,8 @@ pub fn apply_phase_config(
         loop_config.max_turns = max_turns;
         loop_config.soft_limit_turns = if max_turns > 0 { max_turns * 2 / 3 } else { 0 };
     }
-    // Persona is handled separately via OMEGON_CHILD_PERSONA env var
-    // Context class and thinking level are handled via shared settings
+    // Persona is handled separately via OMEGON_CHILD_PERSONA env var.
+    // Context class and thinking level are handled via shared settings.
 }
 
 #[cfg(test)]
