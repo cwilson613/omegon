@@ -30,7 +30,11 @@ pub fn build_base_prompt_with_breakdown(
     let date = utc_date();
     let tool_list = format_tool_list(tools);
     let lex_imperialis = load_lex_imperialis();
-    let lifecycle_context = detect_lifecycle_context(cwd, tools);
+    let lifecycle_context = if slim {
+        String::new()
+    } else {
+        detect_lifecycle_context(cwd, tools)
+    };
     let global_directives = if slim {
         String::new()
     } else {
@@ -488,33 +492,14 @@ mod tests {
     }
 
     #[test]
-    fn slim_prompt_keeps_lifecycle_but_omits_global_operator_sections() {
-        let dir = tempfile::tempdir().unwrap();
-        let cwd = dir.path();
-        std::fs::create_dir_all(cwd.join(".git")).unwrap();
-        std::fs::create_dir_all(cwd.join("docs")).unwrap();
-        std::fs::write(cwd.join("docs/some-design.md"), "# Design").unwrap();
-        let tools = vec![
-            omegon_traits::ToolDefinition {
-                name: "bash".into(),
-                label: "test".into(),
-                description: "A test tool".into(),
-                parameters: serde_json::json!({}),
-            },
-            omegon_traits::ToolDefinition {
-                name: "design_tree".into(),
-                label: "dt".into(),
-                description: "query".into(),
-                parameters: serde_json::json!({}),
-            },
-            omegon_traits::ToolDefinition {
-                name: "design_tree_update".into(),
-                label: "dtu".into(),
-                description: "mutate".into(),
-                parameters: serde_json::json!({}),
-            },
-        ];
-        let assembly = build_base_prompt_with_breakdown(cwd, &tools, true);
+    fn slim_prompt_omits_lifecycle_and_global_operator_sections() {
+        let tools = vec![omegon_traits::ToolDefinition {
+            name: "bash".into(),
+            label: "test".into(),
+            description: "A test tool".into(),
+            parameters: serde_json::json!({}),
+        }];
+        let assembly = build_base_prompt_with_breakdown(Path::new("/tmp"), &tools, true);
         let section_keys: Vec<&str> = assembly
             .composition
             .sections
@@ -522,10 +507,8 @@ mod tests {
             .filter(|section| section.chars > 0)
             .map(|section| section.key.as_str())
             .collect();
-        assert!(section_keys.contains(&"project_lifecycle"));
+        assert!(!section_keys.contains(&"project_lifecycle"));
         assert!(!section_keys.contains(&"operator_directives"));
-        assert!(assembly.prompt.contains("Project Lifecycle"));
-        assert!(assembly.prompt.contains("design-tree"));
         assert!(assembly.prompt.contains("Lex Imperialis"));
     }
 
