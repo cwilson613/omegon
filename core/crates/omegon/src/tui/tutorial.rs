@@ -44,28 +44,22 @@ pub enum TutorialMode {
 /// Checks env vars directly — does not depend on startup probe results,
 /// which may not be set yet. Called at `/tutorial` invocation time.
 pub fn tutorial_gate() -> TutorialMode {
-    let has_anthropic_api_key = resolve_api_key_sync("anthropic").is_some_and(|(_, oauth)| !oauth);
     let has_openai_api_key = resolve_api_key_sync("openai").is_some_and(|(_, oauth)| !oauth);
     let has_openrouter = resolve_api_key_sync("openrouter").is_some();
-    let has_anthropic_oauth = resolve_api_key_sync("anthropic").is_some_and(|(_, oauth)| oauth);
-    let has_codex_oauth = resolve_api_key_sync("openai-codex").is_some();
 
     // Direct API-key-style routes are the clear happy path for AutoPrompt.
-    if has_anthropic_api_key || has_openai_api_key || has_openrouter {
+    if has_openai_api_key || has_openrouter {
         return TutorialMode::Interactive;
     }
 
-    // Subscription-backed OAuth routes are not treated as automation-safe defaults.
+    // Subscription-backed Anthropic OAuth is not treated as an automation-safe default.
     // Anthropic may be usable interactively with explicit operator consent; ChatGPT/Codex
     // consumer OAuth stays orientation-only unless and until a sanctioned route exists.
-    if has_anthropic_oauth {
-        return TutorialMode::ConsentRequired;
+    match crate::providers::anthropic_credential_mode() {
+        crate::providers::AnthropicCredentialMode::ApiKey => TutorialMode::Interactive,
+        crate::providers::AnthropicCredentialMode::OAuthOnly => TutorialMode::ConsentRequired,
+        crate::providers::AnthropicCredentialMode::None => TutorialMode::OrientationOnly,
     }
-
-    let _ = has_codex_oauth;
-
-    // No automation-safe cloud model available — show orientation tour only.
-    TutorialMode::OrientationOnly
 }
 
 /// How a step advances to the next one.
