@@ -44,6 +44,8 @@ pub struct HarnessStatus {
     pub context_class: String,   // "Squad" / "Maniple" / "Clan" / "Legion"
     pub thinking_level: String,  // "Off" / "Minimal" / "Low" / "Medium" / "High"
     pub capability_tier: String, // "retribution" / "victory" / "gloriana"
+    pub posture: String,         // "Explorator" / "Fabricator" / "Architect" / "Devastator"
+    pub operating_profile: String,
     pub runtime_profile: omegon_traits::OmegonRuntimeProfile,
     pub autonomy_mode: omegon_traits::OmegonAutonomyMode,
     pub dispatcher: DispatcherStatus,
@@ -486,10 +488,14 @@ impl HarnessStatus {
         context_class: &str,
         thinking_level: &str,
         capability_tier: &str,
+        posture: &str,
+        operating_profile: &str,
     ) {
         self.context_class = context_class.into();
         self.thinking_level = thinking_level.into();
         self.capability_tier = capability_tier.into();
+        self.posture = posture.into();
+        self.operating_profile = operating_profile.into();
     }
 
     /// Update deployment/autonomy posture exported to IPC/Web/Auspex surfaces.
@@ -705,6 +711,8 @@ impl Default for HarnessStatus {
             context_class: "Squad".into(),
             thinking_level: "Medium".into(),
             capability_tier: "victory".into(),
+            posture: "Architect".into(),
+            operating_profile: "anonymous / Architect / Medium / Clan".into(),
             runtime_profile: omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
             autonomy_mode: omegon_traits::OmegonAutonomyMode::OperatorDriven,
             dispatcher: DispatcherStatus {

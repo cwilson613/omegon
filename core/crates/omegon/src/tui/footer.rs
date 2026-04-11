@@ -65,6 +65,8 @@ pub struct FooterData {
     pub compaction_flash_ticks: u8,
     /// Current thinking level name (for engine panel display).
     pub thinking_level: String,
+    /// Current posture name (for engine panel display).
+    pub posture: String,
     /// Current model tier name (for engine panel display).
     pub model_tier: String,
     /// Whether a live LLM provider is connected. False when NullBridge is active.
@@ -206,6 +208,18 @@ impl FooterData {
                 .fg(t.accent_muted())
                 .add_modifier(Modifier::BOLD),
         )));
+
+        if !self.posture.is_empty() {
+            push_row(
+                &mut lines,
+                "posture",
+                self.posture.clone(),
+                value_width,
+                t.border_dim(),
+                t.accent(),
+                true,
+            );
+        }
 
         if !self.provider_connected {
             push_row(
