@@ -103,6 +103,75 @@ pub fn discover_workflow(cwd: &Path) -> Option<WorkflowTemplate> {
     None
 }
 
+/// A design-tree node that is ready for autonomous dispatch.
+#[derive(Debug, Clone)]
+pub struct ReadyNode {
+    pub id: String,
+    pub title: String,
+    pub priority: Option<u8>,
+}
+
+/// Query the design tree for nodes that are ready to implement:
+/// status == Decided, all dependencies Implemented, not archived.
+/// Reads directly from filesystem — no bus or Feature access required.
+pub fn query_ready_nodes(cwd: &Path) -> Vec<ReadyNode> {
+    use crate::lifecycle::{design, types::NodeStatus};
+
+    let docs_dir = cwd.join("docs");
+    if !docs_dir.is_dir() {
+        return Vec::new();
+    }
+    let nodes = design::scan_design_docs(&docs_dir);
+    nodes
+        .values()
+        .filter(|n| !matches!(n.status, NodeStatus::Archived))
+        .filter(|n| matches!(n.status, NodeStatus::Decided))
+        .filter(|n| {
+            n.dependencies.iter().all(|dep_id| {
+                nodes
+                    .get(dep_id)
+                    .is_some_and(|d| matches!(d.status, NodeStatus::Implemented))
+            })
+        })
+        .map(|n| ReadyNode {
+            id: n.id.clone(),
+            title: n.title.clone(),
+            priority: n.priority,
+        })
+        .collect()
+}
+
+/// Build a prompt for a ready design-tree node, suitable for daemon dispatch.
+pub fn build_dispatch_prompt(node: &ReadyNode) -> String {
+    format!(
+        "Implement design node `{}`: {}\n\n\
+         This node has been marked as decided and all dependencies are satisfied. \
+         Transition it to implementing, create the necessary changes, and verify \
+         the implementation meets the design criteria.",
+        node.id, node.title
+    )
+}
+
+/// Apply workflow phase config to a LoopConfig for a given lifecycle phase.
+pub fn apply_phase_config(
+    loop_config: &mut crate::r#loop::LoopConfig,
+    phase_config: &PhaseConfig,
+    shared_settings: &crate::settings::SharedSettings,
+) {
+    if let Some(ref model) = phase_config.model {
+        loop_config.model = model.clone();
+        if let Ok(mut s) = shared_settings.lock() {
+            s.set_model(model);
+        }
+    }
+    if let Some(max_turns) = phase_config.max_turns {
+        loop_config.max_turns = max_turns;
+        loop_config.soft_limit_turns = if max_turns > 0 { max_turns * 2 / 3 } else { 0 };
+    }
+    // Persona is handled separately via OMEGON_CHILD_PERSONA env var
+    // Context class and thinking level are handled via shared settings
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

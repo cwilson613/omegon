@@ -745,7 +745,19 @@ async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::R
         agent.context_metrics.clone(),
     );
 
-    // ─── Dispatch loop — consume commands, run agent loops ──────────────
+    // ─── Workflow template (for phase-aware dispatch) ──────────────────
+    let daemon_workflow = workflow::discover_workflow(&cwd);
+    if let Some(ref wf) = daemon_workflow {
+        tracing::info!(workflow = %wf.workflow.name, "daemon loaded workflow template");
+    }
+
+    // ─── Dispatch loop — consume commands + autonomous idle tick ─────
+    let idle_poll_interval = tokio::time::Duration::from_secs(30);
+    let mut idle_tick = tokio::time::interval(idle_poll_interval);
+    idle_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Skip the first immediate tick
+    idle_tick.tick().await;
+
     tracing::info!("daemon dispatch loop started");
     loop {
         tokio::select! {
@@ -759,13 +771,13 @@ async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::R
                         tracing::info!(prompt_len = text.len(), "daemon: received user prompt");
                         agent.conversation.push_user(text);
 
-                        let loop_config = r#loop::LoopConfig {
+                        let mut loop_config = r#loop::LoopConfig {
                             max_turns: shared_settings
                                 .lock()
                                 .map(|s| s.max_turns)
                                 .unwrap_or(50),
                             soft_limit_turns: 35,
-                            max_retries: 0, // daemon retries indefinitely
+                            max_retries: 0,
                             retry_delay_ms: 750,
                             model: shared_settings
                                 .lock()
@@ -779,6 +791,22 @@ async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::R
                             allow_commit_nudge: true,
                             enforce_first_turn_execution_bias: false,
                         };
+
+                        // Apply workflow phase config if implementing
+                        if let Some(ref wf) = daemon_workflow {
+                            let phase = &agent.context_manager.phase();
+                            if let Some(pc) = wf.phase_config(phase) {
+                                workflow::apply_phase_config(
+                                    &mut loop_config,
+                                    pc,
+                                    &shared_settings,
+                                );
+                                if let Some(ref persona) = pc.persona {
+                                    // SAFETY: sequential dispatch, no concurrent env readers
+                                    unsafe { std::env::set_var("OMEGON_CHILD_PERSONA", persona) };
+                                }
+                            }
+                        }
 
                         let turn_cancel = CancellationToken::new();
                         if let Err(e) = r#loop::run(
@@ -794,7 +822,6 @@ async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::R
                         {
                             tracing::error!(error = %e, "daemon agent loop error");
                         }
-                        // Conversation persists — next prompt continues the session
                     }
                     Some(web::WebCommand::SlashCommand { name, args: _, respond_to }) => {
                         tracing::info!(command = %name, "daemon: slash command");
@@ -821,6 +848,86 @@ async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::R
                         tracing::info!("daemon: command channel closed");
                         break;
                     }
+                }
+            }
+            _ = idle_tick.tick() => {
+                // ─── Autonomous idle tick: poll design tree for ready nodes ──
+                let ready = workflow::query_ready_nodes(&cwd);
+                if ready.is_empty() {
+                    continue;
+                }
+
+                // Dispatch highest-priority ready node
+                let mut ready = ready;
+                ready.sort_by(|a, b| {
+                    a.priority.unwrap_or(u8::MAX).cmp(&b.priority.unwrap_or(u8::MAX))
+                });
+                let node = &ready[0];
+                tracing::info!(
+                    node_id = %node.id,
+                    title = %node.title,
+                    priority = ?node.priority,
+                    "daemon: auto-dispatching ready design node"
+                );
+
+                let prompt = workflow::build_dispatch_prompt(node);
+                agent.conversation.push_user(prompt);
+
+                let mut loop_config = r#loop::LoopConfig {
+                    max_turns: shared_settings
+                        .lock()
+                        .map(|s| s.max_turns)
+                        .unwrap_or(50),
+                    soft_limit_turns: 35,
+                    max_retries: 0,
+                    retry_delay_ms: 750,
+                    model: shared_settings
+                        .lock()
+                        .map(|s| s.model.clone())
+                        .unwrap_or_else(|_| model.clone()),
+                    cwd: agent.cwd.clone(),
+                    extended_context: false,
+                    settings: Some(shared_settings.clone()),
+                    secrets: Some(agent.secrets.clone()),
+                    force_compact: None,
+                    allow_commit_nudge: true,
+                    enforce_first_turn_execution_bias: true,
+                };
+
+                // Apply implementing phase config from workflow template
+                if let Some(ref wf) = daemon_workflow {
+                    let implementing_phase = omegon_traits::LifecyclePhase::Implementing {
+                        change_id: Some(node.id.clone()),
+                    };
+                    if let Some(pc) = wf.phase_config(&implementing_phase) {
+                        workflow::apply_phase_config(
+                            &mut loop_config,
+                            pc,
+                            &shared_settings,
+                        );
+                        if let Some(ref persona) = pc.persona {
+                            unsafe { std::env::set_var("OMEGON_CHILD_PERSONA", persona) };
+                        }
+                    }
+                }
+
+                let turn_cancel = CancellationToken::new();
+                if let Err(e) = r#loop::run(
+                    bridge.as_ref(),
+                    &mut agent.bus,
+                    &mut agent.context_manager,
+                    &mut agent.conversation,
+                    &events_tx,
+                    turn_cancel,
+                    &loop_config,
+                )
+                .await
+                {
+                    tracing::error!(
+                        node_id = %node.id,
+                        error = %e,
+                        "daemon: auto-dispatch agent loop error"
+                    );
                 }
             }
         }

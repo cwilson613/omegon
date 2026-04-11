@@ -107,6 +107,18 @@ fn is_repo_inspection_tool(name: &str) -> bool {
     matches!(name, "read" | "codebase_search" | "view")
 }
 
+fn is_broad_orientation_tool(name: &str) -> bool {
+    matches!(name, "memory_recall" | "context_status" | "request_context")
+}
+
+fn is_broad_repo_inspection_tool(name: &str) -> bool {
+    matches!(name, "codebase_search" | "view")
+}
+
+fn is_targeted_repo_inspection_tool(name: &str) -> bool {
+    name == "read"
+}
+
 fn is_mutation_tool_name(name: &str) -> bool {
     matches!(name, "write" | "edit" | "change")
 }
@@ -185,31 +197,76 @@ fn classify_drift_kind(
     tool_calls: &[ToolCall],
     results: &[ToolResultEntry],
 ) -> Option<DriftKind> {
+    let broad_orientation_calls = tool_calls
+        .iter()
+        .filter(|call| is_broad_orientation_tool(&call.name))
+        .count();
+    let broad_repo_inspection_calls = tool_calls
+        .iter()
+        .filter(|call| is_broad_repo_inspection_tool(&call.name))
+        .count();
+    let targeted_repo_inspection_calls = tool_calls
+        .iter()
+        .filter(|call| is_targeted_repo_inspection_tool(&call.name))
+        .count();
+
     if conversation.intent.files_modified.is_empty()
         && !conversation.intent.files_read.is_empty()
         && tool_calls.iter().all(|call| is_repo_inspection_tool(&call.name))
         && turn >= 3
+        && broad_repo_inspection_calls > 0
+        && targeted_repo_inspection_calls <= 1
     {
         return Some(DriftKind::OrientationChurn);
     }
 
-    let repeated_mutation_failures = tool_calls
+    if conversation.intent.files_modified.is_empty()
+        && conversation.intent.files_read.is_empty()
+        && turn >= 2
+        && broad_orientation_calls == tool_calls.len()
+    {
+        return Some(DriftKind::OrientationChurn);
+    }
+
+    let failing_mutations: Vec<&ToolCall> = tool_calls
         .iter()
-        .filter(|call| is_mutation_tool_name(&call.name))
-        .count()
-        >= 2
-        && results.iter().filter(|result| result.is_error).count() >= 2;
+        .filter(|call| {
+            is_mutation_tool_name(&call.name)
+                && results
+                    .iter()
+                    .find(|result| result.call_id == call.id)
+                    .is_some_and(|result| result.is_error)
+        })
+        .collect();
+    let repeated_mutation_failures = failing_mutations.len() >= 2
+        && failing_mutations.iter().enumerate().any(|(idx, call)| {
+            let path = call.arguments.get("path").and_then(|v| v.as_str());
+            failing_mutations
+                .iter()
+                .enumerate()
+                .filter(|(other_idx, other)| *other_idx != idx && other.name == call.name)
+                .any(|(_, other)| {
+                    let other_path = other.arguments.get("path").and_then(|v| v.as_str());
+                    match (path, other_path) {
+                        (Some(path), Some(other_path)) => path == other_path,
+                        (None, None) => true,
+                        _ => false,
+                    }
+                })
+        });
     if repeated_mutation_failures {
         return Some(DriftKind::RepeatedActionFailure);
     }
 
     let validation_calls = tool_calls.iter().filter(|call| is_validation_tool(call)).count();
-    if validation_calls >= 2 && conversation.intent.files_modified.is_empty() {
+    let targeted_validation = matches!(classify_validation_scope(tool_calls, results), ProgressSignal::TargetedValidation);
+    if validation_calls >= 2 && conversation.intent.files_modified.is_empty() && !targeted_validation {
         return Some(DriftKind::ValidationThrash);
     }
 
     if !conversation.intent.files_modified.is_empty()
         && tool_calls.iter().all(|call| is_repo_inspection_tool(&call.name))
+        && broad_repo_inspection_calls > 0
     {
         return Some(DriftKind::ClosureStall);
     }
@@ -252,6 +309,7 @@ fn should_inject_execution_pressure(
         && conversation.intent.files_modified.is_empty()
         && !conversation.intent.files_read.is_empty()
         && tool_calls.iter().all(|call| is_repo_inspection_tool(&call.name))
+        && tool_calls.iter().any(|call| is_broad_repo_inspection_tool(&call.name))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2852,6 +2910,25 @@ mod tests {
     }
 
     #[test]
+    fn execution_pressure_not_detected_for_targeted_read_only_batches() {
+        let config = LoopConfig {
+            enforce_first_turn_execution_bias: true,
+            ..LoopConfig::default()
+        };
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .files_read
+            .insert(std::path::PathBuf::from("core/src/context.rs"));
+        let tool_calls = vec![ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "core/src/context.rs"}),
+        }];
+        assert!(!should_inject_execution_pressure(4, &config, &conversation, &tool_calls));
+    }
+
+    #[test]
     fn continuation_pressure_detected_for_sustained_orientation_churn() {
         let config = LoopConfig {
             enforce_first_turn_execution_bias: true,
@@ -2889,6 +2966,174 @@ mod tests {
             ),
             Some(1)
         );
+    }
+
+    #[test]
+    fn classify_drift_kind_does_not_flag_single_targeted_read_as_orientation_churn() {
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .files_read
+            .insert(std::path::PathBuf::from("core/src/context.rs"));
+        let tool_calls = vec![ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "core/src/context.rs"}),
+        }];
+        let results = vec![ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "read".into(),
+            content: vec![ContentBlock::Text { text: "ok".into() }],
+            is_error: false,
+            args_summary: None,
+        }];
+        assert_eq!(classify_drift_kind(3, &conversation, &tool_calls, &results), None);
+    }
+
+    #[test]
+    fn classify_drift_kind_flags_broad_inspection_loop_as_orientation_churn() {
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .files_read
+            .insert(std::path::PathBuf::from("core/src/context.rs"));
+        let tool_calls = vec![
+            ToolCall {
+                id: "1".into(),
+                name: "read".into(),
+                arguments: serde_json::json!({"path": "core/src/context.rs"}),
+            },
+            ToolCall {
+                id: "2".into(),
+                name: "codebase_search".into(),
+                arguments: serde_json::json!({"query": "ContextManager"}),
+            },
+        ];
+        let results = vec![
+            ToolResultEntry {
+                call_id: "1".into(),
+                tool_name: "read".into(),
+                content: vec![ContentBlock::Text { text: "ok".into() }],
+                is_error: false,
+                args_summary: None,
+            },
+            ToolResultEntry {
+                call_id: "2".into(),
+                tool_name: "codebase_search".into(),
+                content: vec![ContentBlock::Text { text: "ok".into() }],
+                is_error: false,
+                args_summary: None,
+            },
+        ];
+        assert_eq!(
+            classify_drift_kind(3, &conversation, &tool_calls, &results),
+            Some(DriftKind::OrientationChurn)
+        );
+    }
+
+    #[test]
+    fn classify_drift_kind_requires_similar_failed_mutations_for_repeated_action_failure() {
+        let conversation = ConversationState::new();
+        let tool_calls = vec![
+            ToolCall {
+                id: "1".into(),
+                name: "edit".into(),
+                arguments: serde_json::json!({"path": "src/a.rs"}),
+            },
+            ToolCall {
+                id: "2".into(),
+                name: "edit".into(),
+                arguments: serde_json::json!({"path": "src/b.rs"}),
+            },
+        ];
+        let results = vec![
+            ToolResultEntry {
+                call_id: "1".into(),
+                tool_name: "edit".into(),
+                content: vec![ContentBlock::Text { text: "fail".into() }],
+                is_error: true,
+                args_summary: None,
+            },
+            ToolResultEntry {
+                call_id: "2".into(),
+                tool_name: "edit".into(),
+                content: vec![ContentBlock::Text { text: "fail".into() }],
+                is_error: true,
+                args_summary: None,
+            },
+        ];
+        assert_eq!(classify_drift_kind(3, &conversation, &tool_calls, &results), None);
+    }
+
+    #[test]
+    fn classify_drift_kind_flags_repeated_failures_on_same_path() {
+        let conversation = ConversationState::new();
+        let tool_calls = vec![
+            ToolCall {
+                id: "1".into(),
+                name: "edit".into(),
+                arguments: serde_json::json!({"path": "src/a.rs"}),
+            },
+            ToolCall {
+                id: "2".into(),
+                name: "edit".into(),
+                arguments: serde_json::json!({"path": "src/a.rs"}),
+            },
+        ];
+        let results = vec![
+            ToolResultEntry {
+                call_id: "1".into(),
+                tool_name: "edit".into(),
+                content: vec![ContentBlock::Text { text: "fail".into() }],
+                is_error: true,
+                args_summary: None,
+            },
+            ToolResultEntry {
+                call_id: "2".into(),
+                tool_name: "edit".into(),
+                content: vec![ContentBlock::Text { text: "fail".into() }],
+                is_error: true,
+                args_summary: None,
+            },
+        ];
+        assert_eq!(
+            classify_drift_kind(3, &conversation, &tool_calls, &results),
+            Some(DriftKind::RepeatedActionFailure)
+        );
+    }
+
+    #[test]
+    fn classify_drift_kind_does_not_flag_targeted_validation_as_validation_thrash() {
+        let conversation = ConversationState::new();
+        let tool_calls = vec![
+            ToolCall {
+                id: "1".into(),
+                name: "bash".into(),
+                arguments: serde_json::json!({"command": "cargo test parser::tests::smoke"}),
+            },
+            ToolCall {
+                id: "2".into(),
+                name: "bash".into(),
+                arguments: serde_json::json!({"command": "cargo test parser::tests::smoke -- --nocapture"}),
+            },
+        ];
+        let results = vec![
+            ToolResultEntry {
+                call_id: "1".into(),
+                tool_name: "read".into(),
+                content: vec![ContentBlock::Text { text: "ok".into() }],
+                is_error: false,
+                args_summary: None,
+            },
+            ToolResultEntry {
+                call_id: "2".into(),
+                tool_name: "codebase_search".into(),
+                content: vec![ContentBlock::Text { text: "ok".into() }],
+                is_error: false,
+                args_summary: None,
+            },
+        ];
+        assert_eq!(classify_drift_kind(3, &conversation, &tool_calls, &results), None);
     }
 
     #[test]

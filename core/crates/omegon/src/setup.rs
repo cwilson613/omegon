@@ -701,6 +701,29 @@ impl AgentSetup {
                                 if let Ok(meta) =
                                     serde_json::from_str::<session::SessionMeta>(&json)
                                 {
+                                    // ── Checkpoint consistency verification ──
+                                    if let Some(latest_cp) =
+                                        crate::checkpoint::read_last_checkpoint(&meta.session_id)
+                                    {
+                                        let cp_turns = latest_cp.intent.stats_turns;
+                                        let session_turns = meta.turns;
+                                        if cp_turns > session_turns {
+                                            tracing::warn!(
+                                                session_turns,
+                                                checkpoint_turns = cp_turns,
+                                                session_id = %meta.session_id,
+                                                "checkpoint is ahead of session file — \
+                                                 session may be stale (crash during prior run?)"
+                                            );
+                                        } else {
+                                            tracing::debug!(
+                                                session_turns,
+                                                checkpoint_turns = cp_turns,
+                                                "checkpoint consistent with session"
+                                            );
+                                        }
+                                    }
+
                                     resume_info = Some(ResumeInfo {
                                         session_id: meta.session_id,
                                         turns: meta.turns,
