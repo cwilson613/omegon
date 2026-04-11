@@ -586,6 +586,10 @@ fn is_slim_execution_bias(config: &LoopConfig) -> bool {
         .unwrap_or(false)
 }
 
+fn has_local_target_hypothesis(conversation: &ConversationState) -> bool {
+    !conversation.intent.files_read.is_empty() && conversation.intent.files_modified.is_empty()
+}
+
 fn continuation_pressure_tier(
     config: &LoopConfig,
     controller: &ControllerState,
@@ -602,7 +606,12 @@ fn continuation_pressure_tier(
     }
 
     let evidence_sufficient = controller.evidence_sufficient_streak > 0;
-    let (tier1, tier2, tier3) = if evidence_sufficient {
+    let om_local_first_lock = is_slim_execution_bias(config)
+        && evidence_sufficient
+        && has_local_target_hypothesis(conversation);
+    let (tier1, tier2, tier3) = if om_local_first_lock {
+        (1, 2, 3)
+    } else if evidence_sufficient {
         if is_slim_execution_bias(config) {
             (2, 3, 4)
         } else {
@@ -621,6 +630,9 @@ fn continuation_pressure_tier(
     let failures = controller.repeated_action_failure_streak;
     let discoveries = controller.constraint_discovery_streak;
 
+    if om_local_first_lock && (continuation >= tier1 || orient >= tier1 || closure >= tier1) {
+        return Some(3);
+    }
     if evidence_sufficient && (continuation >= tier2 || orient >= tier1 || closure >= tier1) {
         return Some(3);
     }
@@ -650,6 +662,10 @@ fn continuation_pressure_message(tier: u8) -> String {
 
 fn evidence_sufficiency_message() -> String {
     "[System: Evidence sufficiency reached. You have enough local evidence to stop exploring. On the next turn, do exactly one of these first: (1) make the smallest justified edit to the named target, (2) run one targeted validation for that named target, or (3) declare the exact blocker. Do not call broad inspection/search tools again unless the last action creates a new contradiction.]".to_string()
+}
+
+fn om_local_first_message() -> String {
+    "[System: OM local-first mode engaged. You already have a plausible local target and enough evidence to test one hypothesis. Do not start another analysis loop. Next turn must do exactly one of: (1) apply the smallest reversible patch to the target, (2) run one narrow validation that proves or disproves the hypothesis, or (3) state why full Omegon is required.]".to_string()
 }
 
 pub(crate) fn compute_context_composition(
@@ -1242,6 +1258,13 @@ pub async fn run(
                 "[System: This run is execution-biased. Stop spending turns on orientation tools unless they are strictly required to unblock execution. On the next turn, take a concrete repo-inspection or implementation step: read the most relevant file, search the codebase for the target symbol/path, or make the smallest justified change.]"
                     .to_string(),
             );
+        } else if is_slim_execution_bias(config)
+            && controller.evidence_sufficient_streak > 0
+            && has_local_target_hypothesis(conversation)
+            && continuation_tier.is_some()
+        {
+            tracing::info!("OM local-first lock engaged — injecting patch-or-prove nudge");
+            conversation.push_user(om_local_first_message());
         } else if controller.evidence_sufficient_streak > 0 && continuation_tier.is_some() {
             tracing::info!("Evidence sufficiency reached — injecting forced-convergence nudge");
             conversation.push_user(evidence_sufficiency_message());
@@ -3457,6 +3480,53 @@ mod tests {
         assert!(text.contains("Evidence sufficiency reached"));
         assert!(text.contains("make the smallest justified edit"));
         assert!(text.contains("Do not call broad inspection/search tools again"));
+    }
+
+    #[test]
+    fn om_local_first_message_forces_patch_or_prove() {
+        let text = om_local_first_message();
+        assert!(text.contains("OM local-first mode engaged"));
+        assert!(text.contains("smallest reversible patch"));
+        assert!(text.contains("full Omegon is required"));
+    }
+
+    #[test]
+    fn om_local_first_lock_escalates_faster_than_generic_sufficiency() {
+        let config = LoopConfig {
+            enforce_first_turn_execution_bias: true,
+            settings: Some(crate::settings::shared("anthropic:claude-sonnet-4-6")),
+            ..LoopConfig::default()
+        };
+        if let Some(settings) = &config.settings
+            && let Ok(mut s) = settings.lock()
+        {
+            s.set_slim_mode(true);
+        }
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .files_read
+            .insert(std::path::PathBuf::from("core/src/context.rs"));
+        let tool_calls = vec![ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "core/src/context.rs"}),
+        }];
+        let controller = ControllerState {
+            consecutive_tool_continuations: 1,
+            evidence_sufficient_streak: 1,
+            ..ControllerState::default()
+        };
+        assert_eq!(
+            continuation_pressure_tier(
+                &config,
+                &controller,
+                &conversation,
+                &tool_calls,
+                Some(OodaPhase::Orient),
+            ),
+            Some(3)
+        );
     }
 
     #[test]
