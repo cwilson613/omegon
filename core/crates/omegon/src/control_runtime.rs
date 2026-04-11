@@ -2082,7 +2082,8 @@ pub async fn auth_login_response(
 }
 
 pub async fn auth_logout_response(provider: &str) -> SlashCommandResponse {
-    if provider.trim().is_empty() {
+    let provider = provider.trim();
+    if provider.is_empty() {
         return SlashCommandResponse {
             accepted: false,
             output: Some(
@@ -2090,13 +2091,18 @@ pub async fn auth_logout_response(provider: &str) -> SlashCommandResponse {
             ),
         };
     }
-    let message = match auth::logout_provider(provider) {
-        Ok(()) => format!("✓ Logged out from {}", provider),
-        Err(e) => format!("❌ Logout failed: {}", e),
-    };
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(message),
+    let provider_label = crate::auth::provider_by_id(provider)
+        .map(|p| p.display_name)
+        .unwrap_or(provider);
+    match auth::logout_provider(provider) {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some(format!("✓ Logged out from {provider_label}")),
+        },
+        Err(e) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("❌ Logout failed for {provider_label}: {}", e)),
+        },
     }
 }
 

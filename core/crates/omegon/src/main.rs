@@ -3102,6 +3102,7 @@ async fn run_auth_command(action: &AuthAction) -> anyhow::Result<()> {
         AuthAction::Login { provider } => run_auth_login(provider).await,
         AuthAction::Logout { provider } => match auth::logout_provider(provider) {
             Ok(()) => {
+                clear_provider_auth_env(provider);
                 println!("✓ Logged out from {provider}");
                 Ok(())
             }
@@ -3120,6 +3121,16 @@ async fn run_auth_command(action: &AuthAction) -> anyhow::Result<()> {
 
 /// Direct API key login — for providers without OAuth (OpenRouter, etc.)
 /// Prompts for the key on stdin, stores in auth.json.
+fn clear_provider_auth_env(provider: &str) {
+    for env_var in auth::provider_env_vars(provider) {
+        // SAFETY: this runs only in response to an explicit logout action, before
+        // any concurrent auth resolution is expected to observe the provider env.
+        unsafe {
+            std::env::remove_var(env_var);
+        }
+    }
+}
+
 async fn login_api_key(
     provider: &str,
     env_var: &str,
@@ -4354,6 +4365,20 @@ mod tests {
         assert_eq!(written["per_turn"]["avg_estimated_tokens"], 107);
     }
 
+    #[test]
+    fn logout_clears_all_provider_auth_env_vars() {
+        unsafe {
+            std::env::set_var("ANTHROPIC_OAUTH_TOKEN", "token-1");
+            std::env::set_var("ANTHROPIC_API_KEY", "key-1");
+        }
+
+        clear_provider_auth_env("anthropic");
+
+        assert!(std::env::var("ANTHROPIC_OAUTH_TOKEN").is_err());
+        assert!(std::env::var("ANTHROPIC_API_KEY").is_err());
+    }
+
+    #[test]
     fn anthropic_subscription_automation_warning_only_for_headless_anthropic_oauth() {
         unsafe {
             std::env::remove_var("ANTHROPIC_API_KEY");

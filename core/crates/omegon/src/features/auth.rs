@@ -58,11 +58,17 @@ impl AuthFeature {
     }
 }
 
-impl Default for AuthFeature {
-    fn default() -> Self {
-        Self::new()
+fn format_env_var_statuses(env_keys: &[&str]) -> String {
+    let mut output = String::new();
+
+    for key in env_keys {
+        let status = if std::env::var(key).is_ok() { "Set" } else { "Not set" };
+        output.push_str(&format!("- **{}:** {}\n", key, status));
     }
+
+    output
 }
+
 
 #[async_trait]
 impl Feature for AuthFeature {
@@ -211,17 +217,14 @@ impl Feature for AuthFeature {
 
                 // Environment variables check
                 output.push_str("## Environment Variables\n");
-                let env_keys = [
-                    "ANTHROPIC_API_KEY",
-                    "ANTHROPIC_OAUTH_TOKEN",
-                    "OPENAI_API_KEY",
-                ];
+                let env_keys: Vec<&str> = crate::auth::PROVIDERS
+                    .iter()
+                    .flat_map(|provider| provider.env_vars.iter().copied())
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect();
 
-                for key in &env_keys {
-                    let value = std::env::var(key);
-                    let status = if value.is_ok() { "Set" } else { "Not set" };
-                    output.push_str(&format!("- **{}:** {}\n", key, status));
-                }
+                output.push_str(&format_env_var_statuses(&env_keys));
             }
             _ => {
                 anyhow::bail!("Unknown action: {}", action);
@@ -377,18 +380,23 @@ mod tests {
         assert_eq!(tools[0].name, "auth_status");
     }
 
-    #[tokio::test]
-    async fn auth_status_tool_execution() {
-        let feature = AuthFeature::new();
-        let result = feature
-            .execute(
-                "auth_status",
-                "test-call",
-                json!({"action": "status"}),
-                tokio_util::sync::CancellationToken::new(),
-            )
-            .await
-            .unwrap();
+    #[test]
+    fn format_env_var_statuses_reports_live_env_state() {
+        let key = "OMEGON_TEST_AUTH_STATUS_ENV";
+        // SAFETY: this test exclusively controls the variable and does not iterate env.
+        unsafe { std::env::remove_var(key) };
+        let unset = format_env_var_statuses(&[key]);
+        assert!(unset.contains("Not set"));
+
+        // SAFETY: this test exclusively controls the variable and does not iterate env.
+        unsafe { std::env::set_var(key, "1") };
+        let set = format_env_var_statuses(&[key]);
+        assert!(set.contains("Set"));
+
+        // SAFETY: cleanup for the same test-controlled variable.
+        unsafe { std::env::remove_var(key) };
+    }
+
 
         assert_eq!(result.content.len(), 1);
         if let ContentBlock::Text { text } = &result.content[0] {
