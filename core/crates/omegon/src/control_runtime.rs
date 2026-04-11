@@ -41,6 +41,7 @@ pub enum ControlRequest {
     WorkspaceAdopt,
     WorkspaceRelease,
     WorkspaceArchive,
+    WorkspacePrune,
     WorkspaceBindMilestone { milestone_id: String },
     WorkspaceBindNode { design_node_id: String },
     WorkspaceBindClear,
@@ -117,6 +118,7 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::WorkspaceAdopt => ControlRequest::WorkspaceAdopt,
         crate::tui::CanonicalSlashCommand::WorkspaceRelease => ControlRequest::WorkspaceRelease,
         crate::tui::CanonicalSlashCommand::WorkspaceArchive => ControlRequest::WorkspaceArchive,
+        crate::tui::CanonicalSlashCommand::WorkspacePrune => ControlRequest::WorkspacePrune,
         crate::tui::CanonicalSlashCommand::WorkspaceBindMilestone(milestone_id) => {
             ControlRequest::WorkspaceBindMilestone {
                 milestone_id: milestone_id.clone(),
@@ -256,6 +258,7 @@ pub async fn execute_control(
         ControlRequest::WorkspaceAdopt => workspace_adopt_response(ctx.agent).await,
         ControlRequest::WorkspaceRelease => workspace_release_response(ctx.agent).await,
         ControlRequest::WorkspaceArchive => workspace_archive_response(ctx.agent).await,
+        ControlRequest::WorkspacePrune => workspace_prune_response(ctx.agent).await,
         ControlRequest::WorkspaceBindMilestone { milestone_id } => {
             workspace_bind_milestone_response(ctx.agent, &milestone_id).await
         }
@@ -1137,6 +1140,37 @@ pub async fn workspace_archive_response(agent: &InteractiveAgentHost) -> SlashCo
             accepted: false,
             output: Some(message),
         },
+    }
+}
+
+pub async fn workspace_prune_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let mut registry = match crate::workspace::runtime::read_workspace_registry(&agent.cwd)
+        .ok()
+        .flatten()
+    {
+        Some(registry) => registry,
+        None => {
+            return SlashCommandResponse {
+                accepted: true,
+                output: Some("Workspace registry: nothing to prune.".into()),
+            }
+        }
+    };
+    let before = registry.workspaces.len();
+    registry.workspaces.retain(|workspace| {
+        let path = Path::new(&workspace.path);
+        path.exists() || !workspace.archived
+    });
+    let removed = before.saturating_sub(registry.workspaces.len());
+    if let Err(err) = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry) {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("Failed to write workspace registry: {err}")),
+        };
+    }
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(format!("Pruned {} workspace registry entries.", removed)),
     }
 }
 

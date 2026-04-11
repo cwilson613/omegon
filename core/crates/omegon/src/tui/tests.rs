@@ -1374,6 +1374,23 @@ fn slash_workspace_archive_enqueues_execute_control() {
 }
 
 #[test]
+fn slash_workspace_prune_enqueues_execute_control() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/workspace prune", &tx);
+    assert!(matches!(result, SlashResult::Handled));
+
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::WorkspacePrune,
+            ..
+        } => {}
+        other => panic!("expected workspace prune request, got {other:?}"),
+    }
+}
+
+#[test]
 fn slash_workspace_destroy_enqueues_execute_control() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
