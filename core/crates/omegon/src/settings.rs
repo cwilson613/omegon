@@ -197,6 +197,29 @@ pub struct AuthorizationContext {
     pub trust_domain: Option<String>,
 }
 
+impl AuthorizationContext {
+    /// Descriptive local authorization context.
+    ///
+    /// This is intentionally observational only. It does not imply enforced RBAC.
+    pub fn local_descriptive() -> Self {
+        Self {
+            roles: vec!["operator".into()],
+            capabilities: Vec::new(),
+            trust_domain: Some("local".into()),
+        }
+    }
+
+    pub fn summary(&self) -> String {
+        let role = self.roles.first().map(String::as_str).unwrap_or("unscoped");
+        let domain = self.trust_domain.as_deref().unwrap_or("unknown");
+        if self.capabilities.is_empty() {
+            format!("{role}@{domain}")
+        } else {
+            format!("{role}@{domain} +{}cap", self.capabilities.len())
+        }
+    }
+}
+
 /// Current persona/mind state.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonaState {
@@ -242,11 +265,12 @@ impl OperatingProfile {
             .as_deref()
             .unwrap_or_else(|| self.identity.summary_principal());
         format!(
-            "{} / {} / {} / {}",
+            "{} / {} / {} / {} / {}",
             persona_or_identity,
             self.posture.effective.display_name(),
             self.resources.thinking.as_str(),
-            self.resources.requested_context_class.short()
+            self.resources.requested_context_class.short(),
+            self.authorization.summary()
         )
     }
 }
@@ -606,7 +630,7 @@ impl Settings {
     pub fn operating_profile(&self) -> OperatingProfile {
         OperatingProfile {
             identity: RuntimeIdentity::local_interactive(),
-            authorization: AuthorizationContext::default(),
+            authorization: AuthorizationContext::local_descriptive(),
             persona: PersonaState::default(),
             posture: self.posture,
             resources: self.resource_envelope(),
@@ -1147,9 +1171,24 @@ mod tests {
         assert_eq!(profile.resources.thinking, ThinkingLevel::Low);
         assert_eq!(profile.resources.requested_context_class, ContextClass::Maniple);
         assert_eq!(profile.identity, RuntimeIdentity::local_interactive());
-        assert_eq!(profile.authorization, AuthorizationContext::default());
+        assert_eq!(
+            profile.authorization,
+            AuthorizationContext::local_descriptive()
+        );
         assert_eq!(profile.persona, PersonaState::default());
-        assert_eq!(profile.summary(), "local-operator / Fabricator / low / Maniple");
+        assert_eq!(
+            profile.summary(),
+            "local-operator / Fabricator / low / Maniple / operator@local"
+        );
+    }
+
+    #[test]
+    fn authorization_context_presets_are_descriptive_only() {
+        let authz = AuthorizationContext::local_descriptive();
+        assert_eq!(authz.roles, vec!["operator"]);
+        assert!(authz.capabilities.is_empty());
+        assert_eq!(authz.trust_domain.as_deref(), Some("local"));
+        assert_eq!(authz.summary(), "operator@local");
     }
 
     #[test]
@@ -1184,7 +1223,7 @@ mod tests {
         );
         assert_eq!(
             profile.summary(),
-            "dev.styrene.omegon.systems-engineer / Architect / medium / Clan"
+            "dev.styrene.omegon.systems-engineer / Architect / medium / Clan / operator@local"
         );
     }
 
@@ -1195,7 +1234,7 @@ mod tests {
             .with_identity(RuntimeIdentity::local_control_plane());
         assert_eq!(
             profile.summary(),
-            "daemon-supervisor / Architect / medium / Clan"
+            "daemon-supervisor / Architect / medium / Clan / operator@local"
         );
     }
 

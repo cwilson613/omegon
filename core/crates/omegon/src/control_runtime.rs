@@ -584,11 +584,13 @@ pub async fn switch_dispatcher_response(
         principal_id,
         identity_issuer,
         session_kind,
+        authorization,
     ) = if let Some(settings) = settings_snapshot {
             let profile = settings.operating_profile();
             let principal_id = profile.identity.principal_id.clone().unwrap_or_else(|| "anonymous".into());
             let identity_issuer = profile.identity.issuer.clone().unwrap_or_else(|| "unknown".into());
             let session_kind = profile.identity.session_kind.clone().unwrap_or_else(|| "unknown".into());
+            let authorization = profile.authorization.summary();
             (
                 settings.effective_requested_class().label().to_string(),
                 settings.thinking.as_str().to_string(),
@@ -597,6 +599,7 @@ pub async fn switch_dispatcher_response(
                 principal_id,
                 identity_issuer,
                 session_kind,
+                authorization,
             )
         } else {
             (
@@ -607,6 +610,7 @@ pub async fn switch_dispatcher_response(
                 status.principal_id.clone(),
                 status.identity_issuer.clone(),
                 status.session_kind.clone(),
+                status.authorization.clone(),
             )
         };
     status.update_routing(
@@ -618,6 +622,7 @@ pub async fn switch_dispatcher_response(
         &principal_id,
         &identity_issuer,
         &session_kind,
+        &authorization,
     );
     status.update_runtime_posture(
         omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
@@ -695,6 +700,7 @@ pub async fn status_view_response(
         .session_kind
         .clone()
         .unwrap_or_else(|| "unknown".into());
+    let authorization = operating_profile.authorization.summary();
     status.update_routing(
         settings.effective_requested_class().label(),
         settings.thinking.as_str(),
@@ -704,6 +710,7 @@ pub async fn status_view_response(
         &principal_id,
         &identity_issuer,
         &session_kind,
+        &authorization,
     );
     let panel = crate::tui::bootstrap::render_bootstrap(&status, false);
     SlashCommandResponse {

@@ -69,6 +69,8 @@ pub struct FooterData {
     pub posture: String,
     /// Current runtime principal (descriptive identity only).
     pub principal_id: String,
+    /// Current authorization summary (descriptive only).
+    pub authorization: String,
     /// Current model tier name (for engine panel display).
     pub model_tier: String,
     /// Whether a live LLM provider is connected. False when NullBridge is active.
@@ -231,6 +233,18 @@ impl FooterData {
                 value_width,
                 t.border_dim(),
                 t.fg(),
+                false,
+            );
+        }
+
+        if !self.authorization.is_empty() {
+            push_row(
+                &mut lines,
+                "authz",
+                self.authorization.clone(),
+                value_width,
+                t.border_dim(),
+                t.muted(),
                 false,
             );
         }

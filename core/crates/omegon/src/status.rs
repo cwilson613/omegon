@@ -49,6 +49,7 @@ pub struct HarnessStatus {
     pub principal_id: String,
     pub identity_issuer: String,
     pub session_kind: String,
+    pub authorization: String,
     pub runtime_profile: omegon_traits::OmegonRuntimeProfile,
     pub autonomy_mode: omegon_traits::OmegonAutonomyMode,
     pub dispatcher: DispatcherStatus,
@@ -496,6 +497,7 @@ impl HarnessStatus {
         principal_id: &str,
         identity_issuer: &str,
         session_kind: &str,
+        authorization: &str,
     ) {
         self.context_class = context_class.into();
         self.thinking_level = thinking_level.into();
@@ -505,6 +507,7 @@ impl HarnessStatus {
         self.principal_id = principal_id.into();
         self.identity_issuer = identity_issuer.into();
         self.session_kind = session_kind.into();
+        self.authorization = authorization.into();
     }
 
     /// Update deployment/autonomy posture exported to IPC/Web/Auspex surfaces.
@@ -725,6 +728,7 @@ impl Default for HarnessStatus {
             principal_id: "local-operator".into(),
             identity_issuer: "local-session".into(),
             session_kind: "interactive".into(),
+            authorization: "operator@local".into(),
             runtime_profile: omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
             autonomy_mode: omegon_traits::OmegonAutonomyMode::OperatorDriven,
             dispatcher: DispatcherStatus {
