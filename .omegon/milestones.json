@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 63,
+    "rc_count": 64,
     "notes": [
       "feat(aggregate-mode): Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.",
       "feat(anthropic): prefer adaptive thinking for claude 4.6",
@@ -652,6 +652,7 @@
       "fix(tutorial): restore Tutorial::with_context() as gate-free constructor",
       "fix(ui): clarify provider labels and codex limit telemetry",
       "fix(usage): show codex remaining headroom in footer",
+      "fix(version): ignore runtime workspace state in dirty flag",
       "fix(web): enforce canonical roles for typed websocket control",
       "fix(web): expose harness state for auspex bootstrap",
       "fix(web): render markdown tables in dashboard tool output",
@@ -692,7 +693,7 @@
       "refactor(workspace): add backend and vcs identity boundaries",
       "refactor(workspace): separate labels from substrate identity"
     ],
-    "rc_version": "0.15.10-rc.69",
-    "last_rc": "2026-04-11T11:16:36Z"
+    "rc_version": "0.15.10-rc.70",
+    "last_rc": "2026-04-11T11:47:41Z"
   }
 }
