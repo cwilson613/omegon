@@ -1088,12 +1088,14 @@ impl InstrumentPanel {
             );
         }
 
-        // Tree + memory strings: break through the left border only.
-        // Do not paint through the right boundary — in the split layout that would
-        // bleed into the adjacent tools panel.
+        // Tree + memory strings — stay strictly inside the inference panel's
+        // inner content box. Earlier code widened the draw rect to `area.x`
+        // so the connector could "break through" the left border, but that
+        // also granted extra horizontal paint budget and allowed wave glyphs to
+        // leak across the inter-panel seam under narrow layouts.
         if inner.height > bar_h + 2 && !active_minds.is_empty() {
             let tree_area = Rect {
-                x: area.x,
+                x: inner.x,
                 y: inner.y + bar_h + 2,
                 width: inner.width,
                 height: inner.height.saturating_sub(bar_h + 2),
@@ -2817,6 +2819,61 @@ mod tests {
     }
 
     #[test]
+    fn inference_panel_does_not_leak_wave_glyphs_into_tools_panel() {
+        let t = crate::tui::theme::Alpharius;
+        let backend = ratatui::backend::TestBackend::new(90, 8);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let mut panel = InstrumentPanel::default();
+        panel.has_ever_fired = true;
+        panel.minds[0].active = true;
+        panel.minds[0].name = "egon".into();
+        panel.minds[0].fact_count = 8;
+        panel.minds[0].wave = vec![0.6; 80];
+        panel.tools = vec![ToolEntry {
+            name: "change".into(),
+            last_called: 0.0,
+            is_error: false,
+            error_ttl: 0.0,
+            running: false,
+            started_at: None,
+            last_duration_ms: Some(14 * 60 * 1000),
+        }];
+
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                let cols = ratatui::layout::Layout::horizontal([
+                    ratatui::layout::Constraint::Percentage(32),
+                    ratatui::layout::Constraint::Percentage(36),
+                    ratatui::layout::Constraint::Percentage(32),
+                ])
+                .split(area);
+                panel.render_inference_panel(cols[1], f, &t);
+                panel.render_tools_panel(cols[2], f, &t);
+            })
+            .unwrap();
+
+        let size = terminal.backend().size().unwrap();
+        let buf = terminal.backend().buffer();
+        let cols = ratatui::layout::Layout::horizontal([
+            ratatui::layout::Constraint::Percentage(32),
+            ratatui::layout::Constraint::Percentage(36),
+            ratatui::layout::Constraint::Percentage(32),
+        ])
+        .split(Rect::new(0, 0, size.width, size.height));
+        let tools = cols[2];
+        let mut text = String::new();
+        for y in tools.top()..tools.bottom() {
+            for x in tools.left()..tools.right() {
+                text.push_str(buf[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(text.contains("change"), "tools panel should render its own content: {text}");
+        assert!(!text.contains("egon"), "inference content leaked into tools panel: {text}");
+        assert!(!text.contains("⠊"), "braille wave glyphs leaked into tools panel: {text}");
+    }
+
     fn fact_count_changes_pluck_project_wave() {
         let mut panel = InstrumentPanel::default();
         panel.update_mind_facts(10, 0, 0, 0.02);

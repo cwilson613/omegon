@@ -80,28 +80,33 @@ pub async fn execute(
         resolved_edits.push((path, &edit.old_text, &edit.new_text));
     }
 
-    // Phase 2: Apply all edits, tracking which files were written
-    let mut written_files: HashMap<PathBuf, String> = HashMap::new();
-    let mut results: Vec<String> = Vec::new();
+    // Phase 2: Validate all edits against ORIGINAL snapshots and resolve
+    // byte offsets.  Checking against the original (rather than the
+    // cumulatively modified content) prevents a previous edit's new_text
+    // from creating phantom duplicates that fail the uniqueness check for
+    // a later edit in the same batch.
+    struct Positioned {
+        index: usize,
+        path: PathBuf,
+        old_norm: String,
+        new_norm: String,
+        offset: usize,
+    }
+    let mut positioned: Vec<Positioned> = Vec::new();
 
     for (i, (path, old_text, new_text)) in resolved_edits.iter().enumerate() {
-        // Get current content — may have been modified by a previous edit in this batch
-        let current = written_files
-            .get(path)
-            .or_else(|| snapshots.get(path))
-            .cloned()
-            .unwrap_or_default();
-
-        let normalized = current.replace("\r\n", "\n");
+        let original = snapshots.get(path).cloned().unwrap_or_default();
+        let normalized_original = original.replace("\r\n", "\n");
         let normalized_old = old_text.replace("\r\n", "\n");
         let normalized_new = new_text.replace("\r\n", "\n");
 
-        let count = normalized.matches(&normalized_old).count();
+        let positions: Vec<usize> = normalized_original
+            .match_indices(&normalized_old)
+            .map(|(pos, _)| pos)
+            .collect();
 
-        if count == 0 {
-            // Rollback all previously written files
-            rollback(&snapshots, &written_files).await;
-            let hint = super::edit::nearest_context(&current, old_text)
+        if positions.is_empty() {
+            let hint = super::edit::nearest_context(&original, old_text)
                 .map(|h| {
                     format!("\n\nNearest matching context to help you anchor the next edit:\n{h}")
                 })
@@ -114,41 +119,72 @@ pub async fn execute(
             );
         }
 
-        if count > 1 {
-            rollback(&snapshots, &written_files).await;
+        if positions.len() > 1 {
             anyhow::bail!(
                 "Edit {}/{}: found {} occurrences in {}. Text must be unique. All changes rolled back.",
                 i + 1,
                 edits.len(),
-                count,
+                positions.len(),
                 edits[i].file
             );
         }
 
-        let new_content = normalized.replacen(&normalized_old, &normalized_new, 1);
-        if new_content == normalized {
-            results.push(format!("  {}: no change (identical)", edits[i].file));
-            continue;
+        positioned.push(Positioned {
+            index: i,
+            path: path.clone(),
+            old_norm: normalized_old,
+            new_norm: normalized_new,
+            offset: positions[0],
+        });
+    }
+
+    // Phase 3: Group by file, apply edits bottom-up (by descending offset)
+    // so earlier replacements don't shift the byte positions of later ones.
+    let mut written_files: HashMap<PathBuf, String> = HashMap::new();
+    let mut results: Vec<(usize, String)> = Vec::new();
+
+    let mut edits_by_file: HashMap<PathBuf, Vec<&Positioned>> = HashMap::new();
+    for p in &positioned {
+        edits_by_file.entry(p.path.clone()).or_default().push(p);
+    }
+
+    for (path, mut file_edits) in edits_by_file {
+        file_edits.sort_by(|a, b| b.offset.cmp(&a.offset));
+
+        let mut content = snapshots.get(&path).cloned().unwrap_or_default().replace("\r\n", "\n");
+
+        for edit in &file_edits {
+            let end = edit.offset + edit.old_norm.len();
+            let before = &content[..edit.offset];
+            let after = &content[end..];
+            let new_content = format!("{}{}{}", before, edit.new_norm, after);
+
+            if new_content == content {
+                results.push((edit.index, format!("  {}: no change (identical)", edits[edit.index].file)));
+                continue;
+            }
+            content = new_content;
+
+            let old_lines = edit.old_norm.lines().count();
+            let new_lines = edit.new_norm.lines().count();
+            let diff = if old_lines == new_lines {
+                format!("{old_lines} line(s)")
+            } else {
+                format!("{old_lines}→{new_lines} lines")
+            };
+            results.push((edit.index, format!("  ✓ {}: {diff}", edits[edit.index].file)));
         }
 
-        // Write the file
-        tokio::fs::write(path, &new_content).await.map_err(|e| {
-            // Can't rollback async in a sync map_err — log the error
+        tokio::fs::write(&path, &content).await.map_err(|e| {
             tracing::error!("Write failed during atomic change, partial state: {e}");
             e
         })?;
-
-        written_files.insert(path.clone(), new_content);
-
-        let old_lines = normalized_old.lines().count();
-        let new_lines = normalized_new.lines().count();
-        let diff = if old_lines == new_lines {
-            format!("{old_lines} line(s)")
-        } else {
-            format!("{old_lines}→{new_lines} lines")
-        };
-        results.push(format!("  ✓ {}: {diff}", edits[i].file));
+        written_files.insert(path, content);
     }
+
+    // Sort results back into the original edit order for stable output.
+    results.sort_by_key(|(idx, _)| *idx);
+    let results: Vec<String> = results.into_iter().map(|(_, s)| s).collect();
 
     let files_changed = written_files.len();
     let mut output = format!(
@@ -412,6 +448,65 @@ mod tests {
         assert!(content.contains("fn foo() -> i32 { 42 }"));
         assert!(content.contains("fn bar() -> bool { true }"));
         assert!(content.contains("fn baz() {}"));
+    }
+
+    /// Regression: when edit 1 inserts text that contains edit 2's old_text,
+    /// the old code would count 2 occurrences in the running content and bail
+    /// with "Text must be unique".  The fix validates against the original
+    /// snapshot so the phantom duplicate from edit 1's new_text is ignored.
+    #[tokio::test]
+    async fn edit_batch_does_not_fail_on_phantom_duplicate_from_prior_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("footer.rs");
+        std::fs::File::create(&file)
+            .unwrap()
+            .write_all(
+                b"fn helper() -> String { String::new() }\n\
+                  fn format_version_text(v: Option<&str>) -> String {\n\
+                      match v { Some(s) => s.into(), None => String::new() }\n\
+                  }\n",
+            )
+            .unwrap();
+
+        let edits = vec![
+            // Edit 1: replace helper, inserting text that contains the
+            // signature of the function that edit 2 will target.
+            EditSpec {
+                file: "footer.rs".into(),
+                old_text: "fn helper() -> String { String::new() }".into(),
+                new_text: "fn helper() -> String { format_version_text(None) }\n\
+                           fn format_version_text(v: Option<&str>) -> String { String::from(\"new\") }"
+                    .into(),
+            },
+            // Edit 2: replace the ORIGINAL format_version_text body.
+            EditSpec {
+                file: "footer.rs".into(),
+                old_text: "fn format_version_text(v: Option<&str>) -> String {\n\
+                      match v { Some(s) => s.into(), None => String::new() }\n\
+                  }"
+                    .into(),
+                new_text: "fn format_version_text(v: Option<&str>) -> String {\n\
+                      v.unwrap_or(\"unknown\").to_string()\n\
+                  }"
+                    .into(),
+            },
+        ];
+
+        let cwd = dir.path().to_path_buf();
+        let resolve = |p: &str| Ok(cwd.join(p));
+        let result = execute(&edits, ValidationMode::None, &cwd, resolve)
+            .await
+            .expect("batch should succeed — phantom duplicate must not cause failure");
+        let text = result.content[0].as_text().unwrap();
+        assert!(text.contains("2 edit(s)"));
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        // Edit 1's new helper body should be present
+        assert!(content.contains("format_version_text(None)"));
+        // Edit 2 should have replaced the original function body
+        assert!(content.contains("unwrap_or(\"unknown\")"));
+        // The original match body should be gone
+        assert!(!content.contains("match v {"));
     }
 
     #[tokio::test]
