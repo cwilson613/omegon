@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 78,
+    "rc_count": 79,
     "notes": [
       "docs(benchmark): seed design node for deferred bwrap sandbox work",
       "feat(aggregate-mode): Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.",
@@ -503,6 +503,7 @@
       "feat(runtime): add daemon event-ingress skeleton",
       "feat(runtime): add interactive turn supervisor scaffold",
       "feat(runtime): add rc update lane and slim launch aliases",
+      "feat(runtime): run ! commands directly and poll update severity",
       "feat(runtime): split rc update channel and add slim/full warp controls",
       "feat(runtime): surface child runtime metadata in daemon status",
       "feat(runtime-matrix): Inspect and extend the Rust live upstream smoke/drift test surface. Define or add a checked-in expectation matrix and determine the minimal viable assertions for provider-specific endpoint drift (not just round-trip OK), plus tests or validation around the matrix parsing/execution path.",
@@ -784,7 +785,7 @@
       "refactor(workspace): add backend and vcs identity boundaries",
       "refactor(workspace): separate labels from substrate identity"
     ],
-    "rc_version": "0.15.10-rc.84",
-    "last_rc": "2026-04-12T17:31:44Z"
+    "rc_version": "0.15.10-rc.85",
+    "last_rc": "2026-04-12T19:15:26Z"
   }
 }
