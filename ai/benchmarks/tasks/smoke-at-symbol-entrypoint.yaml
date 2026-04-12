@@ -1,0 +1,55 @@
+id: smoke-at-symbol-entrypoint
+kind: implementation
+repo: .
+base_ref: v0.15.9
+model: anthropic:claude-sonnet-4-6
+slim: false
+harnesses:
+  - omegon
+  - claude-code
+prompt: |
+  Implement a minimal @ file-selection entry point in core/crates/omegon/src/tui/mod.rs.
+
+  Constraints:
+  - Touch only core/crates/omegon/src/tui/mod.rs unless absolutely blocked.
+  - Do not build a full fuzzy picker.
+  - Add the smallest viable '@' handling path in the TUI input flow.
+  - Do not refactor unrelated code.
+  - Stop after the smallest viable patch.
+
+  Likely edit areas:
+  - App struct state for minimal picker-mode bookkeeping if needed
+  - key handling for normal editor input
+  - one minimal render path or placeholder indicator if needed
+
+  Success target:
+  - The diff clearly adds explicit '@' handling in the TUI input path.
+acceptance:
+  required:
+    - "grep -n \"KeyCode::Char('@@')\" core/crates/omegon/src/tui/mod.rs"
+success_files:
+  - core/crates/omegon/src/tui/mod.rs
+budget:
+  max_turns: 6
+  max_minutes: 5
+  max_total_tokens: 500000
+process_expectations:
+  must_touch_target_file: true
+  must_stay_within_token_budget: true
+expected_solution:
+  primary_files:
+    - core/crates/omegon/src/tui/mod.rs
+  smoke_goal: explicit_at_symbol_handling
+notes: |
+  One-shot smoke test for harness overhead, not full feature completion.
+
+  This task intentionally narrows the search space to a single file and a
+  minimal behavior anchor so the comparison measures first-pass harness burn
+  rather than broad autonomous task decomposition. Use this for quick A/B
+  release smoke checks between Omegon and Claude Code.
+
+  Certifying a release candidate:
+  1. Override base_ref to the candidate (e.g. v0.15.10-rc.NN) for the run only.
+  2. Run both harnesses on the same overridden task.
+  3. Compare status, wall_clock_sec, tokens.total, and turn_count.
+  4. Treat bounded failure or >2x token burn vs the other harness as a release-warning signal.
