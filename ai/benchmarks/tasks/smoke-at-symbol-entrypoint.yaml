@@ -26,7 +26,7 @@ prompt: |
   - The diff clearly adds explicit '@' handling in the TUI input path.
 acceptance:
   required:
-    - "grep -n \"KeyCode::Char('@@')\" core/crates/omegon/src/tui/mod.rs"
+    - "grep -n \"KeyCode::Char('@')\" core/crates/omegon/src/tui/mod.rs"
 success_files:
   - core/crates/omegon/src/tui/mod.rs
 budget:
