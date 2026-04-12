@@ -2087,6 +2087,31 @@ fn draw_clears_stale_completed_cleave_snapshot_from_tools_panel() {
 }
 
 #[test]
+fn draw_hides_dashboard_for_inactive_restored_cleave_snapshot_without_other_content() {
+    let mut app = test_app();
+    app.ui_surfaces.dashboard = true;
+    app.ui_surfaces.instruments = false;
+    app.ui_surfaces.footer = false;
+    app.dashboard.cleave = Some(crate::features::cleave::CleaveProgress {
+        active: false,
+        run_id: "restored-run".into(),
+        total_children: 3,
+        completed: 3,
+        failed: 0,
+        children: vec![],
+        total_tokens_in: 100,
+        total_tokens_out: 50,
+    });
+
+    let rendered = render_app_to_string(&mut app, 140, 20);
+
+    assert!(
+        !rendered.contains("Dashboard"),
+        "inactive restored cleave snapshot should not force dashboard visibility: {rendered}"
+    );
+}
+
+#[test]
 fn harness_status_changed_updates_footer() {
     let mut app = test_app();
 

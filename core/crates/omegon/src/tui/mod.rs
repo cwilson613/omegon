@@ -2328,11 +2328,7 @@ impl App {
             && (self.dashboard.status_counts.total > 0
                 || self.dashboard.focused_node.is_some()
                 || !self.dashboard.active_changes.is_empty()
-                || self
-                    .dashboard
-                    .cleave
-                    .as_ref()
-                    .is_some_and(|c| c.active || c.total_children > 0));
+                || self.dashboard.cleave.as_ref().is_some_and(|c| c.active));
 
         let (main_area, dash_area) = if show_dashboard {
             let h = Layout::horizontal([Constraint::Min(60), Constraint::Length(36)]).split(area);
