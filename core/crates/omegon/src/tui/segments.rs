@@ -2072,7 +2072,7 @@ fn compute_table_widths(lines: &[&str], available_width: usize) -> Vec<Option<Ve
             }
             let cells: Vec<&str> = trimmed.split('|').filter(|s| !s.is_empty()).collect();
             for (idx, cell) in cells.iter().enumerate() {
-                let w = cell.trim().chars().count().max(1);
+                let w = super::widgets::visible_width(cell.trim()).max(1);
                 if idx >= col_widths.len() {
                     col_widths.push(w);
                 } else if w > col_widths[idx] {
@@ -2166,8 +2166,9 @@ fn render_table_line<'a>(
         let cell_raw = cells.get(i).copied().unwrap_or("").trim();
         let cell_text = truncate_table_cell(cell_raw, width);
         if is_header {
+            let padded = super::widgets::pad_right(&cell_text, width);
             spans.push(Span::styled(
-                format!(" {:width$} ", cell_text, width = width),
+                format!(" {padded} "),
                 Style::default()
                     .fg(t.accent_bright())
                     .bg(row_bg)
@@ -2175,15 +2176,9 @@ fn render_table_line<'a>(
             ));
         } else {
             spans.push(Span::styled(" ", Style::default().bg(row_bg)));
-            let mut cell_spans = super::widgets::highlight_inline(&cell_text, t);
-            let visible = cell_text.chars().count();
-            if visible < width {
-                cell_spans.push(Span::styled(
-                    " ".repeat(width - visible),
-                    Style::default().bg(row_bg),
-                ));
-            }
-            for mut s in cell_spans {
+            let padded = super::widgets::pad_right(&cell_text, width);
+            let mut cell_spans = super::widgets::highlight_inline(&padded, t);
+            for mut s in cell_spans.drain(..) {
                 s.style = s.style.bg(row_bg);
                 spans.push(s);
             }
@@ -2199,16 +2194,10 @@ fn render_table_line<'a>(
 }
 
 fn truncate_table_cell(text: &str, width: usize) -> String {
-    let count = text.chars().count();
-    if count <= width {
-        return text.to_string();
+    if width == 0 {
+        return String::new();
     }
-    if width <= 1 {
-        return "…".to_string();
-    }
-    let mut out: String = text.chars().take(width - 1).collect();
-    out.push('…');
-    out
+    super::widgets::truncate_str(text, width, "…")
 }
 
 fn render_system(text: &str, area: Rect, buf: &mut Buffer, t: &dyn Theme, mode: SegmentRenderMode) {
@@ -2363,6 +2352,7 @@ fn render_separator(area: Rect, buf: &mut Buffer, t: &dyn Theme) {
 mod tests {
     use super::*;
     use crate::tui::theme::Alpharius;
+    use crate::tui::widgets;
 
     fn make_buf(w: u16, h: u16) -> (Rect, Buffer) {
         let area = Rect::new(0, 0, w, h);
@@ -4225,6 +4215,42 @@ mod tests {
         assert_eq!(block1[0], 1);
         // Block 2 first column = max("longer-header", "x") = 13 chars
         assert_eq!(block2[0], 13);
+    }
+
+    #[test]
+    fn compute_table_widths_uses_display_width_for_ambiguous_and_wide_cells() {
+        let lines = vec![
+            "| Tool | What it does |",
+            "|------|---------------|",
+            "| bash | Execute shell commands, run tests, build, grep, etc. |",
+            "| Ω read | Read files (text + images) |",
+        ];
+        let widths_per_line = compute_table_widths(&lines, 80);
+        let widths = widths_per_line[0].as_ref().expect("table widths");
+
+        assert!(
+            widths[0] >= widgets::visible_width("Ω read"),
+            "first column should use display width, got widths={widths:?}"
+        );
+        assert!(
+            widths[1]
+                >= widgets::visible_width("Execute shell commands, run tests, build, grep, etc."),
+            "second column should use display width, got widths={widths:?}"
+        );
+    }
+
+    #[test]
+    fn render_table_line_pads_to_display_width_not_char_count() {
+        let widths = vec![8, 12];
+        let body = render_table_line("| Ω read | text + images |", false, &widths, &Alpharius);
+        let text: String = body.spans.iter().map(|span| span.content.as_ref()).collect();
+        assert!(text.starts_with("│ "));
+        assert!(text.ends_with("│"));
+        assert!(text.contains("Ω read"), "{text}");
+        assert!(
+            text.contains("text + imag…") || text.contains("text + images"),
+            "{text}"
+        );
     }
 
     #[test]
