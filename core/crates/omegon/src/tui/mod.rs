@@ -259,6 +259,8 @@ pub struct App {
     selector: Option<selector::Selector>,
     /// What the selector is for — determines what happens on confirm.
     selector_kind: Option<SelectorKind>,
+    /// Active @-file picker popup.
+    at_picker: Option<selector::Selector>,
     /// Last tool name from ToolStart — used to track memory mutations.
     last_tool_name: Option<String>,
     /// Tool name that completed this frame — consumed by instrument telemetry
@@ -978,6 +980,7 @@ impl App {
             session_start: std::time::Instant::now(),
             selector: None,
             selector_kind: None,
+            at_picker: None,
             last_tool_name: None,
             completed_tool_name: None,
             working_verb: "Working",
@@ -2398,10 +2401,17 @@ impl App {
         if raw_text.starts_with('/') {
             match self.handle_slash_command(&raw_text, command_tx) {
                 SlashResult::Display(response) => {
+                    self.history.push(raw_text.clone());
+                    self.history_idx = None;
                     self.conversation.push_system(&response);
                 }
-                SlashResult::Handled => {}
+                SlashResult::Handled => {
+                    self.history.push(raw_text.clone());
+                    self.history_idx = None;
+                }
                 SlashResult::Quit => {
+                    self.history.push(raw_text.clone());
+                    self.history_idx = None;
                     self.should_quit = true;
                     let _ = command_tx.send(TuiCommand::Quit).await;
                 }
@@ -2547,6 +2557,7 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        self.refresh_at_picker();
         let area = frame.area();
         frame.render_widget(Clear, area);
         frame.render_widget(
@@ -3061,7 +3072,11 @@ impl App {
 
         // Command palette popup (above editor when typing /)
         if !self.agent_active {
-            let matches = self.matching_commands();
+            let matches = if self.at_picker.is_some() {
+                vec![]
+            } else {
+                self.matching_commands()
+            };
             if !matches.is_empty() {
                 let palette_height = matches.len().min(8) as u16 + 2; // +2 for borders
                 let editor_area = chunks[1];
@@ -3096,6 +3111,10 @@ impl App {
             }
 
             // Textarea renders its own cursor via cursor_style
+        }
+
+        if let Some(ref picker) = self.at_picker {
+            picker.render(area, frame, t.as_ref());
         }
 
         // Selector popup (overlays everything when active)
@@ -4752,6 +4771,79 @@ impl App {
                 vec![]
             }
         }
+    }
+
+    fn is_at_file_picker_trigger(text: &str) -> Option<String> {
+        let trimmed = text.trim_start();
+        let rest = trimmed.strip_prefix('@')?;
+        if rest.contains(' ') || rest.contains('\n') {
+            return None;
+        }
+        Some(rest.to_string())
+    }
+
+    fn collect_project_file_matches(&self, query: &str) -> Vec<selector::SelectOption> {
+        fn visit(
+            root: &std::path::Path,
+            dir: &std::path::Path,
+            out: &mut Vec<String>,
+            depth: usize,
+        ) {
+            if depth > 5 {
+                return;
+            }
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.starts_with('.') && name != ".env.example" {
+                    continue;
+                }
+                if name == "target" || name == "node_modules" || name == ".git" {
+                    continue;
+                }
+                if path.is_dir() {
+                    visit(root, &path, out, depth + 1);
+                } else if let Ok(rel) = path.strip_prefix(root) {
+                    out.push(rel.to_string_lossy().to_string());
+                }
+            }
+        }
+
+        let mut files = Vec::new();
+        visit(self.cwd(), self.cwd(), &mut files, 0);
+        let q = query.to_lowercase();
+        let mut filtered: Vec<String> = files
+            .into_iter()
+            .filter(|path| q.is_empty() || path.to_lowercase().contains(&q))
+            .take(40)
+            .collect();
+        filtered.sort();
+        filtered
+            .into_iter()
+            .map(|path| selector::SelectOption {
+                value: path.clone(),
+                label: path.clone(),
+                description: "Insert file into prompt context".to_string(),
+                active: false,
+            })
+            .collect()
+    }
+
+    fn refresh_at_picker(&mut self) {
+        let Some(query) = Self::is_at_file_picker_trigger(&self.editor.render_text()) else {
+            self.at_picker = None;
+            return;
+        };
+        let options = self.collect_project_file_matches(&query);
+        if options.is_empty() {
+            self.at_picker = None;
+            return;
+        }
+        self.at_picker = Some(selector::Selector::new("Inject file into context", options));
     }
 
     /// Load editor history from disk.
@@ -6763,18 +6855,22 @@ pub async fn run_tui(
                             }
                         }
 
-                        // Tab: command completion if typing, or toggle tool card expansion
+                        // Tab: command completion, @-picker insertion, or toggle tool card expansion
                         (KeyCode::Tab, _) => {
                             let text = app.editor.render_text().to_string();
-                            if text.starts_with('/') {
-                                // Command completion
+                            if let Some(ref picker) = app.at_picker {
+                                let path = picker.selected_value().to_string();
+                                let full = app.cwd().join(&path);
+                                app.editor.set_text("");
+                                app.editor.insert_attachment(full);
+                                app.at_picker = None;
+                            } else if text.starts_with('/') {
                                 let matches = app.matching_commands();
                                 if matches.len() == 1 {
                                     let cmd = format!("/{}", matches[0].0);
                                     app.editor.set_text(&cmd);
                                 }
                             } else if text.is_empty() {
-                                // Toggle nearest tool card expansion
                                 if let Some(idx) = app.conversation.focused_tool_card() {
                                     app.conversation.toggle_expand(idx);
                                 }
@@ -6811,9 +6907,17 @@ pub async fn run_tui(
                             }
                         }
 
-                        // Submit
+                        // Submit / @-picker confirm
                         (KeyCode::Enter, _) => {
-                            app.submit_editor_buffer(&command_tx).await;
+                            if let Some(ref picker) = app.at_picker {
+                                let path = picker.selected_value().to_string();
+                                let full = app.cwd().join(&path);
+                                app.editor.set_text("");
+                                app.editor.insert_attachment(full);
+                                app.at_picker = None;
+                            } else {
+                                app.submit_editor_buffer(&command_tx).await;
+                            }
                         }
 
                         // Basic editing — only insert if no Ctrl modifier
@@ -6875,18 +6979,20 @@ pub async fn run_tui(
                             app.conversation.scroll_down(20);
                         }
                         (KeyCode::Up, _) => {
-                            if app.editor.line_count() > 1 && app.editor.cursor_row() > 0 {
-                                // Multiline: move cursor up within editor
+                            if let Some(ref mut picker) = app.at_picker {
+                                picker.move_up();
+                            } else if app.editor.line_count() > 1 && app.editor.cursor_row() > 0 {
                                 app.editor.move_up();
                             } else if app.should_use_arrow_history_recall() {
                                 app.history_recall_up();
                             }
                         }
                         (KeyCode::Down, _) => {
-                            if app.editor.line_count() > 1
+                            if let Some(ref mut picker) = app.at_picker {
+                                picker.move_down();
+                            } else if app.editor.line_count() > 1
                                 && app.editor.cursor_row() < app.editor.line_count() - 1
                             {
-                                // Multiline: move cursor down within editor
                                 app.editor.move_down();
                             } else if app.should_use_arrow_history_recall() {
                                 app.history_recall_down();
