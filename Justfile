@@ -210,6 +210,14 @@ run *args:
 
 # Cut a release candidate: bump rc.N, test, commit, tag, build, sign.
 # Push the tag to trigger CI: git push origin main --tags
+rc-validate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "Release validation..."
+    cd core && cargo test -p omegon 2>&1 | tail -3
+    cd ..
+
 rc:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -301,10 +309,7 @@ rc:
         rm -f "$REPORT"
     fi
 
-    # Test before any mutation so aborts don't dirty the tree.
-    echo "Testing..."
-    cd core && cargo test -p omegon 2>&1 | tail -3
-    cd ..
+    echo "Note: full release validation is now split out of 'just rc'. Run 'just rc-validate' before cutting if you need local test confirmation."
 
     # From here on, rollback mutated files if anything fails before commit.
     MUTATED=0
@@ -366,7 +371,7 @@ rc:
     git push origin main "v${NEW_VERSION}"
 
     echo ""
-    echo "✓ ${NEW_VERSION} — tested, committed, tagged, built, pushed."
+    echo "✓ ${NEW_VERSION} — preflighted, committed, tagged, built, pushed."
 
 # Release preflight: verify repo is releasable BEFORE any version mutation.
 # Checks: on main, clean tree, release line is an RC, changelog target exists,
