@@ -208,6 +208,87 @@ run *args:
 
 # ─── Release ─────────────────────────────────────────────────
 
+# Developer-facing RC cut. Run this from the main workspace — no manual
+# workspace setup required. Validates main is clean and pushed, creates
+# a fresh release workspace from GitHub, runs `just rc` from there, then
+# pulls the resulting commit + tag back into local main.
+cut-rc:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # 1. Must be on main
+    BRANCH=$(git branch --show-current)
+    if [ -z "$BRANCH" ]; then
+        echo "✗ Detached HEAD — check out main first"
+        exit 1
+    fi
+    if [ "$BRANCH" != "main" ]; then
+        echo "✗ Must be on main (currently on $BRANCH)"
+        exit 1
+    fi
+
+    # 2. Must be clean
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "✗ Uncommitted changes — commit or stash first"
+        git status --short
+        exit 1
+    fi
+
+    # 3. Must be pushed
+    git fetch origin main --quiet
+    LOCAL=$(git rev-parse HEAD)
+    REMOTE=$(git rev-parse origin/main)
+    if [ "$LOCAL" != "$REMOTE" ]; then
+        echo "✗ Local main is ahead of origin — push first:"
+        echo "  git push origin main"
+        exit 1
+    fi
+
+    # 4. Fresh release workspace from GitHub — no stale state, correct origin
+    WSDIR=$(mktemp -d)/omegon-rc-workspace
+    echo "Cloning release workspace from GitHub..."
+    git clone https://github.com/styrene-lab/omegon.git "$WSDIR" --quiet
+
+    # 5. Write workspace.json so preflight accepts the role
+    CURRENT=$(grep '^version = ' core/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+    MILESTONE=$(echo "$CURRENT" | sed 's/-rc\.[0-9]*//' | sed 's/-nightly\.[0-9]*//')
+    mkdir -p "$WSDIR/.omegon/runtime"
+    cat > "$WSDIR/.omegon/runtime/workspace.json" <<JSON
+{
+  "project_id": "Users::cwilson::workspace::black-meridian::omegon",
+  "workspace_id": "cut-rc-workspace",
+  "label": "release",
+  "path": "$WSDIR",
+  "backend_kind": "local-dir",
+  "vcs_ref": {"vcs": "git", "branch": "main", "revision": null, "remote": "origin"},
+  "bindings": {"milestone_id": "$MILESTONE", "design_node_id": null, "openspec_change": null},
+  "branch": "main",
+  "role": "release",
+  "workspace_kind": "release",
+  "mutability": "mutable",
+  "owner_session_id": "cut-rc",
+  "owner_agent_id": "operator",
+  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "last_heartbeat": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "archived": false,
+  "archived_at": null,
+  "archive_reason": null,
+  "parent_workspace_id": null,
+  "source": "operator"
+}
+JSON
+
+    # 6. Cut the RC from the release workspace
+    echo "Cutting RC from release workspace..."
+    just --justfile "$WSDIR/justfile" --working-directory "$WSDIR" rc
+
+    # 7. Pull the new commit + tag back into local main
+    echo "Pulling RC commit back into local main..."
+    git pull origin main --quiet
+    NEW_VERSION=$(grep '^version = ' core/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+    echo ""
+    echo "✓ $NEW_VERSION — local main is up to date"
+
 # Cut a release candidate: bump rc.N, test, commit, tag, build, sign.
 # Push the tag to trigger CI: git push origin main --tags
 rc-validate:
