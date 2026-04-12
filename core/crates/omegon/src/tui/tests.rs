@@ -2073,17 +2073,14 @@ fn harness_status_memory_drives_instrument_panel_working_row() {
 }
 
 #[test]
-fn slash_model_no_args_enqueues_model_view() {
+fn slash_model_no_args_opens_selector() {
     let mut app = test_app();
-    let (tx, mut rx) = test_tx_with_rx();
+    let tx = test_tx();
 
     let result = app.handle_slash_command("/model", &tx);
     assert!(matches!(result, SlashResult::Handled));
-
-    match rx.try_recv().expect("queued command") {
-        TuiCommand::ModelView { respond_to: None } => {}
-        other => panic!("expected model view command, got: {other:?}"),
-    }
+    assert!(app.selector.is_some(), "expected model selector to open");
+    assert!(matches!(app.selector_kind, Some(SelectorKind::Model)));
 }
 
 #[test]

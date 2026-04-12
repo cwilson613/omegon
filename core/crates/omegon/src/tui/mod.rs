@@ -3280,7 +3280,7 @@ impl App {
 
             "model" => {
                 if args.is_empty() {
-                    let _ = tx.try_send(TuiCommand::ModelView { respond_to: None });
+                    self.open_model_selector();
                     SlashResult::Handled
                 } else {
                     match canonical_slash_command("model", args) {
