@@ -1563,6 +1563,12 @@ pub async fn session_stats_view_response(
 ) -> SlashCommandResponse {
     let settings = shared_settings.lock().unwrap().clone();
     let est = runtime_state.conversation.estimate_tokens();
+    let live_harness = agent
+        .dashboard_handles
+        .harness
+        .as_ref()
+        .and_then(|h| h.lock().ok().map(|status| status.clone()))
+        .unwrap_or_else(crate::status::HarnessStatus::assemble);
     SlashCommandResponse {
         accepted: true,
         output: Some(format!(
@@ -1578,12 +1584,12 @@ pub async fn session_stats_view_response(
             settings.model_short(),
             settings.thinking.icon(),
             settings.thinking.as_str(),
-            if crate::status::HarnessStatus::assemble().memory_available {
+            if live_harness.memory_available {
                 "available"
             } else {
                 "UNAVAILABLE"
             },
-            if crate::status::HarnessStatus::assemble().cleave_available {
+            if live_harness.cleave_available {
                 "available"
             } else {
                 "UNAVAILABLE"

@@ -1291,14 +1291,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     }
 
     // ─── Shared setup ───────────────────────────────────────────────────
-    // Default: resume most recent session. --fresh overrides. --resume <id> pins a specific one.
-    let resume: Option<Option<&str>> = if cli.fresh {
-        None
-    } else if let Some(ref r) = cli.resume {
-        Some(r.as_deref())
-    } else {
-        Some(None) // try most recent
-    };
+    // Fresh by default. --resume opts into session restore; --resume with no value
+    // means "most recent" and --fresh forces a clean start.
+    let resume = interactive_resume_mode(cli);
     let mut agent = setup::AgentSetup::new(&cli.cwd, resume, Some(shared_settings.clone())).await?;
     agent.initial_harness_status.update_runtime_posture(
         omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
@@ -2735,6 +2730,16 @@ pub(crate) struct CliRuntimeView<'a> {
     pub(crate) model: &'a str,
 }
 
+fn interactive_resume_mode(cli: &Cli) -> Option<Option<&str>> {
+    if cli.fresh {
+        None
+    } else if let Some(ref r) = cli.resume {
+        Some(r.as_deref())
+    } else {
+        None
+    }
+}
+
 fn split_interactive_agent(agent: setup::AgentSetup) -> (InteractiveAgentHost, InteractiveAgentState) {
     let host = InteractiveAgentHost {
         session_id: agent.session_id,
@@ -3822,6 +3827,29 @@ mod tests {
     }
 
     #[test]
+    fn interactive_resume_mode_defaults_to_fresh_session() {
+        let cli = Cli::parse_from(["omegon"]);
+        assert!(interactive_resume_mode(&cli).is_none());
+    }
+
+    #[test]
+    fn interactive_resume_mode_resumes_most_recent_when_requested() {
+        let cli = Cli::parse_from(["omegon", "--resume"]);
+        assert_eq!(interactive_resume_mode(&cli), Some(None));
+    }
+
+    #[test]
+    fn interactive_resume_mode_resumes_specific_session_when_requested() {
+        let cli = Cli::parse_from(["omegon", "--resume", "abc123"]);
+        assert_eq!(interactive_resume_mode(&cli), Some(Some("abc123")));
+    }
+
+    #[test]
+    fn interactive_resume_mode_fresh_overrides_resume_flag() {
+        let cli = Cli::parse_from(["omegon", "--fresh", "--resume", "abc123"]);
+        assert!(interactive_resume_mode(&cli).is_none());
+    }
+
     fn interactive_runtime_supervisor_starts_first_prompt_fifo() {
         let mut supervisor = InteractiveRuntimeSupervisor::default();
         supervisor.enqueue_prompt(
