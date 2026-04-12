@@ -3104,15 +3104,15 @@ impl App {
                 .take(2)
                 .collect::<Vec<_>>()
                 .join("-");
-            let prompt = if self.agent_active {
-                format!(" ⟳ {}... ", self.working_verb)
-            } else {
-                format!(" {model_short} ▸ ")
-            };
             let editor_title = if self.agent_active {
-                Span::styled(prompt, t.style_warning())
+                let verb_display = spinner::maybe_glitch(self.working_verb)
+                    .unwrap_or_else(|| self.working_verb.to_string());
+                Line::from(vec![
+                    Span::styled(" ⟳ ", Style::default().fg(t.accent_bright()).add_modifier(ratatui::style::Modifier::BOLD)),
+                    Span::styled(format!("{verb_display} "), Style::default().fg(t.accent_muted())),
+                ])
             } else {
-                Span::styled(prompt, t.style_accent())
+                Line::from(Span::styled(format!(" {model_short} ▸ "), t.style_accent()))
             };
             let editor_block = Block::default()
                 .borders(Borders::TOP)
@@ -6066,12 +6066,21 @@ pub async fn run_tui(
         original_hook(info);
     }));
 
-    // Seed spinner from process start time for variety across sessions
-    spinner::seed(
+    // Initialise spinner: seed from process start time for variety across
+    // sessions, and load user extras from ~/.config/omegon/spinner-verbs.txt.
+    let extras_path = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".config/omegon/spinner-verbs.txt");
+    spinner::init(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as usize)
             .unwrap_or(42),
+        if extras_path.exists() {
+            Some(extras_path.as_path())
+        } else {
+            None
+        },
     );
 
     let mouse_enabled = settings.lock().map(|s| s.mouse).unwrap_or(true);
