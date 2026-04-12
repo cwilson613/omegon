@@ -3342,10 +3342,14 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
         }
     }
 
-    // Graceful bridge shutdown
+    // Graceful bridge shutdown.
+    //
+    // In headless benchmark mode the agent task may finish while other
+    // components still hold cloned AgentEvent senders. Waiting forever for the
+    // stderr event-printer task to observe channel closure can therefore hang
+    // process exit even though the task already succeeded. That in turn blocks
+    // usage JSON emission and breaks benchmark artifact finalization.
     bridge.shutdown().await;
-    drop(events_tx);
-    let _ = event_task.await;
 
     if let Some(path) = usage_json.as_ref() {
         let summary = benchmark_summary
@@ -3353,6 +3357,14 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
             .map(|guard| guard.clone())
             .unwrap_or_default();
         write_benchmark_usage_json(path, &summary)?;
+    }
+
+    drop(events_tx);
+    match tokio::time::timeout(std::time::Duration::from_millis(250), event_task).await {
+        Ok(_) => {}
+        Err(_) => {
+            tracing::warn!("headless benchmark event-printer task did not drain before shutdown; aborting it");
+        }
     }
 
     match &result {
@@ -4776,6 +4788,19 @@ mod tests {
         assert_eq!(written["per_turn"]["avg_cache_tokens"], 2);
         assert_eq!(written["per_turn"]["avg_cache_write_tokens"], 0);
         assert_eq!(written["per_turn"]["avg_estimated_tokens"], 107);
+    }
+
+    #[tokio::test]
+    async fn benchmark_event_printer_timeout_does_not_block_usage_finalization() {
+        let (_events_tx, mut events_rx) = tokio::sync::broadcast::channel::<AgentEvent>(4);
+        let blocker = tokio::spawn(async move {
+            let _held_sender = _events_tx.clone();
+            let _ = events_rx.recv().await;
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        });
+
+        let wait = tokio::time::timeout(std::time::Duration::from_millis(50), blocker).await;
+        assert!(wait.is_err(), "event task should still be blocked before forced shutdown handling");
     }
 
     #[test]
