@@ -119,11 +119,111 @@ impl DelegateResultStore {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum DelegateWorkerProfile {
+    Scout,
+    Patch,
+    Verify,
+}
+
+impl DelegateWorkerProfile {
+    fn parse(value: Option<&str>) -> Self {
+        match value.unwrap_or("scout") {
+            "patch" => Self::Patch,
+            "verify" => Self::Verify,
+            _ => Self::Scout,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Scout => "scout",
+            Self::Patch => "patch",
+            Self::Verify => "verify",
+        }
+    }
+
+    fn prompt_preamble(self) -> &'static str {
+        match self {
+            Self::Scout => {
+                "You are a delegated Omegon scout worker. Read/search only. Do not broaden scope, do not mutate files, and return concise evidence."
+            }
+            Self::Patch => {
+                "You are a delegated Omegon patch worker. Make the smallest justified scoped edit, validate narrowly, and report the touched files plainly."
+            }
+            Self::Verify => {
+                "You are a delegated Omegon verify worker. Run bounded checks, summarize outcomes, and do not edit files."
+            }
+        }
+    }
+
+    fn runtime_profile(
+        self,
+        scope: Option<&[String]>,
+        thinking_level: Option<&str>,
+        persona: Option<&str>,
+    ) -> ChildAgentRuntimeProfile {
+        let mut runtime = ChildAgentRuntimeProfile {
+            context_class: Some("squad".to_string()),
+            thinking_level: Some(thinking_level.unwrap_or("minimal").to_string()),
+            disabled_tools: vec![
+                "web_search".into(),
+                "design_tree".into(),
+                "design_tree_update".into(),
+                "openspec_manage".into(),
+                "lifecycle_doctor".into(),
+                "cleave_assess".into(),
+                "cleave_run".into(),
+                "delegate".into(),
+                "delegate_result".into(),
+                "delegate_status".into(),
+                "request_context".into(),
+                "context_compact".into(),
+                "context_clear".into(),
+                "memory_store".into(),
+                "memory_recall".into(),
+                "memory_query".into(),
+                "memory_archive".into(),
+                "memory_supersede".into(),
+                "memory_focus".into(),
+                "memory_release".into(),
+                "memory_episodes".into(),
+                "memory_compact".into(),
+                "manage_tools".into(),
+                "set_model_tier".into(),
+                "switch_to_offline_driver".into(),
+                "set_thinking_level".into(),
+                "session_log".into(),
+                "auth_status".into(),
+            ],
+            preloaded_files: scope.map(|s| s.to_vec()).unwrap_or_default(),
+            persona: persona.map(ToString::to_string),
+            ..Default::default()
+        };
+        runtime.enabled_tools = match self {
+            Self::Scout => vec!["read".into(), "bash".into(), "codebase_search".into(), "view".into()],
+            Self::Patch => vec!["read".into(), "edit".into(), "change".into(), "bash".into()],
+            Self::Verify => vec!["read".into(), "bash".into()],
+        };
+        runtime
+    }
+
+    fn max_turns(self) -> u32 {
+        match self {
+            Self::Scout => 4,
+            Self::Patch => 6,
+            Self::Verify => 4,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct DelegateRuntimeRequest {
     scope: Option<Vec<String>>,
     model: Option<String>,
     thinking_level: Option<String>,
+    worker_profile: DelegateWorkerProfile,
 }
 
 /// Mock delegate runner for this implementation
@@ -140,15 +240,14 @@ impl DelegateRunner {
 
     fn build_delegate_prompt(
         &self,
+        worker_profile: DelegateWorkerProfile,
         task: &str,
         scope: Option<&[String]>,
         facts: Option<&[String]>,
         field_kit_context: &str,
     ) -> String {
-        let mut prompt = String::from(
-            "You are a delegated Omegon subagent running a bounded child task. \
-Work directly, stay within scope, and finish with a concise final result.\n\n",
-        );
+        let mut prompt = String::from(worker_profile.prompt_preamble());
+        prompt.push_str("\n\n");
         prompt.push_str("## Task\n");
         prompt.push_str(task);
         prompt.push_str("\n");
@@ -174,6 +273,9 @@ Work directly, stay within scope, and finish with a concise final result.\n\n",
             prompt.push('\n');
         }
         prompt.push_str(
+            "\n## Constraints\n- Stay within the declared scope.\n- Do not broaden into design/lifecycle/spec work.\n- Do not delegate further.\n- Prefer concise output over process narration.\n",
+        );
+        prompt.push_str(
             "\n## Output contract\nReturn the concrete result of the delegated task. \
 If you edited files, say which ones. If you validated, say what ran. \
 If blocked, say the blocker plainly.\n",
@@ -197,36 +299,16 @@ If blocked, say the blocker plainly.\n",
             agent_binary: std::env::current_exe()
                 .context("delegate runner could not locate current executable")?,
             model,
-            max_turns: 8,
+            max_turns: runtime.worker_profile.max_turns(),
             inherited_env: Vec::new(),
             injected_env: Vec::new(),
-            runtime: ChildAgentRuntimeProfile {
-                context_class: Some("squad".to_string()),
-                thinking_level: Some(
-                    runtime
-                        .thinking_level
-                        .clone()
-                        .unwrap_or_else(|| "minimal".to_string()),
-                ),
-                enabled_tools: vec!["read".into(), "write".into(), "edit".into(), "change".into(), "bash".into()],
-                disabled_tools: vec![
-                    "web_search".into(),
-                    "design_tree".into(),
-                    "design_tree_update".into(),
-                    "openspec_manage".into(),
-                    "lifecycle_doctor".into(),
-                    "cleave_assess".into(),
-                    "cleave_run".into(),
-                    "request_context".into(),
-                    "context_compact".into(),
-                    "context_clear".into(),
-                ],
-                preloaded_files: runtime.scope.clone().unwrap_or_default(),
-                persona: mind.map(ToString::to_string),
-                ..Default::default()
-            },
+            runtime: runtime.worker_profile.runtime_profile(
+                runtime.scope.as_deref(),
+                runtime.thinking_level.as_deref(),
+                mind,
+            ),
         };
-        let (mut child, _pid) =
+        let (child, _pid) =
             spawn_headless_child_agent(&child_config, &self.cwd, &prompt_path)?;
         let output = child
             .wait_with_output()
@@ -257,6 +339,7 @@ If blocked, say the blocker plainly.\n",
         scope: Option<Vec<String>>,
         model: Option<String>,
         thinking_level: Option<String>,
+        worker_profile: DelegateWorkerProfile,
         facts: Option<Vec<String>>,
         mind: Option<String>,
     ) -> anyhow::Result<()> {
@@ -311,8 +394,10 @@ If blocked, say the blocker plainly.\n",
             scope: scope.clone(),
             model,
             thinking_level,
+            worker_profile,
         };
         let prompt = self.build_delegate_prompt(
+            worker_profile,
             &task,
             scope.as_deref(),
             facts.as_deref(),
@@ -424,7 +509,12 @@ impl Feature for DelegateFeature {
                         "agent": { "type": "string" },
                         "scope": { "type": "array", "items": {"type": "string"} },
                         "model": { "type": "string" },
-                        "thinking_level": { "type": "string" },
+                        "worker_profile": {
+                            "type": "string",
+                            "enum": ["scout", "patch", "verify"],
+                            "description": "Micro-worker profile. scout=read/search, patch=small scoped edit, verify=bounded validation",
+                            "default": "scout"
+                        },
                         "facts": { "type": "array", "items": {"type": "string"} },
                         "mind": { "type": "string" },
                         "background": { "type": "boolean", "default": true }
@@ -500,6 +590,9 @@ impl Feature for DelegateFeature {
                     .get("mind")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
+                let worker_profile = DelegateWorkerProfile::parse(
+                    args.get("worker_profile").and_then(|v| v.as_str()),
+                );
                 let background = args
                     .get("background")
                     .and_then(|v| v.as_bool())
@@ -523,6 +616,7 @@ impl Feature for DelegateFeature {
                         scope,
                         model,
                         thinking_level,
+                        worker_profile,
                         facts,
                         mind,
                     )
@@ -800,6 +894,54 @@ fn parse_agent_spec(content: &str) -> Option<AgentSpec> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn delegate_worker_profile_defaults_to_scout_and_is_hyper_scaled_down() {
+        let profile = DelegateWorkerProfile::parse(None);
+        assert_eq!(profile, DelegateWorkerProfile::Scout);
+        let runtime = profile.runtime_profile(None, None, None);
+        assert_eq!(runtime.context_class.as_deref(), Some("squad"));
+        assert_eq!(runtime.thinking_level.as_deref(), Some("minimal"));
+        assert_eq!(profile.max_turns(), 4);
+        assert_eq!(
+            runtime.enabled_tools,
+            vec!["read", "bash", "codebase_search", "view"]
+        );
+        assert!(runtime.disabled_tools.iter().any(|t| t == "delegate"));
+        assert!(runtime.disabled_tools.iter().any(|t| t == "cleave_run"));
+        assert!(runtime.disabled_tools.iter().any(|t| t == "memory_store"));
+    }
+
+    #[test]
+    fn delegate_worker_profiles_specialize_tool_surface() {
+        let patch = DelegateWorkerProfile::Patch.runtime_profile(None, Some("minimal"), None);
+        assert_eq!(patch.enabled_tools, vec!["read", "edit", "change", "bash"]);
+        assert_eq!(DelegateWorkerProfile::Patch.max_turns(), 6);
+
+        let verify = DelegateWorkerProfile::Verify.runtime_profile(None, None, None);
+        assert_eq!(verify.enabled_tools, vec!["read", "bash"]);
+        assert_eq!(DelegateWorkerProfile::Verify.max_turns(), 4);
+    }
+
+    #[test]
+    fn delegate_tool_schema_exposes_worker_profile() {
+        let temp_dir = TempDir::new().unwrap();
+        let feature = DelegateFeature::new(&temp_dir.path().to_path_buf(), vec![]);
+        let delegate_tool = feature
+            .tools()
+            .into_iter()
+            .find(|tool| tool.name == "delegate")
+            .expect("delegate tool exists");
+        let worker = &delegate_tool.parameters["properties"]["worker_profile"];
+        assert_eq!(worker["default"].as_str(), Some("scout"));
+        assert!(
+            worker["enum"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v.as_str() == Some("patch"))
+        );
+    }
 
     #[tokio::test]
     async fn test_delegate_feature_tools() {
