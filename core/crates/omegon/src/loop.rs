@@ -78,6 +78,72 @@ impl Default for LoopConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AutoDelegatePlan {
+    worker_profile: &'static str,
+}
+
+fn classify_auto_delegate_plan(
+    config: &LoopConfig,
+    conversation: &ConversationState,
+    tool_calls: &[ToolCall],
+    dominant_phase: Option<OodaPhase>,
+    drift_kind: Option<DriftKind>,
+) -> Option<AutoDelegatePlan> {
+    if !is_slim_execution_bias(config) || tool_calls.is_empty() {
+        return None;
+    }
+    if tool_calls.iter().any(|call| call.name == "delegate") {
+        return None;
+    }
+    if !conversation.intent.files_modified.is_empty() {
+        return None;
+    }
+    if tool_calls.iter().any(|call| is_mutation_tool(&call.name) || call.name == "commit") {
+        return None;
+    }
+    if matches!(drift_kind, Some(DriftKind::OrientationChurn))
+        && tool_calls.iter().all(|call| is_repo_inspection_tool(&call.name))
+    {
+        return Some(AutoDelegatePlan {
+            worker_profile: "scout",
+        });
+    }
+    if matches!(dominant_phase, Some(OodaPhase::Act))
+        && tool_calls.iter().all(is_validation_tool)
+    {
+        return Some(AutoDelegatePlan {
+            worker_profile: "verify",
+        });
+    }
+    None
+}
+
+fn auto_delegate_tool_call(
+    conversation: &ConversationState,
+    plan: AutoDelegatePlan,
+) -> ToolCall {
+    let last_prompt = conversation.last_user_prompt();
+    let task = if !last_prompt.trim().is_empty() {
+        last_prompt.trim().to_string()
+    } else {
+        conversation
+            .intent
+            .current_task
+            .clone()
+            .unwrap_or_else(|| "Inspect the current bounded task and return concise findings.".to_string())
+    };
+    ToolCall {
+        id: format!("auto-delegate-{}", conversation.turn_count().saturating_add(1)),
+        name: "delegate".to_string(),
+        arguments: serde_json::json!({
+            "task": task,
+            "background": false,
+            "worker_profile": plan.worker_profile,
+        }),
+    }
+}
+
 fn default_context_composition(context_window: usize) -> ContextComposition {
     ContextComposition {
         free_tokens: context_window,
@@ -1242,9 +1308,23 @@ pub async fn run(
         }
 
         // ─── Dispatch tool calls ────────────────────────────────────
+        let auto_delegate_plan = classify_auto_delegate_plan(
+            config,
+            conversation,
+            tool_calls,
+            None,
+            None,
+        );
+        let dispatch_calls_storage;
+        let dispatch_calls: &[ToolCall] = if let Some(plan) = auto_delegate_plan {
+            dispatch_calls_storage = vec![auto_delegate_tool_call(conversation, plan)];
+            &dispatch_calls_storage
+        } else {
+            tool_calls
+        };
         let results = dispatch_tools(
             bus,
-            tool_calls,
+            dispatch_calls,
             events,
             cancel.clone(),
             &config.cwd,
@@ -1256,10 +1336,10 @@ pub async fn run(
         for result in &results {
             conversation.push_tool_result(result.clone());
         }
-        conversation.intent.update_from_tools(tool_calls, &results);
+        conversation.intent.update_from_tools(dispatch_calls, &results);
 
-        let dominant_phase = classify_turn_phase(tool_calls, &results);
-        let drift_kind = classify_drift_kind(turn, conversation, tool_calls, &results);
+        let dominant_phase = classify_turn_phase(dispatch_calls, &results);
+        let drift_kind = classify_drift_kind(turn, conversation, dispatch_calls, &results);
         let constraints_before = captured
             .iter()
             .filter(|capture| {
@@ -1270,10 +1350,10 @@ pub async fn run(
         let progress_signal = classify_progress_signal(
             constraints_after.saturating_sub(constraints_before),
             constraints_after,
-            tool_calls,
+            dispatch_calls,
             &results,
         );
-        let evidence_sufficiency = detect_evidence_sufficiency(conversation, tool_calls, &results);
+        let evidence_sufficiency = detect_evidence_sufficiency(conversation, dispatch_calls, &results);
         controller.observe_turn(
             TurnEndReason::ToolContinuation,
             drift_kind,
@@ -1284,11 +1364,11 @@ pub async fn run(
             config,
             &controller,
             conversation,
-            tool_calls,
+            dispatch_calls,
             dominant_phase,
         );
 
-        if is_first_turn_orientation_churn(turn, config, conversation, tool_calls) {
+        if is_first_turn_orientation_churn(turn, config, conversation, dispatch_calls) {
             tracing::info!("First-turn orientation churn detected — injecting execution-bias nudge");
             conversation.push_user(
                 "[System: This run is execution-biased. Stop spending turns on orientation tools unless they are strictly required to unblock execution. On the next turn, take a concrete repo-inspection or implementation step: read the most relevant file, search the codebase for the target symbol/path, or make the smallest justified change.]"
@@ -1304,7 +1384,7 @@ pub async fn run(
         } else if controller.evidence_sufficient_streak > 0 && continuation_tier.is_some() {
             tracing::info!("Evidence sufficiency reached — injecting forced-convergence nudge");
             conversation.push_user(evidence_sufficiency_message());
-        } else if should_inject_execution_pressure(turn, config, conversation, tool_calls) {
+        } else if should_inject_execution_pressure(turn, config, conversation, dispatch_calls) {
             tracing::info!("Execution stall detected after repo inspection — injecting execution-pressure nudge");
             conversation.push_user(
                 "[System: You now have enough local evidence. Do not use broad inspection/search tools again until you do one of these two things: (1) make one concrete code edit, or (2) name one specific blocking ambiguity tied to a file or symbol. Stop narrating. Pick the smallest justified patch now, apply it, then run the narrowest relevant validation.]"
@@ -1316,7 +1396,7 @@ pub async fn run(
         }
 
         // ─── Emit tool events to bus features ───────────────────────
-        for (call, result) in tool_calls.iter().zip(results.iter()) {
+        for (call, result) in dispatch_calls.iter().zip(results.iter()) {
             bus.emit(&omegon_traits::BusEvent::ToolEnd {
                 id: call.id.clone(),
                 name: call.name.clone(),
@@ -1329,17 +1409,17 @@ pub async fn run(
         }
 
         // ─── Wire context signals ───────────────────────────────────
-        for call in tool_calls {
+        for call in dispatch_calls {
             context.record_tool_call(&call.name);
             // Track file access from tool arguments
             if let Some(path) = call.arguments.get("path").and_then(|v| v.as_str()) {
                 context.record_file_access(std::path::PathBuf::from(path));
             }
         }
-        context.update_phase_from_activity(tool_calls);
+        context.update_phase_from_activity(dispatch_calls);
 
         // ─── Feed stuck detector ────────────────────────────────────
-        for call in tool_calls {
+        for call in dispatch_calls {
             let is_error = results
                 .iter()
                 .find(|r| r.call_id == call.id)
@@ -3705,6 +3785,80 @@ mod tests {
             classify_progress_signal(0, 1, &tool_calls, &results),
             ProgressSignal::None
         );
+    }
+
+    #[test]
+    fn auto_delegate_scout_on_slim_orientation_churn_reads() {
+        let config = LoopConfig {
+            settings: Some(std::sync::Arc::new(std::sync::Mutex::new({
+                let mut s = crate::settings::Settings::new("openai-codex:gpt-4.1");
+                s.set_slim_mode(true);
+                s
+            }))),
+            ..LoopConfig::default()
+        };
+        let conversation = ConversationState::new();
+        let tool_calls = vec![
+            ToolCall { id: "1".into(), name: "read".into(), arguments: Value::Null },
+            ToolCall { id: "2".into(), name: "codebase_search".into(), arguments: Value::Null },
+        ];
+        let plan = classify_auto_delegate_plan(
+            &config,
+            &conversation,
+            &tool_calls,
+            Some(OodaPhase::Observe),
+            Some(DriftKind::OrientationChurn),
+        );
+        assert_eq!(plan.map(|p| p.worker_profile), Some("scout"));
+    }
+
+    #[test]
+    fn auto_delegate_verify_on_slim_validation_only_turns() {
+        let config = LoopConfig {
+            settings: Some(std::sync::Arc::new(std::sync::Mutex::new({
+                let mut s = crate::settings::Settings::new("openai-codex:gpt-4.1");
+                s.set_slim_mode(true);
+                s
+            }))),
+            ..LoopConfig::default()
+        };
+        let conversation = ConversationState::new();
+        let tool_calls = vec![ToolCall {
+            id: "1".into(),
+            name: "bash".into(),
+            arguments: serde_json::json!({"command": "cargo test -p omegon delegate"}),
+        }];
+        let plan = classify_auto_delegate_plan(
+            &config,
+            &conversation,
+            &tool_calls,
+            Some(OodaPhase::Act),
+            None,
+        );
+        assert_eq!(plan.map(|p| p.worker_profile), Some("verify"));
+    }
+
+    #[test]
+    fn auto_delegate_skips_when_parent_already_mutated_files() {
+        let config = LoopConfig {
+            settings: Some(std::sync::Arc::new(std::sync::Mutex::new({
+                let mut s = crate::settings::Settings::new("openai-codex:gpt-4.1");
+                s.set_slim_mode(true);
+                s
+            }))),
+            ..LoopConfig::default()
+        };
+        let mut conversation = ConversationState::new();
+        conversation.intent.files_modified.insert(std::path::PathBuf::from("src/lib.rs"));
+        let tool_calls = vec![ToolCall { id: "1".into(), name: "read".into(), arguments: Value::Null }];
+        let plan = classify_auto_delegate_plan(
+            &config,
+            &conversation,
+            &tool_calls,
+            Some(OodaPhase::Observe),
+            Some(DriftKind::OrientationChurn),
+        );
+        assert!(plan.is_none());
     }
 
     #[test]
