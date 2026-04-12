@@ -6,6 +6,7 @@
 use chrono::{DateTime, Utc};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
+use unicode_width::UnicodeWidthChar;
 
 use super::model_catalog::ModelCatalog;
 use super::theme::Theme;
@@ -912,16 +913,30 @@ fn truncate_for_width(value: &str, max_width: usize) -> String {
     if max_width == 0 {
         return String::new();
     }
-    let len = value.chars().count();
-    if len <= max_width {
+
+    let display_width: usize = value
+        .chars()
+        .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
+        .sum();
+    if display_width <= max_width {
         return value.to_string();
     }
     if max_width == 1 {
         return "…".to_string();
     }
-    let mut truncated = value.chars().take(max_width - 1).collect::<String>();
-    truncated.push('…');
-    truncated
+
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in value.chars() {
+        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + w > max_width - 1 {
+            break;
+        }
+        out.push(ch);
+        used += w;
+    }
+    out.push('…');
+    out
 }
 
 fn shorten_cwd(cwd: &str, max_chars: usize) -> String {
@@ -1341,6 +1356,21 @@ mod tests {
         assert_eq!(truncate_for_width("weekly 4d0h", 6), "weekl…");
         assert_eq!(truncate_for_width("ok", 6), "ok");
         assert_eq!(truncate_for_width("ok", 0), "");
+    }
+
+    #[test]
+    fn truncate_for_width_uses_display_cell_width_not_char_count() {
+        // `⤴` is rendered as a full terminal cell glyph; truncation must use
+        // display width math so mixed ASCII + symbol rows do not drift into the
+        // neighboring panel when the footer is narrow.
+        let value = "⤴ OpenAI/Codex · ↻ sub";
+        let truncated = truncate_for_width(value, 10);
+        let rendered_width: usize = truncated
+            .chars()
+            .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
+            .sum();
+        assert!(rendered_width <= 10, "got {truncated:?} width {rendered_width}");
+        assert!(truncated.ends_with('…'), "got {truncated:?}");
     }
 
     #[test]
