@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 74,
+    "rc_count": 75,
     "notes": [
       "docs(benchmark): seed design node for deferred bwrap sandbox work",
       "feat(aggregate-mode): Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.",
@@ -607,6 +607,7 @@
       "fix(context): reduce code pack selector false positives",
       "fix(context): sync compact status with authoritative snapshot",
       "fix(context): wait for authoritative slash completion",
+      "fix(core): clear release-blocking compiler warnings",
       "fix(dev): extract workspace.json writer to script, fix cut-rc parse error",
       "fix(errors): broaden upstream outage classification",
       "fix(errors): collapse provider-side upstream failures",
@@ -667,6 +668,7 @@
       "fix(tui): clear overlay bodies when popup content shrinks",
       "fix(tui): clear stale cleave progress when runs finish",
       "fix(tui): clear the full root frame on each draw",
+      "fix(tui): clip inference wave rendering to its panel",
       "fix(tui): clip tool rows to panel width",
       "fix(tui): compact engine usage telemetry",
       "fix(tui): execute direct context request slash path",
@@ -712,6 +714,7 @@
       "fix(tui): stop instrument panel boundary leakage",
       "fix(tui): strip ansi debris from cleave activity rows",
       "fix(tui): strip control bytes from all panel rendering paths (#35)",
+      "fix(tui): style version updates with inline update hint",
       "fix(tui): support queued prompts with attachment lists",
       "fix(tui): take instrument seam width from the tools panel",
       "fix(tui): truncate footer engine rows by display width",
@@ -768,7 +771,7 @@
       "refactor(workspace): add backend and vcs identity boundaries",
       "refactor(workspace): separate labels from substrate identity"
     ],
-    "rc_version": "0.15.10-rc.80",
-    "last_rc": "2026-04-12T13:05:39Z"
+    "rc_version": "0.15.10-rc.81",
+    "last_rc": "2026-04-12T14:27:54Z"
   }
 }
