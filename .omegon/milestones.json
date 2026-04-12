@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 76,
+    "rc_count": 77,
     "notes": [
       "docs(benchmark): seed design node for deferred bwrap sandbox work",
       "feat(aggregate-mode): Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.",
@@ -522,6 +522,7 @@
       "feat(telemetry): surface provider quota snapshots in footer",
       "feat(tests-copy): Update slash-command surface, operator-facing status/help text, and tests to make /auspex the primary local desktop command while preserving /dash as compatibility/debug wording. Add tests for detection/launch status and command presence/behavior.",
       "feat(tui): TUI render-quality pass — live progress, table alignment, edit diffs, token annotations, clipboard retention (#34)",
+      "feat(tui): add ! @ and * prompt prefixes",
       "feat(tui): add /ui surface presets for slim conversation-first mode",
       "feat(tui): add auspex status handoff probe",
       "feat(tui): add direct context request slash command",
@@ -529,6 +530,7 @@
       "feat(tui): fullscreen focus mode and inline image attachments",
       "feat(tui): make image attachments inline editor tokens",
       "feat(tui): unify delegate and cleave worker instrumentation",
+      "feat(tui): upgrade queued prompt previews and footer panel stability",
       "feat(tui-copy): Update in-product copy in the TUI/tutorial/help surfaces so operator-facing text points to Auspex as the primary browser UI, while leaving current `/dash` command behavior intact as compatibility wording. Focus on core/crates/omegon/src/tui/mod.rs, core/crates/omegon/src/tui/tutorial.rs, and nearby help/command descriptions only.",
       "feat(tutorial): add tutorial gate and orientation mode",
       "feat(usage): add telemetry advisory command",
@@ -658,6 +660,7 @@
       "fix(telemetry): format provider usage by active backend",
       "fix(tui): accept json context request slash payloads",
       "fix(tui): add a dedicated seam gutter between instrument panels",
+      "fix(tui): add footer gutters between instrument panels",
       "fix(tui): add selectors for update and workspace slash flows",
       "fix(tui): align activity row with context band semantics",
       "fix(tui): align cursor with inline attachment tokens",
@@ -676,6 +679,7 @@
       "fix(tui): clip tool rows to panel width",
       "fix(tui): compact engine usage telemetry",
       "fix(tui): execute direct context request slash path",
+      "fix(tui): extend tools-panel recent fade window",
       "fix(tui): harden cleave panel against border glyph leakage",
       "fix(tui): keep thinking telemetry in blue family",
       "fix(tui): keep version visible in persistent footer",
@@ -777,7 +781,7 @@
       "refactor(workspace): add backend and vcs identity boundaries",
       "refactor(workspace): separate labels from substrate identity"
     ],
-    "rc_version": "0.15.10-rc.82",
-    "last_rc": "2026-04-12T15:51:59Z"
+    "rc_version": "0.15.10-rc.83",
+    "last_rc": "2026-04-12T16:50:44Z"
   }
 }
