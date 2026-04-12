@@ -40,6 +40,8 @@ const currentVersion = versionMatch ? `v${versionMatch[1]}` : "latest";
       <p class="hero-copy">
         Omegon is the agent harness for engineers who need more than a polite chatbot: persistent project memory,
         honest provider identity, design and spec lifecycles, and enough systems discipline to survive real work.
+        It installs two entrypoints from the same binary: <code>om</code> for the slim, copy-friendly terminal mode,
+        and <code>omegon</code> for the full harness.
       </p>
 
       <div class="hero-install-wrap">
@@ -61,6 +63,7 @@ const currentVersion = versionMatch ? `v${versionMatch[1]}` : "latest";
       </p>
       <p class="hero-alt-install">RC one-shot: <code>CHANNEL=rc curl -fsSL https://omegon.styrene.io/install.sh | sh</code></p>
       <p class="hero-alt-install hero-alt-rc">Package manager: <code>brew tap styrene-lab/tap && brew install omegon</code> or <code>brew install styrene-lab/tap/omegon-rc</code></p>
+      <p class="hero-alt-install">After install: <code>om</code> starts the slim terminal-first mode, <code>omegon</code> starts the full harness.</p>
 
       <div class="hero-cta">
         <a href="/docs/get-started" class="btn btn-primary">Get Working Fast →</a>

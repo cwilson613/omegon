@@ -57,7 +57,7 @@ import Docs from "../../layouts/Docs.astro";
       <tr><td><code>/milestone [action]</code></td><td>Release milestone management: <code>freeze</code>, <code>status</code>.</td></tr>
       <tr><td><code>/delegate [status]</code></td><td>Delegate task management across sessions.</td></tr>
       <tr><td><code>/chronos [sub]</code></td><td>Date/time context: <code>week</code>, <code>month</code>, <code>quarter</code>, <code>relative</code>, <code>iso</code>, <code>epoch</code>, <code>tz</code>, <code>range</code>, <code>all</code>.</td></tr>
-      <tr><td><code>/update</code></td><td>Check for updates, inspect release notes, and install verified stable or RC builds.</td></tr>
+      <tr><td><code>/update</code></td><td>Check for updates, inspect release notes, and install verified stable, RC, or nightly builds depending on the selected update lane.</td></tr>
     </tbody>
   </table>
 
@@ -82,6 +82,9 @@ import Docs from "../../layouts/Docs.astro";
       <tr><td><code>/auspex open</code></td><td>Launch the primary browser surface. If the local compatibility server is not running yet, Omegon starts it first.</td></tr>
       <tr><td><code>/dash</code></td><td>Open Omegon's local browser compatibility/debug surface (real-time live state over WebSocket).</td></tr>
       <tr><td><code>/focus</code></td><td>Toggle selected-segment focus mode for terminal-native text selection.</td></tr>
+      <tr><td><code>/warp</code></td><td>Toggle live between <code>om</code> (slim) and <code>omegon</code> (full) runtime posture.</td></tr>
+      <tr><td><code>/shackle</code></td><td>Force slim <code>om</code>-style posture: copy-friendly, conversation-first, lower-pressure surfaces.</td></tr>
+      <tr><td><code>/unshackle</code></td><td>Force full <code>omegon</code> posture with the broader harness surfaces.</td></tr>
       <tr><td><code>/tree [sub]</code></td><td>Design tree summary: <code>list</code>, <code>frontier</code>, <code>ready</code>, <code>blocked</code>.</td></tr>
       <tr><td><code>/tutorial [action]</code></td><td>Interactive tutorial overlay. Primary paths: <code>/tutorial</code> for the current-project flow and <code>/tutorial demo</code> for the scripted showcase. Management args: <code>status</code>, <code>reset</code>.</td></tr>
       <tr><td><code>/splash</code></td><td>Replay the splash animation.</td></tr>

@@ -101,9 +101,10 @@ import Docs from "../../layouts/Docs.astro";
 
   <h2>Mouse</h2>
   <p>
-    Mouse capture is on by default. To use your terminal's native text selection,
-    toggle mouse handling with <code>Ctrl+M</code>. Press <code>Ctrl+Y</code> to copy the selected
-    conversation segment as plain text.
+    In <code>om</code> / slim mode, mouse capture is off by default so terminal-native selection and paste work immediately.
+    In full <code>omegon</code> mode, mouse capture is on by default. Toggle mouse handling with <code>Ctrl+M</code> or use
+    <code>/warp</code>, <code>/shackle</code>, and <code>/unshackle</code> to move between slim and full runtime posture.
+    Press <code>Ctrl+Y</code> to copy the selected conversation segment as plain text.
   </p>
 
   <h2>Editor</h2>
@@ -115,6 +116,7 @@ import Docs from "../../layouts/Docs.astro";
     <li><strong>Enter</strong> sends the prompt</li>
     <li><strong>Shift+Enter</strong> inserts a newline</li>
     <li><strong>Arrow keys</strong> navigate text and history</li>
+    <li><strong>Mouse wheel</strong> scrolls the pane it is hovering over (conversation or dashboard), not prompt history recall</li>
   </ul>
 
   <h2>Browser surface</h2>

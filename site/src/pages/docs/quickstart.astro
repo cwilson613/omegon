@@ -13,10 +13,10 @@ import Docs from "../../layouts/Docs.astro";
   <h2>1. Install &amp; authenticate</h2>
   <pre><code>curl -fsSL https://omegon.styrene.io/install.sh | sh
 omegon login openai-codex   # or: omegon login ollama-cloud
-omegon                      # or: export ANTHROPIC_API_KEY="sk-ant-..." && omegon</code></pre>
+om                          # or: export ANTHROPIC_API_KEY="sk-ant-..." && om</code></pre>
   <p>
-    You will see the splash screen, then the TUI opens with the conversation view in the center,
-    the editor at the bottom, and the status footer below it.
+    <code>om</code> starts the slim terminal-first posture: conversation-first, copy-friendly, and lower-pressure by default.
+    Launch <code>omegon</code> instead if you want the full harness surfaces immediately.
   </p>
 
   <h2>2. Your first prompt</h2>
@@ -47,6 +47,7 @@ omegon                      # or: export ANTHROPIC_API_KEY="sk-ant-..." && omego
 /think high    # Raise reasoning effort
 /context clan  # Raise context class
 /status        # Check provider and system status
+/warp          # Toggle om ↔ omegon live
 /tutorial      # Launch the interactive overlay tutorial
 /update        # Inspect and install a newer release</code></pre>
 
