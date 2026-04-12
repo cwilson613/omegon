@@ -4709,39 +4709,40 @@ impl App {
 
             // ── Aliases ─────────────────────────────────────────────
             "shackle" => {
-                if let Ok(mut s) = self.settings.lock() {
-                    s.set_slim_mode(true);
-                }
                 self.set_ui_mode(UiMode::Slim);
-                self.conversation
-                    .push_system("⛓ Shackle engaged — slim mode active.");
-                SlashResult::Display("Shackled: slim runtime profile active.".into())
+                let _ = tx.try_send(TuiCommand::ExecuteControl {
+                    request: crate::control_runtime::ControlRequest::SetRuntimeMode { slim: true },
+                    respond_to: None,
+                });
+                SlashResult::Display("Shackled: om mode active.".into())
             }
             "unshackle" => {
-                if let Ok(mut s) = self.settings.lock() {
-                    s.set_slim_mode(false);
-                }
                 self.set_ui_mode(UiMode::Full);
-                self.conversation
-                    .push_system("⛓‍💥 Shackle released — full harness active.");
-                SlashResult::Display("Unshackled: full runtime profile active.".into())
+                let _ = tx.try_send(TuiCommand::ExecuteControl {
+                    request: crate::control_runtime::ControlRequest::SetRuntimeMode { slim: false },
+                    respond_to: None,
+                });
+                SlashResult::Display("Unshackled: omegon mode active.".into())
             }
             "warp" => {
                 let slim_now = self.settings.lock().ok().is_some_and(|s| s.slim_mode);
-                if let Ok(mut s) = self.settings.lock() {
-                    s.set_slim_mode(!slim_now);
-                }
-                if slim_now {
-                    self.set_ui_mode(UiMode::Full);
-                    self.conversation
-                        .push_system("🌀 Warp complete — full harness active.");
-                    SlashResult::Display("Warped to full harness mode.".into())
+                let target_slim = !slim_now;
+                self.set_ui_mode(if target_slim {
+                    UiMode::Slim
                 } else {
-                    self.set_ui_mode(UiMode::Slim);
-                    self.conversation
-                        .push_system("🌀 Warp complete — slim mode active.");
-                    SlashResult::Display("Warped to slim mode.".into())
-                }
+                    UiMode::Full
+                });
+                let _ = tx.try_send(TuiCommand::ExecuteControl {
+                    request: crate::control_runtime::ControlRequest::SetRuntimeMode {
+                        slim: target_slim,
+                    },
+                    respond_to: None,
+                });
+                SlashResult::Display(if target_slim {
+                    "Warped to om mode.".into()
+                } else {
+                    "Warped to omegon mode.".into()
+                })
             }
             "thinking" => self.handle_slash_command(&format!("/think {args}"), tx),
             "models" => self.handle_slash_command("/model", tx),

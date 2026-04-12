@@ -4243,7 +4243,11 @@ mod tests {
     fn render_table_line_pads_to_display_width_not_char_count() {
         let widths = vec![8, 12];
         let body = render_table_line("| Ω read | text + images |", false, &widths, &Alpharius);
-        let text: String = body.spans.iter().map(|span| span.content.as_ref()).collect();
+        let text: String = body
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
         assert!(text.starts_with("│ "));
         assert!(text.ends_with("│"));
         assert!(text.contains("Ω read"), "{text}");

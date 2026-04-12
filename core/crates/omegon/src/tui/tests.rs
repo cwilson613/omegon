@@ -1247,49 +1247,77 @@ fn slash_focus_toggles_fullscreen_conversation_mode() {
 #[test]
 fn slash_shackle_switches_to_slim_runtime_profile() {
     let mut app = test_app();
-    let tx = test_tx();
+    let (tx, mut rx) = test_tx_with_rx();
 
     let result = app.handle_slash_command("/shackle", &tx);
     assert!(matches!(result, SlashResult::Display(_)));
     assert_eq!(app.ui_mode, UiMode::Slim);
     assert!(app.terminal_copy_mode);
     assert!(!app.mouse_capture_enabled);
-    let settings = app.settings.lock().unwrap().clone();
-    assert!(settings.slim_mode);
+
+    match rx.try_recv().expect("queued control") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::SetRuntimeMode { slim },
+            ..
+        } => assert!(slim),
+        other => panic!("expected SetRuntimeMode slim control request, got {other:?}"),
+    }
 }
 
 #[test]
 fn slash_unshackle_switches_to_full_runtime_profile() {
     let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
     if let Ok(mut s) = app.settings.lock() {
         s.set_slim_mode(true);
     }
     app.set_ui_mode(UiMode::Slim);
-    let tx = test_tx();
 
     let result = app.handle_slash_command("/unshackle", &tx);
     assert!(matches!(result, SlashResult::Display(_)));
     assert_eq!(app.ui_mode, UiMode::Full);
     assert!(!app.terminal_copy_mode);
     assert!(app.mouse_capture_enabled);
-    let settings = app.settings.lock().unwrap().clone();
-    assert!(!settings.slim_mode);
+
+    match rx.try_recv().expect("queued control") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::SetRuntimeMode { slim },
+            ..
+        } => assert!(!slim),
+        other => panic!("expected SetRuntimeMode full control request, got {other:?}"),
+    }
 }
 
 #[test]
 fn slash_warp_toggles_between_slim_and_full_modes() {
     let mut app = test_app();
-    let tx = test_tx();
+    let (tx, mut rx) = test_tx_with_rx();
 
     let result = app.handle_slash_command("/warp", &tx);
     assert!(matches!(result, SlashResult::Display(_)));
     assert_eq!(app.ui_mode, UiMode::Slim);
-    assert!(app.settings.lock().unwrap().slim_mode);
+    match rx.try_recv().expect("queued control") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::SetRuntimeMode { slim },
+            ..
+        } => assert!(slim),
+        other => panic!("expected SetRuntimeMode slim control request, got {other:?}"),
+    }
+
+    if let Ok(mut s) = app.settings.lock() {
+        s.set_slim_mode(true);
+    }
 
     let result = app.handle_slash_command("/warp", &tx);
     assert!(matches!(result, SlashResult::Display(_)));
     assert_eq!(app.ui_mode, UiMode::Full);
-    assert!(!app.settings.lock().unwrap().slim_mode);
+    match rx.try_recv().expect("queued control") {
+        TuiCommand::ExecuteControl {
+            request: crate::control_runtime::ControlRequest::SetRuntimeMode { slim },
+            ..
+        } => assert!(!slim),
+        other => panic!("expected SetRuntimeMode full control request, got {other:?}"),
+    }
 }
 
 #[test]

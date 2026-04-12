@@ -51,6 +51,55 @@ impl EventBus {
         }
     }
 
+    pub fn apply_operator_tool_profile(&mut self, slim_mode: bool) {
+        use crate::tool_registry as reg;
+        let Some(handle) = self.disabled_tools.as_ref() else {
+            return;
+        };
+        let mut disabled = handle.lock().unwrap();
+        disabled.clear();
+
+        // Base defaults for both om and omegon: specialist or low-frequency surfaces.
+        disabled.insert(reg::core::SPECULATE_START.into());
+        disabled.insert(reg::core::SPECULATE_CHECK.into());
+        disabled.insert(reg::core::SPECULATE_COMMIT.into());
+        disabled.insert(reg::core::SPECULATE_ROLLBACK.into());
+        disabled.insert(reg::render::RENDER_DIAGRAM.into());
+        disabled.insert(reg::render::GENERATE_IMAGE_LOCAL.into());
+        disabled.insert(reg::persona::SWITCH_PERSONA.into());
+        disabled.insert(reg::persona::SWITCH_TONE.into());
+        disabled.insert(reg::persona::LIST_PERSONAS.into());
+        disabled.insert(reg::delegate::DELEGATE.into());
+        disabled.insert(reg::delegate::DELEGATE_RESULT.into());
+        disabled.insert(reg::delegate::DELEGATE_STATUS.into());
+        disabled.insert(reg::auth::AUTH_STATUS.into());
+        disabled.insert(reg::harness_settings::HARNESS_SETTINGS.into());
+        disabled.insert(reg::memory::MEMORY_INGEST_LIFECYCLE.into());
+        disabled.insert(reg::memory::MEMORY_CONNECT.into());
+        disabled.insert(reg::memory::MEMORY_SEARCH_ARCHIVE.into());
+
+        if slim_mode {
+            // om/slim stays familiar and orientation-friendly: keep memory/search/shell/files on.
+            disabled.insert(reg::local_inference::LIST_LOCAL_MODELS.into());
+            disabled.insert(reg::local_inference::MANAGE_OLLAMA.into());
+            disabled.insert(reg::lifecycle::DESIGN_TREE.into());
+            disabled.insert(reg::lifecycle::DESIGN_TREE_UPDATE.into());
+            disabled.insert(reg::lifecycle::OPENSPEC_MANAGE.into());
+            disabled.insert(reg::lifecycle::LIFECYCLE_DOCTOR.into());
+            disabled.insert(reg::cleave::CLEAVE_ASSESS.into());
+            disabled.insert(reg::cleave::CLEAVE_RUN.into());
+            disabled.insert(reg::codescan::CODEBASE_INDEX.into());
+            disabled.insert(reg::session_log::SESSION_LOG.into());
+            disabled.insert(reg::core::SERVE.into());
+            disabled.insert(reg::view::VIEW.into());
+            disabled.insert(reg::context::CONTEXT_COMPACT.into());
+            disabled.insert(reg::context::CONTEXT_CLEAR.into());
+            disabled.insert(reg::model_budget::SET_MODEL_TIER.into());
+            disabled.insert(reg::model_budget::SWITCH_TO_OFFLINE_DRIVER.into());
+            disabled.insert(reg::model_budget::SET_THINKING_LEVEL.into());
+        }
+    }
+
     /// Set the disabled tools handle (called from setup after ManageTools is registered).
     pub fn set_disabled_tools(&mut self, handle: crate::features::manage_tools::DisabledTools) {
         self.disabled_tools = Some(handle);

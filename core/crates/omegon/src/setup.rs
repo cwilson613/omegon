@@ -573,74 +573,13 @@ impl AgentSetup {
         bus.set_disabled_tools(disabled_handle.clone());
 
         // ─── Default tool profile — disable rarely-used tools ───────────
-        // These tools are available via manage_tools enable but don't need
-        // to consume input tokens on every request.
         {
-            use crate::tool_registry as reg;
             let slim_mode = settings
                 .as_ref()
                 .and_then(|s| s.lock().ok().map(|g| g.slim_mode))
                 .unwrap_or(false);
+            bus.apply_operator_tool_profile(slim_mode);
             let mut disabled = disabled_handle.lock().unwrap();
-            // Speculation tools — only needed when explicitly exploring
-            disabled.insert(reg::core::SPECULATE_START.into());
-            disabled.insert(reg::core::SPECULATE_CHECK.into());
-            disabled.insert(reg::core::SPECULATE_COMMIT.into());
-            disabled.insert(reg::core::SPECULATE_ROLLBACK.into());
-            // Render/image tools — most sessions don't need them
-            disabled.insert(reg::render::RENDER_DIAGRAM.into());
-            disabled.insert(reg::render::GENERATE_IMAGE_LOCAL.into());
-            // Persona/tone switching — rarely used mid-session
-            disabled.insert(reg::persona::SWITCH_PERSONA.into());
-            disabled.insert(reg::persona::SWITCH_TONE.into());
-            disabled.insert(reg::persona::LIST_PERSONAS.into());
-            // Delegate system — advanced multi-agent, not default
-            disabled.insert(reg::delegate::DELEGATE.into());
-            disabled.insert(reg::delegate::DELEGATE_RESULT.into());
-            disabled.insert(reg::delegate::DELEGATE_STATUS.into());
-            // Auth probing — used at startup, not mid-conversation
-            disabled.insert(reg::auth::AUTH_STATUS.into());
-            // Harness settings — internal, rarely agent-called
-            disabled.insert(reg::harness_settings::HARNESS_SETTINGS.into());
-            // Memory tools that are rarely called directly
-            disabled.insert(reg::memory::MEMORY_INGEST_LIFECYCLE.into());
-            disabled.insert(reg::memory::MEMORY_CONNECT.into());
-            disabled.insert(reg::memory::MEMORY_SEARCH_ARCHIVE.into());
-            if slim_mode {
-                disabled.insert(reg::web_search::WEB_SEARCH.into());
-                disabled.insert(reg::local_inference::ASK_LOCAL_MODEL.into());
-                disabled.insert(reg::local_inference::LIST_LOCAL_MODELS.into());
-                disabled.insert(reg::local_inference::MANAGE_OLLAMA.into());
-                disabled.insert(reg::memory::MEMORY_STORE.into());
-                disabled.insert(reg::memory::MEMORY_RECALL.into());
-                disabled.insert(reg::memory::MEMORY_QUERY.into());
-                disabled.insert(reg::memory::MEMORY_ARCHIVE.into());
-                disabled.insert(reg::memory::MEMORY_SUPERSEDE.into());
-                disabled.insert(reg::memory::MEMORY_FOCUS.into());
-                disabled.insert(reg::memory::MEMORY_RELEASE.into());
-                disabled.insert(reg::memory::MEMORY_EPISODES.into());
-                disabled.insert(reg::memory::MEMORY_COMPACT.into());
-                disabled.insert(reg::lifecycle::DESIGN_TREE.into());
-                disabled.insert(reg::lifecycle::DESIGN_TREE_UPDATE.into());
-                disabled.insert(reg::lifecycle::OPENSPEC_MANAGE.into());
-                disabled.insert(reg::lifecycle::LIFECYCLE_DOCTOR.into());
-                disabled.insert(reg::cleave::CLEAVE_ASSESS.into());
-                disabled.insert(reg::cleave::CLEAVE_RUN.into());
-                disabled.insert(reg::codescan::CODEBASE_INDEX.into());
-                disabled.insert(reg::session_log::SESSION_LOG.into());
-                // OM research mode keeps local repo inspection and direct shell validation,
-                // but drops heavier orchestration/meta-control surfaces by default.
-                disabled.insert(reg::core::WHOAMI.into());
-                disabled.insert(reg::core::SERVE.into());
-                disabled.insert(reg::core::CHRONOS.into());
-                disabled.insert(reg::view::VIEW.into());
-                disabled.insert(reg::context::REQUEST_CONTEXT.into());
-                disabled.insert(reg::context::CONTEXT_COMPACT.into());
-                disabled.insert(reg::context::CONTEXT_CLEAR.into());
-                disabled.insert(reg::model_budget::SET_MODEL_TIER.into());
-                disabled.insert(reg::model_budget::SWITCH_TO_OFFLINE_DRIVER.into());
-                disabled.insert(reg::model_budget::SET_THINKING_LEVEL.into());
-            }
             tracing::info!(
                 disabled = disabled.len(),
                 slim = slim_mode,

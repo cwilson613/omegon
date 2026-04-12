@@ -89,6 +89,9 @@ pub enum ControlRequest {
     SetContextClass {
         class: crate::settings::ContextClass,
     },
+    SetRuntimeMode {
+        slim: bool,
+    },
     NewSession,
     ListSessions,
     AuthStatus,
@@ -348,6 +351,10 @@ pub async fn execute_control(
         }
         ControlRequest::SetContextClass { class } => {
             set_context_class_response(ctx.agent, ctx.shared_settings, class).await
+        }
+        ControlRequest::SetRuntimeMode { slim } => {
+            set_runtime_mode_response(ctx.runtime_state, ctx.shared_settings, ctx.events_tx, slim)
+                .await
         }
         ControlRequest::NewSession => {
             new_session_response(ctx.runtime_state, ctx.agent, ctx.cli, ctx.events_tx).await
@@ -734,6 +741,71 @@ pub async fn set_thinking_response(
     SlashCommandResponse {
         accepted: true,
         output: Some(format!("Thinking → {} {}", level.icon(), level.as_str())),
+    }
+}
+
+pub async fn set_runtime_mode_response(
+    runtime_state: &mut InteractiveAgentState,
+    shared_settings: &settings::SharedSettings,
+    events_tx: &broadcast::Sender<AgentEvent>,
+    slim: bool,
+) -> SlashCommandResponse {
+    if let Ok(mut s) = shared_settings.lock() {
+        s.set_slim_mode(slim);
+    }
+    runtime_state.conversation.set_slim_mode(slim);
+    runtime_state.bus.apply_operator_tool_profile(slim);
+
+    let mut status = crate::status::HarnessStatus::assemble();
+    let settings = shared_settings.lock().unwrap().clone();
+    let operating_profile = settings.operating_profile();
+    let operating_profile_label = operating_profile.summary();
+    let principal_id = operating_profile
+        .identity
+        .principal_id
+        .clone()
+        .unwrap_or_else(|| "anonymous".into());
+    let identity_issuer = operating_profile
+        .identity
+        .issuer
+        .clone()
+        .unwrap_or_else(|| "unknown".into());
+    let session_kind = operating_profile
+        .identity
+        .session_kind
+        .clone()
+        .unwrap_or_else(|| "unknown".into());
+    let authorization = operating_profile.authorization.summary();
+    status.update_routing(
+        settings.effective_requested_class().label(),
+        settings.thinking.as_str(),
+        &status.capability_tier.clone(),
+        operating_profile.posture.effective.display_name(),
+        &operating_profile_label,
+        &principal_id,
+        &identity_issuer,
+        &session_kind,
+        &authorization,
+    );
+    status.update_runtime_posture(
+        omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
+        omegon_traits::OmegonAutonomyMode::OperatorDriven,
+    );
+    let auth_status = auth::probe_all_providers().await;
+    status.providers = crate::auth::auth_status_to_provider_statuses(&auth_status);
+    status.annotate_provider_runtime_health();
+    status.update_from_bus(&runtime_state.bus);
+    let status_json = runtime_state.bus.emit_harness_status(&status);
+    let _ = events_tx.send(AgentEvent::HarnessStatusChanged { status_json });
+
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(if slim {
+            "Runtime profile → om (slim, familiar, copy-friendly; memory + orientation tools preserved).".into()
+        } else {
+            "Runtime profile → omegon (full harness, broader observability and advanced surfaces)."
+                .into()
+        }),
     }
 }
 
