@@ -1184,6 +1184,10 @@ fn ui_command_can_toggle_individual_surfaces() {
     assert!(matches!(result, SlashResult::Display(_)));
     assert!(app.ui_surfaces.dashboard);
 
+    let result = app.handle_slash_command("/ui toggle dashboard", &tx);
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert!(!app.ui_surfaces.dashboard);
+
     let result = app.handle_slash_command("/ui hide instruments", &tx);
     assert!(matches!(result, SlashResult::Display(_)));
     assert!(!app.ui_surfaces.instruments);
@@ -1197,6 +1201,19 @@ fn empty_editor_hint_mentions_ui_surfaces_when_dashboard_hidden() {
     let rendered = render_app_to_string(&mut app, 100, 20);
     assert!(rendered.contains("/ui surfaces"), "{rendered}");
     assert!(!rendered.contains("^D tree"), "{rendered}");
+}
+
+#[test]
+fn ui_status_lists_toggle_controls() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let result = app.handle_slash_command("/ui", &tx);
+    let SlashResult::Display(text) = result else {
+        panic!("expected display");
+    };
+    assert!(text.contains("/ui toggle dashboard"), "{text}");
+    assert!(text.contains("/ui toggle instruments"), "{text}");
+    assert!(text.contains("/ui toggle footer"), "{text}");
 }
 
 #[test]

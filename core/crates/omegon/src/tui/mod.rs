@@ -1002,7 +1002,7 @@ impl App {
             UiMode::Slim => "slim",
         };
         format!(
-            "UI mode: {mode}\n  dashboard: {}\n  instruments: {}\n  footer: {}\n\nPresets\n  /ui full\n  /ui slim\n\nSurfaces\n  /ui show dashboard\n  /ui hide dashboard\n  /ui show instruments\n  /ui hide instruments\n  /ui show footer\n  /ui hide footer",
+            "UI mode: {mode}\n  dashboard: {}\n  instruments: {}\n  footer: {}\n\nPresets\n  /ui full\n  /ui slim\n\nSurfaces\n  /ui show dashboard\n  /ui hide dashboard\n  /ui toggle dashboard\n  /ui show instruments\n  /ui hide instruments\n  /ui toggle instruments\n  /ui show footer\n  /ui hide footer\n  /ui toggle footer",
             if self.ui_surfaces.dashboard { "on" } else { "off" },
             if self.ui_surfaces.instruments { "on" } else { "off" },
             if self.ui_surfaces.footer { "on" } else { "off" },
@@ -2367,8 +2367,9 @@ impl App {
         // Render tab bar + conversation/widget content
         let t = &self.theme;
         let has_multiple_tabs = self.conversation.tabs.tabs.len() > 1;
+        let show_tab_bar = has_multiple_tabs && !(matches!(self.ui_mode, UiMode::Slim) && !self.ui_surfaces.dashboard && !self.ui_surfaces.footer);
 
-        let content_area = if has_multiple_tabs {
+        let content_area = if show_tab_bar {
             // Split conversation area into tab bar + content
             let conv_chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -4019,6 +4020,18 @@ impl App {
                 } else if args == "slim" {
                     self.set_ui_mode(UiMode::Slim);
                     SlashResult::Display("UI mode → slim (conversation-first surfaces)".into())
+                } else if let Some(surface) = args.strip_prefix("toggle ") {
+                    let surface = surface.trim();
+                    let enabled = match surface {
+                        "dashboard" | "dash" | "tree" => !self.ui_surfaces.dashboard,
+                        "instruments" | "instrument" | "tools" => !self.ui_surfaces.instruments,
+                        "footer" | "status" => !self.ui_surfaces.footer,
+                        other => return SlashResult::Display(format!("Unknown UI surface: {other}")),
+                    };
+                    match self.toggle_ui_surface(surface, enabled) {
+                        Ok(()) => SlashResult::Display(format!("UI surface {}: {}", if enabled { "enabled" } else { "disabled" }, surface)),
+                        Err(err) => SlashResult::Display(err),
+                    }
                 } else if let Some(surface) = args.strip_prefix("show ") {
                     match self.toggle_ui_surface(surface.trim(), true) {
                         Ok(()) => SlashResult::Display(format!("UI surface enabled: {}", surface.trim())),
@@ -5534,9 +5547,10 @@ pub async fn run_tui(
             }
             brief.push('\n');
             if s.slim_mode {
-                brief.push_str("\n  /model  switch provider    /help   commands");
-                brief.push_str("\n  /new    fresh session      Ctrl+R  search history");
-                brief.push_str("\n  Direct loop: inspect → edit → validate");
+                brief.push_str("\n  Lean coding loop: inspect → edit → validate");
+                brief.push_str("\n  /ui full  reveal dashboard + instruments");
+                brief.push_str("\n  /model    switch provider   /help   commands");
+                brief.push_str("\n  /new      fresh session     Ctrl+R  search history");
             } else {
                 brief.push_str("\n  /model  switch provider    /think  reasoning level");
                 brief.push_str("\n  /new    fresh session        /help   all commands");
@@ -5573,8 +5587,9 @@ pub async fn run_tui(
             welcome.push('\n');
             if s.slim_mode {
                 welcome.push_str("\n  Lean coding loop: inspect → edit → validate");
-                welcome.push_str("\n  /model  switch provider    /help   commands");
-                welcome.push_str("\n  Ctrl+R  search history      Ctrl+C  cancel/quit");
+                welcome.push_str("\n  /ui full  reveal dashboard + instruments");
+                welcome.push_str("\n  /model    switch provider   /help   commands");
+                welcome.push_str("\n  Ctrl+R    search history    Ctrl+C  cancel/quit");
             } else {
                 welcome.push_str("\n  /model  switch provider    /think  reasoning level");
                 welcome.push_str("\n  /context  context class      /help   all commands");
@@ -5586,7 +5601,7 @@ pub async fn run_tui(
             if facts == 0 {
                 app.conversation.push_system(
                     if s.slim_mode {
-                        "💡 Lean mode is active. Start with the file or command you want to inspect."
+                        "💡 Lean mode is active. Start with the file or command you want to inspect. Use /ui full any time to reveal the richer harness surfaces."
                     } else {
                         "💡 First time here? Type /tutorial for a guided tour, or just start typing."
                     },
