@@ -1152,6 +1152,54 @@ fn slash_focus_toggles_fullscreen_conversation_mode() {
 }
 
 #[test]
+fn ui_command_switches_between_full_and_slim_presets() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/ui slim", &tx);
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert_eq!(app.ui_mode, UiMode::Slim);
+    assert!(!app.ui_surfaces.dashboard);
+    assert!(!app.ui_surfaces.instruments);
+    assert!(!app.ui_surfaces.footer);
+
+    let result = app.handle_slash_command("/ui full", &tx);
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert_eq!(app.ui_mode, UiMode::Full);
+    assert!(app.ui_surfaces.dashboard);
+    assert!(app.ui_surfaces.instruments);
+    assert!(app.ui_surfaces.footer);
+}
+
+#[test]
+fn ui_command_can_toggle_individual_surfaces() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/ui hide dashboard", &tx);
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert!(!app.ui_surfaces.dashboard);
+
+    let result = app.handle_slash_command("/ui show dashboard", &tx);
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert!(app.ui_surfaces.dashboard);
+
+    let result = app.handle_slash_command("/ui hide instruments", &tx);
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert!(!app.ui_surfaces.instruments);
+    assert!(app.ui_surfaces.footer, "hiding instruments should not remove footer status");
+}
+
+#[test]
+fn empty_editor_hint_mentions_ui_surfaces_when_dashboard_hidden() {
+    let mut app = test_app();
+    app.set_ui_mode(UiMode::Slim);
+    let rendered = render_app_to_string(&mut app, 100, 20);
+    assert!(rendered.contains("/ui surfaces"), "{rendered}");
+    assert!(!rendered.contains("^D tree"), "{rendered}");
+}
+
+#[test]
 fn empty_editor_hint_mentions_focus_hotkey() {
     let mut app = test_app();
     let rendered = render_app_to_string(&mut app, 100, 20);

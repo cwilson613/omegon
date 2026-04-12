@@ -161,6 +161,37 @@ enum PaneFocus {
     Dashboard,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UiMode {
+    Full,
+    Slim,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct UiSurfaces {
+    dashboard: bool,
+    instruments: bool,
+    footer: bool,
+}
+
+impl UiSurfaces {
+    fn full() -> Self {
+        Self {
+            dashboard: true,
+            instruments: true,
+            footer: true,
+        }
+    }
+
+    fn slim() -> Self {
+        Self {
+            dashboard: false,
+            instruments: false,
+            footer: false,
+        }
+    }
+}
+
 struct OperatorEvent {
     message: String,
     color: Color,
@@ -196,6 +227,8 @@ pub struct App {
     instrument_panel: InstrumentPanel,
     /// Focus mode toggle state
     focus_mode: bool,
+    ui_mode: UiMode,
+    ui_surfaces: UiSurfaces,
     theme: Box<dyn theme::Theme>,
     /// Shared settings — source of truth for model, thinking, etc.
     settings: crate::settings::SharedSettings,
@@ -881,6 +914,8 @@ impl App {
             },
             instrument_panel: InstrumentPanel::default(),
             focus_mode: false,
+            ui_mode: UiMode::Full,
+            ui_surfaces: UiSurfaces::full(),
             theme: theme::default_theme(),
             settings,
             cancel: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -941,6 +976,37 @@ impl App {
         self.terminal_copy_mode = false;
         self.focus_mode = false;
         self.set_mouse_capture(true);
+    }
+
+    fn set_ui_mode(&mut self, mode: UiMode) {
+        self.ui_mode = mode;
+        self.ui_surfaces = match mode {
+            UiMode::Full => UiSurfaces::full(),
+            UiMode::Slim => UiSurfaces::slim(),
+        };
+    }
+
+    fn toggle_ui_surface(&mut self, surface: &str, enabled: bool) -> Result<(), String> {
+        match surface {
+            "dashboard" | "dash" | "tree" => self.ui_surfaces.dashboard = enabled,
+            "instruments" | "instrument" | "tools" => self.ui_surfaces.instruments = enabled,
+            "footer" | "status" => self.ui_surfaces.footer = enabled,
+            other => return Err(format!("Unknown UI surface: {other}")),
+        }
+        Ok(())
+    }
+
+    fn ui_status_text(&self) -> String {
+        let mode = match self.ui_mode {
+            UiMode::Full => "full",
+            UiMode::Slim => "slim",
+        };
+        format!(
+            "UI mode: {mode}\n  dashboard: {}\n  instruments: {}\n  footer: {}\n\nPresets\n  /ui full\n  /ui slim\n\nSurfaces\n  /ui show dashboard\n  /ui hide dashboard\n  /ui show instruments\n  /ui hide instruments\n  /ui show footer\n  /ui hide footer",
+            if self.ui_surfaces.dashboard { "on" } else { "off" },
+            if self.ui_surfaces.instruments { "on" } else { "off" },
+            if self.ui_surfaces.footer { "on" } else { "off" },
+        )
     }
 
     fn set_focus_mode(&mut self, enabled: bool) {
@@ -2257,7 +2323,8 @@ impl App {
 
         // ── Horizontal split: main area | dashboard panel ───────────
         // Dashboard appears as a right-side panel when terminal is wide enough.
-        let show_dashboard = area.width >= 120
+        let show_dashboard = self.ui_surfaces.dashboard
+            && area.width >= 120
             && (self.dashboard.status_counts.total > 0
                 || self.dashboard.focused_node.is_some()
                 || !self.dashboard.active_changes.is_empty()
@@ -2280,10 +2347,12 @@ impl App {
         // a single infinitely wrapped line.
         let editor_height = editor_height_for(&self.editor, main_area);
 
-        let footer_height = if self.focus_mode {
+        let footer_height = if self.focus_mode || !self.ui_surfaces.footer {
             0
-        } else {
+        } else if self.ui_surfaces.instruments {
             self.instrument_panel.preferred_height()
+        } else {
+            1
         };
 
         let chunks = Layout::default()
@@ -2494,22 +2563,27 @@ impl App {
 
         // ── Unified footer console: engine | inference | tools ──────
         // Store instrument areas for cleanup pass to skip.
-        let inst_area = if !self.focus_mode {
+        let inst_area = if !self.focus_mode && self.ui_surfaces.footer {
             let footer_area = chunks[2];
-            let footer_cols = Layout::horizontal([
-                Constraint::Percentage(32),
-                Constraint::Percentage(36),
-                Constraint::Percentage(32),
-            ])
-            .split(footer_area);
+            if self.ui_surfaces.instruments {
+                let footer_cols = Layout::horizontal([
+                    Constraint::Percentage(32),
+                    Constraint::Percentage(36),
+                    Constraint::Percentage(32),
+                ])
+                .split(footer_area);
 
-            self.footer_data
-                .render_left_panel(footer_cols[0], frame, t.as_ref());
-            self.instrument_panel
-                .render_inference_panel(footer_cols[1], frame, t.as_ref());
-            self.instrument_panel
-                .render_tools_panel(footer_cols[2], frame, t.as_ref());
-            footer_cols[1].union(footer_cols[2])
+                self.footer_data
+                    .render_left_panel(footer_cols[0], frame, t.as_ref());
+                self.instrument_panel
+                    .render_inference_panel(footer_cols[1], frame, t.as_ref());
+                self.instrument_panel
+                    .render_tools_panel(footer_cols[2], frame, t.as_ref());
+                footer_cols[1].union(footer_cols[2])
+            } else {
+                self.footer_data.render_left_panel(footer_area, frame, t.as_ref());
+                footer_area
+            }
         } else {
             Rect::ZERO
         };
@@ -2570,7 +2644,11 @@ impl App {
             let hint_text = if self.agent_active {
                 String::new()
             } else if self.editor.is_empty() {
-                "⏎ send  ⇧⏎/⌥⏎ newline  ^F focus  ^D tree  / commands ".into()
+                if self.ui_surfaces.dashboard {
+                    "⏎ send  ⇧⏎/⌥⏎ newline  ^F focus  ^D tree  / commands ".into()
+                } else {
+                    "⏎ send  ⇧⏎/⌥⏎ newline  ^F focus  /ui surfaces  / commands ".into()
+                }
             } else {
                 "⏎ send  ⇧⏎/⌥⏎ newline  ↑/↓ history ".into()
             };
@@ -3929,6 +4007,31 @@ impl App {
                 SlashResult::Display(format!(
                     "Focus mode → {status} (selected segment isolated for terminal-native selection)"
                 ))
+            }
+
+            "ui" => {
+                let args = args.trim();
+                if args.is_empty() || args == "status" {
+                    SlashResult::Display(self.ui_status_text())
+                } else if args == "full" {
+                    self.set_ui_mode(UiMode::Full);
+                    SlashResult::Display("UI mode → full (dashboard, instruments, footer enabled)".into())
+                } else if args == "slim" {
+                    self.set_ui_mode(UiMode::Slim);
+                    SlashResult::Display("UI mode → slim (conversation-first surfaces)".into())
+                } else if let Some(surface) = args.strip_prefix("show ") {
+                    match self.toggle_ui_surface(surface.trim(), true) {
+                        Ok(()) => SlashResult::Display(format!("UI surface enabled: {}", surface.trim())),
+                        Err(err) => SlashResult::Display(err),
+                    }
+                } else if let Some(surface) = args.strip_prefix("hide ") {
+                    match self.toggle_ui_surface(surface.trim(), false) {
+                        Ok(()) => SlashResult::Display(format!("UI surface disabled: {}", surface.trim())),
+                        Err(err) => SlashResult::Display(err),
+                    }
+                } else {
+                    SlashResult::Display(self.ui_status_text())
+                }
             }
 
             "copy" => match args {
@@ -5386,6 +5489,12 @@ pub async fn run_tui(
     app.update_rx = Some(update_rx);
     app.update_tx = Some(update_tx);
     app.login_prompt_tx = config.login_prompt_tx;
+
+    // Slim starts in a conversation-first layout; richer surfaces remain
+    // summonable via /ui full or granular /ui show ... commands.
+    if app.settings().slim_mode {
+        app.set_ui_mode(UiMode::Slim);
+    }
 
     // Pre-populate from initial state so first frame isn't empty
     app.footer_data.total_facts = config.initial.total_facts;
