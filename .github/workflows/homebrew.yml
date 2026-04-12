@@ -6,14 +6,22 @@ on:
 
 jobs:
   update-formula:
-    # Only update on stable releases (no -rc.)
-    if: "!contains(github.ref_name, '-rc.')"
+    # Only update on stable releases (no -rc. or -nightly.)
+    if: "!contains(github.ref_name, '-rc.') && !contains(github.ref_name, '-nightly.')"
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout omegon (for release_manifest.py + formula template)
+        uses: actions/checkout@v4
+        with:
+          path: omegon
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: styrene-lab/homebrew-tap
+          token: ${{ secrets.RELEASE_GITHUB_TOKEN }}
+          path: homebrew-tap
 
       - name: Get release info
         id: release
@@ -28,20 +36,26 @@ jobs:
             -o release-manifest.json
           cat release-manifest.json
 
-      - name: Update formula
+      - name: Update formula in tap
         run: |
-          python3 scripts/release_manifest.py update-homebrew \
+          python3 omegon/scripts/release_manifest.py update-homebrew \
             --manifest release-manifest.json \
-            --formula homebrew/Formula/omegon.rb
+            --formula homebrew-tap/Formula/omegon.rb
 
-          cat homebrew/Formula/omegon.rb
+          echo "--- updated formula ---"
+          cat homebrew-tap/Formula/omegon.rb
 
-      - name: Commit and push
+      - name: Validate formula syntax
         run: |
+          brew style homebrew-tap/Formula/omegon.rb 2>/dev/null || \
+            ruby -c homebrew-tap/Formula/omegon.rb
+
+      - name: Commit and push to tap
+        run: |
+          cd homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add homebrew/Formula/omegon.rb
-          git commit -m "chore(brew): update formula to ${{ steps.release.outputs.version }}" || exit 0
-          git fetch origin main
-          git rebase origin/main
-          git push origin HEAD:main
+          git add Formula/omegon.rb
+          git diff --cached --quiet && echo "formula unchanged, nothing to commit" && exit 0
+          git commit -m "chore(brew): update formula to ${{ steps.release.outputs.version }}"
+          git push origin main
