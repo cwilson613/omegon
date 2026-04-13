@@ -5077,6 +5077,12 @@ impl App {
         use ratatui::text::{Line, Span};
         use ratatui::widgets::Paragraph;
 
+        frame.render_widget(
+            Paragraph::new(Line::from(""))
+                .style(Style::default().bg(self.theme.surface_bg()).fg(self.theme.fg())),
+            area,
+        );
+
         let mut line_spans = vec![];
         for (idx, tab) in self.conversation.tabs.tabs.iter().enumerate() {
             if idx > 0 {

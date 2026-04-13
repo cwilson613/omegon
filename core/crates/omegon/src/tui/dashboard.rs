@@ -337,8 +337,19 @@ impl DashboardState {
     }
 
     pub fn render_themed(&mut self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
-        // Clear the dashboard area — prevent stale conversation bleed-through
-        frame.render_widget(ratatui::widgets::Clear, area);
+        // Own the full dashboard strip every frame.
+        let bg = t.bg();
+        let fg = t.fg();
+        let buf = frame.buffer_mut();
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                    cell.set_char(' ');
+                    cell.set_bg(bg);
+                    cell.set_fg(fg);
+                }
+            }
+        }
 
         let block = Block::default()
             .borders(Borders::LEFT)
@@ -377,13 +388,13 @@ impl DashboardState {
 
         // ── Render header ───────────────────────────────────────
         if header_h > 0 {
-            let para = Paragraph::new(header_lines);
+            let para = Paragraph::new(header_lines).style(Style::default().bg(t.bg()).fg(t.fg()));
             frame.render_widget(para, chunks[0]);
         }
 
         // ── Render focused node ─────────────────────────────────
         if focus_h > 0 {
-            let para = Paragraph::new(focus_lines);
+            let para = Paragraph::new(focus_lines).style(Style::default().bg(t.bg()).fg(t.fg()));
             frame.render_widget(para, chunks[1]);
         }
 
@@ -395,7 +406,8 @@ impl DashboardState {
             let hint = Paragraph::new(Line::from(Span::styled(
                 " no active nodes",
                 Style::default().fg(t.dim()),
-            )));
+            )))
+            .style(Style::default().bg(t.bg()));
             frame.render_widget(hint, chunks[2]);
         }
     }
@@ -659,6 +671,15 @@ impl DashboardState {
             width: 1,
             height: area.height,
         };
+
+        frame.render_widget(
+            Block::default().style(Style::default().bg(t.bg())),
+            tree_area,
+        );
+        frame.render_widget(
+            Block::default().style(Style::default().bg(t.bg())),
+            scrollbar_area,
+        );
 
         let tree = tree
             .style(Style::default().bg(t.bg()))
@@ -1525,6 +1546,54 @@ mod tests {
         let items = build_tree_items(&nodes, None, &empty_changes, &t);
         assert_eq!(items.len(), 1, "orphan should become root");
         assert_eq!(items[0].identifier(), &"orphan".to_string());
+    }
+
+    #[test]
+    fn dashboard_clears_dirty_cells_in_owned_area() {
+        let mut state = DashboardState::default();
+        state.status_counts.total = 1;
+        state.all_nodes = vec![NodeSummary {
+            id: "node-a".into(),
+            title: "Node A".into(),
+            status: NodeStatus::Exploring,
+            open_questions: 0,
+            parent: None,
+            priority: None,
+            issue_type: None,
+            openspec_change: None,
+        }];
+
+        let area = Rect::new(0, 0, 36, 20);
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                let buf = frame.buffer_mut();
+                for y in area.top()..area.bottom() {
+                    for x in area.left()..area.right() {
+                        if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                            cell.set_char('Ω');
+                            cell.set_fg(Color::White);
+                            cell.set_bg(Color::Black);
+                        }
+                    }
+                }
+                state.render_themed(area, frame, &super::super::theme::Alpharius);
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let residual = (area.top()..area.bottom())
+            .flat_map(|y| (area.left()..area.right()).map(move |x| (x, y)))
+            .filter(|(x, y)| {
+                let cell = &buf[(*x, *y)];
+                cell.symbol() == "Ω" && cell.bg == Color::Black
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            residual.is_empty(),
+            "dashboard should clear dirty cells it owns, residual: {residual:?}"
+        );
     }
 
     #[test]

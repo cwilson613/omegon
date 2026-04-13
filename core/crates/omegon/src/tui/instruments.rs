@@ -596,6 +596,8 @@ impl InstrumentPanel {
     }
 
     pub fn render_inference_panel(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+        // Own the panel area even when too narrow to render chrome.
+        clear_area(area, frame.buffer_mut(), panel_bg(t));
         if area.width < 20 || area.height < 4 {
             return;
         }
@@ -608,6 +610,8 @@ impl InstrumentPanel {
     }
 
     pub fn render_tools_panel(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+        // Own the panel area even when too narrow to render chrome.
+        clear_area(area, frame.buffer_mut(), panel_bg(t));
         if area.width < 20 || area.height < 4 {
             return;
         }

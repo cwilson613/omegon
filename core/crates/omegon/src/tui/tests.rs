@@ -9,6 +9,8 @@ use crate::settings::{ContextClass, Settings, ThinkingLevel};
 use crate::tui::dashboard::FocusedNodeSummary;
 use crate::update::{UpdateChannel, UpdateInfo};
 use crate::web::WebDaemonStatus;
+use ratatui::backend::TestBackend;
+use ratatui::Terminal;
 use tokio::sync::mpsc;
 
 fn test_settings() -> crate::settings::SharedSettings {
@@ -48,6 +50,70 @@ fn render_app_to_string(app: &mut App, width: u16, height: u16) -> String {
         text.push('\n');
     }
     text
+}
+
+fn draw_app_with_dirty_background(app: &mut App, width: u16, height: u16, dirty: char) -> String {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| {
+            let area = frame.area();
+            let buf = frame.buffer_mut();
+            for y in area.top()..area.bottom() {
+                for x in area.left()..area.right() {
+                    if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                        cell.set_char(dirty);
+                        cell.set_fg(Color::White);
+                        cell.set_bg(Color::Black);
+                    }
+                }
+            }
+            app.draw(frame);
+        })
+        .unwrap();
+
+    let buf = terminal.backend().buffer();
+    let mut text = String::new();
+    for y in 0..buf.area.height {
+        for x in 0..buf.area.width {
+            text.push_str(buf[(x, y)].symbol());
+        }
+        text.push('\n');
+    }
+    text
+}
+
+#[test]
+fn draw_clears_tab_bar_and_dashboard_leakage_from_dirty_background() {
+    let mut app = test_app();
+    app.ui_surfaces.dashboard = true;
+    app.ui_surfaces.footer = false;
+    app.ui_surfaces.instruments = false;
+    app.conversation.tabs.add_extension_tab("widget-1".into(), "tools".into());
+    app.dashboard.status_counts.total = 1;
+    app.dashboard.all_nodes = vec![crate::tui::dashboard::NodeSummary {
+        id: "runtime-task-spawn-policy".into(),
+        title: "Runtime Task Spawn Policy".into(),
+        status: crate::lifecycle::types::NodeStatus::Exploring,
+        open_questions: 0,
+        parent: None,
+        priority: Some(1),
+        issue_type: None,
+        openspec_change: None,
+    }];
+
+    let rendered = draw_app_with_dirty_background(&mut app, 140, 24, '¤');
+    assert!(!rendered.contains('¤'), "got {rendered}");
+}
+
+#[test]
+fn draw_clears_narrow_footer_instrument_panels_when_layout_shrinks() {
+    let mut app = test_app();
+    app.ui_surfaces.footer = true;
+    app.ui_surfaces.instruments = true;
+
+    let rendered = draw_app_with_dirty_background(&mut app, 60, 12, '§');
+    assert!(!rendered.contains('§'), "got {rendered}");
 }
 
 #[test]
