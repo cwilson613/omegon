@@ -430,8 +430,7 @@ fn should_inject_execution_pressure(
     conversation: &ConversationState,
     tool_calls: &[ToolCall],
 ) -> bool {
-    if !config.enforce_first_turn_execution_bias
-        || tool_calls.is_empty()
+    if tool_calls.is_empty()
         || !conversation.intent.files_modified.is_empty()
         || conversation.intent.files_read.is_empty()
         || !tool_calls
@@ -777,8 +776,7 @@ fn continuation_pressure_tier(
     tool_calls: &[ToolCall],
     dominant_phase: Option<OodaPhase>,
 ) -> Option<u8> {
-    if !config.enforce_first_turn_execution_bias
-        || tool_calls.is_empty()
+    if tool_calls.is_empty()
         || !conversation.intent.files_modified.is_empty()
         || !matches!(dominant_phase, Some(OodaPhase::Observe | OodaPhase::Orient))
     {
