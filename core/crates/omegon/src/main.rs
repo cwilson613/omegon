@@ -2765,6 +2765,15 @@ fn format_agent_error(
             );
         }
         crate::upstream_errors::UpstreamErrorClass::AuthInvalid => {
+            if let Some(start) = raw.find("\"message\":\"") {
+                let rest = &raw[start + 11..];
+                if let Some(end) = rest.find('"') {
+                    return format!(
+                        "⚠ Authentication error ({who}) — {}",
+                        &rest[..end]
+                    );
+                }
+            }
             return format!(
                 "⚠ Authentication error ({who}) — credentials were rejected. This may be an expired/invalid session, wrong account identity, or a provider-side auth mismatch. Re-authenticate and verify the active account before retrying."
             );
