@@ -129,7 +129,18 @@ impl Feature for AuthFeature {
                     output.push_str("**No authentication providers configured.**\n");
                 } else {
                     for provider in &providers {
-                        let status_icon = if provider.authenticated { "✓" } else { "✗" };
+                        let status_line = match provider.auth_state {
+                            Some(crate::status::ProviderAuthState::Configured) => "✓ configured",
+                            Some(crate::status::ProviderAuthState::Expired) => {
+                                "⚠ expired — re-login required"
+                            }
+                            Some(crate::status::ProviderAuthState::Missing) => {
+                                "✗ not authenticated"
+                            }
+                            Some(crate::status::ProviderAuthState::Error) => "✗ error",
+                            None if provider.authenticated => "✓ configured",
+                            None => "✗ not authenticated",
+                        };
                         let auth_method = provider
                             .auth_method
                             .as_ref()
@@ -143,7 +154,7 @@ impl Feature for AuthFeature {
 
                         output.push_str(&format!(
                             "{} **{}**{}{}\n",
-                            status_icon, provider.name, auth_method, model_info
+                            status_line, provider.name, auth_method, model_info
                         ));
                     }
                 }
@@ -184,6 +195,10 @@ impl Feature for AuthFeature {
                         "- **Authenticated:** {}\n",
                         provider.authenticated
                     ));
+
+                    if let Some(auth_state) = provider.auth_state {
+                        output.push_str(&format!("- **Auth State:** {:?}\n", auth_state));
+                    }
 
                     if let Some(ref method) = provider.auth_method {
                         output.push_str(&format!("- **Method:** {}\n", method));
@@ -451,6 +466,7 @@ mod tests {
             name: "Anthropic".into(),
             authenticated: true,
             auth_method: Some("oauth".into()),
+            auth_state: Some(crate::status::ProviderAuthState::Configured),
             model: Some("claude-3-5-sonnet-20241022".into()),
             runtime_status: None,
             recent_failure_count: None,
@@ -568,10 +584,18 @@ mod tests {
         assert_eq!(providers[0].name, "anthropic");
         assert!(providers[0].authenticated);
         assert_eq!(providers[0].auth_method, Some("oauth".into()));
+        assert_eq!(
+            providers[0].auth_state,
+            Some(crate::status::ProviderAuthState::Configured)
+        );
 
         // Verify second provider
         assert_eq!(providers[1].name, "openai");
         assert!(!providers[1].authenticated);
+        assert_eq!(
+            providers[1].auth_state,
+            Some(crate::status::ProviderAuthState::Missing)
+        );
 
         // Simulate wiring into HarnessStatus (as setup.rs does)
         let mut harness = crate::status::HarnessStatus::default();

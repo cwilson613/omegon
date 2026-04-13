@@ -208,6 +208,15 @@ pub struct MemoryStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum ProviderAuthState {
+    Configured,
+    Expired,
+    Missing,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProviderRuntimeStatus {
     Healthy,
     Degraded,
@@ -218,6 +227,8 @@ pub struct ProviderStatus {
     pub name: String, // "Anthropic" / "OpenAI" / "Copilot"
     pub authenticated: bool,
     pub auth_method: Option<String>, // "oauth" / "api-key" / "copilot"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_state: Option<ProviderAuthState>,
     pub model: Option<String>,       // active model name
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_status: Option<ProviderRuntimeStatus>,
@@ -908,6 +919,7 @@ mod tests {
             name: "openai".into(),
             authenticated: true,
             auth_method: Some("oauth".into()),
+            auth_state: Some(ProviderAuthState::Configured),
             model: Some("gpt-5".into()),
             runtime_status: None,
             recent_failure_count: None,
@@ -942,6 +954,7 @@ mod tests {
             name: "openai".into(),
             authenticated: true,
             auth_method: Some("oauth".into()),
+            auth_state: Some(ProviderAuthState::Configured),
             model: Some("gpt-5".into()),
             runtime_status: None,
             recent_failure_count: None,

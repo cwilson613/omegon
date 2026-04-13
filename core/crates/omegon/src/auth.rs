@@ -6,7 +6,7 @@
 //!
 //! Token refresh happens automatically when the stored token is expired.
 
-use crate::status::ProviderStatus;
+use crate::status::{ProviderAuthState, ProviderStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -1354,6 +1354,12 @@ pub fn auth_status_to_provider_statuses(status: &AuthStatus) -> Vec<ProviderStat
         .iter()
         .map(|p| {
             let runtime_status = None;
+            let auth_state = Some(match p.status {
+                ProviderAuthStatus::Authenticated => ProviderAuthState::Configured,
+                ProviderAuthStatus::Expired => ProviderAuthState::Expired,
+                ProviderAuthStatus::Missing => ProviderAuthState::Missing,
+                ProviderAuthStatus::Error => ProviderAuthState::Error,
+            });
             ProviderStatus {
                 name: p.name.clone(),
                 authenticated: p.status == ProviderAuthStatus::Authenticated,
@@ -1365,6 +1371,7 @@ pub fn auth_status_to_provider_statuses(status: &AuthStatus) -> Vec<ProviderStat
                 } else {
                     None
                 },
+                auth_state,
                 model: None,
                 runtime_status,
                 recent_failure_count: None,

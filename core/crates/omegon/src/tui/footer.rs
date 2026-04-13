@@ -1630,6 +1630,7 @@ mod tests {
                     name: "openai".into(),
                     authenticated: true,
                     auth_method: Some("oauth".into()),
+                    auth_state: Some(crate::status::ProviderAuthState::Configured),
                     model: Some("gpt-5.4".into()),
                     runtime_status: Some(crate::status::ProviderRuntimeStatus::Degraded),
                     recent_failure_count: Some(6),
