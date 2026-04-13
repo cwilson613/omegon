@@ -2360,11 +2360,24 @@ pub async fn auth_login_response(
             .map(|p| p.display_name)
             .unwrap_or(provider_clone.as_str())
             .to_string();
+        let env_conflict = if result.is_ok() && provider_clone == "anthropic" {
+            std::env::var("ANTHROPIC_API_KEY")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .map(|_| {
+                    "Anthropic OAuth login succeeded, but ANTHROPIC_API_KEY is also set. Omegon will prefer ANTHROPIC_API_KEY over the subscription token on requests. Unset or remove ANTHROPIC_API_KEY if you intend to use Claude subscription auth.".to_string()
+                })
+        } else {
+            None
+        };
         let message = match &result {
             Ok(_) => format!("✓ Successfully logged in to {provider_label}"),
             Err(e) => format!("❌ Login failed: {}", e),
         };
         let _ = events_tx_clone.send(AgentEvent::SystemNotification { message });
+        if let Some(conflict) = env_conflict {
+            let _ = events_tx_clone.send(AgentEvent::SystemNotification { message: conflict });
+        }
         if result.is_ok() {
             let effective_model = providers::resolve_execution_model_spec(&model_for_redetect)
                 .await
