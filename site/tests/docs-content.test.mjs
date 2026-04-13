@@ -47,7 +47,13 @@ test('privacy page is variant-aware instead of hard-coding the old domain', () =
 test('site builds in stable and preview variants', () => {
   execFileSync('npm', ['run', 'build'], {
     cwd: resolve(here, '..'),
-    env: { ...process.env, PUBLIC_SITE_VARIANT: 'stable', PUBLIC_SITE_URL: 'https://omegon.styrene.io' },
+    env: {
+      ...process.env,
+      PUBLIC_SITE_VARIANT: 'stable',
+      PUBLIC_SITE_URL: 'https://omegon.styrene.io',
+      PUBLIC_STABLE_SITE_URL: 'https://omegon.styrene.io',
+      PUBLIC_PREVIEW_SITE_URL: 'https://omegon.styrene.dev',
+    },
     stdio: 'pipe',
   });
 
@@ -57,6 +63,7 @@ test('site builds in stable and preview variants', () => {
       ...process.env,
       PUBLIC_SITE_VARIANT: 'preview',
       PUBLIC_SITE_URL: 'https://omegon.styrene.dev',
+      PUBLIC_STABLE_SITE_URL: 'https://omegon.styrene.io',
       PUBLIC_PREVIEW_SITE_URL: 'https://omegon.styrene.dev',
     },
     stdio: 'pipe',

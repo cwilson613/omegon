@@ -42,6 +42,7 @@ jobs:
           cd site
           PUBLIC_SITE_VARIANT=stable \
           PUBLIC_SITE_URL=https://omegon.styrene.io \
+          PUBLIC_STABLE_SITE_URL=https://omegon.styrene.io \
           PUBLIC_PREVIEW_SITE_URL=https://omegon.styrene.dev \
           npx astro build
           rm -rf ../site-dist-stable
@@ -53,6 +54,7 @@ jobs:
           cd site
           PUBLIC_SITE_VARIANT=preview \
           PUBLIC_SITE_URL=https://omegon.styrene.dev \
+          PUBLIC_STABLE_SITE_URL=https://omegon.styrene.io \
           PUBLIC_PREVIEW_SITE_URL=https://omegon.styrene.dev \
           npx astro build
           rm -rf ../site-dist-preview
@@ -146,6 +148,7 @@ jobs:
           cd site
           PUBLIC_SITE_VARIANT=stable \
           PUBLIC_SITE_URL=https://omegon.styrene.io \
+          PUBLIC_STABLE_SITE_URL=https://omegon.styrene.io \
           PUBLIC_PREVIEW_SITE_URL=https://omegon.styrene.dev \
           npx astro build
 
