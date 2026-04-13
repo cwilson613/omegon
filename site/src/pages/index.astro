@@ -15,35 +15,35 @@ const currentVersion = versionMatch ? `v${versionMatch[1]}` : "latest";
 
 const valueCards = [
   {
-    title: "Honest engine identity",
-    body: "See the concrete runtime backend — Anthropic/Claude, OpenAI API, OpenAI/Codex, or Ollama — instead of vague routing theater.",
+    title: "Direct file and shell control",
+    body: "Read and edit files, run shell commands, inspect output, and commit the result from one terminal session without handing work off to another app.",
   },
   {
     title: "Persistent project memory",
-    body: "Durable facts, episodic recall, and typed memory sections survive across sessions. Not another markdown file pretending to be state.",
+    body: "Store durable facts, decisions, and known issues across sessions so the agent can resume work with actual project context instead of starting cold.",
   },
   {
-    title: "Parallel execution",
-    body: "Decompose substantial work into scoped git worktree children with conflict detection and merge-back into the parent branch.",
+    title: "Scoped parallel work",
+    body: "Split larger changes into git worktree children with bounded file scope, dependency ordering, and merge-back into the parent branch.",
   },
   {
-    title: "Design + spec lifecycle",
-    body: "Track design exploration in the design tree, then drive implementation with OpenSpec scenarios and verification loops.",
+    title: "Design and spec discipline",
+    body: "Track design exploration in the design tree and tie implementation work to OpenSpec scenarios when the change is large enough to need them.",
   },
   {
-    title: "Real TUI instrumentation",
-    body: "Wrapped multiline editor, tool cards, memory telemetry, provider state, and quota metadata — an instrument panel, not a transcript dump.",
+    title: "Provider transparency",
+    body: "Show the concrete backend in use — Anthropic/Claude, OpenAI API, OpenAI/Codex, or Ollama — along with runtime and quota context when the provider exposes it.",
   },
   {
-    title: "Single binary",
-    body: "Native Rust harness, signed releases, no runtime Node.js dependency, and direct provider integrations instead of subprocess cosplay.",
+    title: "Operationally simple",
+    body: "One Rust binary, signed releases, no runtime Node.js dependency, and a docs/install surface that stays separate between stable and preview channels.",
   },
 ];
 
 const modeTitle = isPreviewSite ? "Preview / staging docs" : "Public stable docs";
 const modeBody = isPreviewSite
-  ? "RC and nightly guidance live here. Stable operator guidance stays on the public .io surface."
-  : "Conservative install and onboarding guidance lives here. Preview and RC guidance stay on the .styrene.dev surface.";
+  ? "Release-candidate and nightly guidance lives here. Stable operator guidance stays on the public .io surface."
+  : "Stable install, onboarding, and product guidance lives here. Preview and RC guidance stays on the .styrene.dev surface.";
 ---
 
 <html lang="en">
@@ -71,23 +71,21 @@ const modeBody = isPreviewSite
     <section class="hero-grid">
       <div class="hero-copy-column">
         <div class="hero-kicker">{modeTitle}</div>
-        <h1>The AI agent harness for operators who build.</h1>
+        <h1>A terminal harness for real software work.</h1>
         <p class="hero-lead">
-          Single binary. Native Rust. Real memory. Parallel worktrees. Design and spec lifecycles built in.
+          Omegon gives an agent direct access to files, commands, memory, and lifecycle state without pretending a chat transcript is an engineering process.
         </p>
         <p class="hero-body">
-          Omegon is not a chatbot in your terminal. It is a systems engineering harness that can read and edit code,
-          run commands, manage project memory across sessions, decompose work into parallel children, and keep design intent
-          as a first-class artifact.
+          Use it when the job is bigger than a one-shot prompt: inspect a repository, make a multi-file change, preserve decisions, and keep the execution path visible while the work is happening.
         </p>
         <div class="hero-cta-row">
-          <a href="/docs/get-started" class="btn btn-primary">Get Working Fast</a>
-          <a href="/docs/" class="btn btn-secondary">Read the Docs</a>
+          <a href="/docs/get-started" class="btn btn-primary">Start with installation</a>
+          <a href="/docs/" class="btn btn-secondary">Documentation</a>
         </div>
         <div class="hero-proof-row">
-          <span>Honest provider identity</span>
-          <span>Persistent memory</span>
-          <span>Parallel git worktrees</span>
+          <span>Read, edit, run, commit</span>
+          <span>Memory across sessions</span>
+          <span>Worktree-based decomposition</span>
         </div>
       </div>
 
@@ -95,16 +93,16 @@ const modeBody = isPreviewSite
         <section class="brand-panel">
           <img src="/icon.svg" alt="Omegon" class="brand-mark" />
           <div>
-            <div class="brand-overline">Terminal-native AI agent harness</div>
+            <div class="brand-overline">Terminal-native software harness</div>
             <div class="brand-copy">{modeBody}</div>
           </div>
         </section>
 
         <section class="install-panel">
           <div class="panel-label">Install</div>
-          <h2>Start with one command.</h2>
+          <h2>Start with one binary.</h2>
           <p class="panel-copy">
-            Omegon installs two entrypoints from the same binary: <code>om</code> for the slim terminal-first posture and <code>omegon</code> for the full harness.
+            Omegon installs two entrypoints from the same binary: <code>om</code> for the slim terminal-first posture and <code>omegon</code> for the full harness. Use the stable site for production recommendations and the preview site for RC/nightly evaluation.
           </p>
 
           <div class="install-command-wrap">
@@ -143,16 +141,16 @@ const modeBody = isPreviewSite
     </section>
 
     <section class="stats-strip">
-      <div class="stat-card"><span class="stat-value">~19 MB</span><span class="stat-label">single binary</span></div>
-      <div class="stat-card"><span class="stat-value">10</span><span class="stat-label">inference providers</span></div>
-      <div class="stat-card"><span class="stat-value">53</span><span class="stat-label">agent tools</span></div>
+      <div class="stat-card"><span class="stat-value">~19 MB</span><span class="stat-label">signed binary</span></div>
+      <div class="stat-card"><span class="stat-value">10</span><span class="stat-label">provider paths</span></div>
+      <div class="stat-card"><span class="stat-value">53</span><span class="stat-label">structured tools</span></div>
       <div class="stat-card"><span class="stat-value">0</span><span class="stat-label">runtime Node deps</span></div>
     </section>
 
     <section class="value-section">
       <div class="section-heading">
-        <div class="section-kicker">Why Omegon</div>
-        <h2>Built for software work as a system, not a transcript.</h2>
+        <div class="section-kicker">Why teams use it</div>
+        <h2>Competent about the work itself, not just the words around it.</h2>
       </div>
       <div class="value-grid">
         {valueCards.map((card) => (
