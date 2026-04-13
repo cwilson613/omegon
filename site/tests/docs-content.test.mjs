@@ -39,6 +39,15 @@ test('providers docs call out stable vs preview split', () => {
   assert.match(content, /RC\/nightly/i);
 });
 
+test('homepage has mobile overflow guards for nav and install content', () => {
+  const content = readFileSync(resolve(here, '../src/pages/index.astro'), 'utf8');
+
+  assert.match(content, /max-width: min\(100%, 100vw - 36px\)/);
+  assert.match(content, /overflow-wrap: anywhere/);
+  assert.match(content, /white-space: normal/);
+  assert.match(content, /flex-wrap: wrap/);
+});
+
 test('privacy page is variant-aware instead of hard-coding the old domain', () => {
   const content = readFileSync(resolve(here, '../src/pages/privacy.astro'), 'utf8');
 

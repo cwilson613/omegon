@@ -219,6 +219,8 @@ const modeBody = isPreviewSite
     display: flex;
     gap: 24px;
     font-size: 14px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   .topnav-links a {
@@ -407,6 +409,7 @@ const modeBody = isPreviewSite
     font-size: 14px;
     color: var(--accent);
     overflow-x: auto;
+    max-width: min(100%, 100vw - 36px);
   }
 
   .install-command code {
@@ -414,6 +417,9 @@ const modeBody = isPreviewSite
     border: none;
     padding: 0;
     color: inherit;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .copy-btn {
@@ -483,6 +489,9 @@ const modeBody = isPreviewSite
 
   .channel-row code {
     font-size: 12px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .channel-row.subdued {
@@ -585,11 +594,16 @@ const modeBody = isPreviewSite
   @media (max-width: 720px) {
     .topnav {
       padding: 14px 18px;
+      gap: 10px;
+      align-items: flex-start;
+      flex-wrap: wrap;
     }
 
     .topnav-links {
       gap: 14px;
       font-size: 13px;
+      width: 100%;
+      justify-content: flex-start;
     }
 
     .landing-shell {
@@ -602,6 +616,32 @@ const modeBody = isPreviewSite
 
     .brand-mark {
       max-width: 90px;
+    }
+
+    .install-panel,
+    .brand-panel,
+    .install-command,
+    .channel-row,
+    .channel-row code {
+      min-width: 0;
+    }
+
+    .install-panel {
+      padding: 20px 16px;
+    }
+
+    .install-panel h2 {
+      font-size: 1.35rem;
+    }
+
+    .install-command {
+      padding: 14px 44px 14px 14px;
+      font-size: 13px;
+      max-width: 100%;
+    }
+
+    .copy-btn {
+      right: 8px;
     }
 
     .stats-strip,
