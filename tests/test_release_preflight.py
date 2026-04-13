@@ -119,6 +119,16 @@ class ReleaseRecipeTests(unittest.TestCase):
             "rc recipe should relink the local binary before pushing/tag completion output",
         )
 
+    def test_rc_recipe_uses_fast_local_validation_build(self) -> None:
+        justfile = (ROOT / "justfile").read_text()
+        rc_start = justfile.index("rc:\n")
+        preflight_start = justfile.index("# Release preflight:")
+        rc_block = justfile[rc_start:preflight_start]
+
+        self.assertIn('cargo build --profile dev-release -p omegon', rc_block)
+        self.assertNotIn('cargo build --release -p omegon', rc_block)
+        self.assertIn('core/target/dev-release/omegon', rc_block)
+
     def test_rc_recipe_self_sets_release_workspace_role_before_preflight(self) -> None:
         justfile = (ROOT / "justfile").read_text()
         rc_start = justfile.index("rc:\n")

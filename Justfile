@@ -432,13 +432,13 @@ rc:
     MUTATED=0
     trap - ERR INT TERM
 
-    # Build release (now the tag and commit are baked into the binary)
-    echo "Building..."
-    cd core && cargo build --release -p omegon 2>&1 | tail -3
+    # Fast local validation build. CI produces the canonical distributable release artifacts.
+    echo "Building local validation binary..."
+    cd core && cargo build --profile dev-release -p omegon 2>&1 | tail -3
     cd ..
 
-    # Code sign — run `just sign` separately if YubiKey isn't in env
-    BINARY="core/target/release/omegon"
+    # Code sign the local validation binary when possible.
+    BINARY="core/target/dev-release/omegon"
     if [ -n "${SMARTCARD_PIN:-}" ]; then
         SCAN=$("$HOME/.cargo/bin/rcodesign" smartcard-scan 2>/dev/null || true)
         if echo "$SCAN" | grep -q "Developer ID Application"; then
