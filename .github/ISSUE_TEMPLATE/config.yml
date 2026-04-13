@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Get Omegon working fast
-    url: https://omegon.styrene.dev/docs/get-started
-    about: Start with the provider happy paths before filing an issue.
+    url: https://omegon.styrene.io/docs/get-started
+    about: Start with the stable provider happy paths before filing an issue. Preview/RC guidance lives on https://omegon.styrene.dev/docs/get-started.

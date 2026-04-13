@@ -6,7 +6,7 @@ Single binary. Native Rust. Real memory. Parallel worktrees. Design and spec lif
 
 Omegon is not a chatbot in your terminal. It is a systems engineering harness for operators who build: a terminal-native agent that can read and edit code, run commands, manage project memory across sessions, decompose work into parallel children, and track design intent as a first-class artifact.
 
-[![docs](https://img.shields.io/badge/docs-omegon.styrene.dev-2ab4c8)](https://omegon.styrene.dev)
+[![docs](https://img.shields.io/badge/docs-omegon.styrene.io-2ab4c8)](https://omegon.styrene.io/docs/)
 [![license](https://img.shields.io/badge/license-BSL%201.1-344858)](LICENSE)
 
 ---
@@ -43,10 +43,10 @@ That means you get:
 curl -fsSL https://omegon.styrene.io/install.sh | sh
 ```
 
-RC channel one-shot:
+Preview channel one-shot:
 
 ```sh
-CHANNEL=rc curl -fsSL https://omegon.styrene.io/install.sh | sh
+CHANNEL=rc curl -fsSL https://omegon.styrene.dev/install.sh | sh
 ```
 
 Or with Homebrew:
@@ -54,10 +54,11 @@ Or with Homebrew:
 ```sh
 brew tap styrene-lab/tap
 brew install omegon                # stable
-brew install styrene-lab/tap/omegon-rc  # rc
+brew install styrene-lab/tap/omegon-rc  # preview / rc
 ```
 
-Docs: <https://omegon.styrene.dev/docs/install>
+Stable docs: <https://omegon.styrene.io/docs/install>
+Preview docs: <https://omegon.styrene.dev/docs/install>
 
 ---
 
@@ -103,7 +104,8 @@ om
 ```
 
 If you want the shortest happy path instead of a full tour, start here:
-- <https://omegon.styrene.dev/docs/get-started>
+- <https://omegon.styrene.io/docs/get-started>
+- Preview / staging guidance: <https://omegon.styrene.dev/docs/get-started>
 
 ---
 
@@ -339,18 +341,23 @@ Omegon ships signed releases with:
 - GitHub build attestations
 
 Install/update docs:
-- <https://omegon.styrene.dev/docs/install>
+- <https://omegon.styrene.io/docs/install>
+- Preview / RC docs: <https://omegon.styrene.dev/docs/install>
 
 ---
 
 ## Read the docs
 
 Start here:
-- <https://omegon.styrene.dev/docs/>
-- <https://omegon.styrene.dev/docs/quickstart>
-- <https://omegon.styrene.dev/docs/providers>
-- <https://omegon.styrene.dev/docs/tui>
-- <https://omegon.styrene.dev/docs/tutorial>
+- <https://omegon.styrene.io/docs/>
+- <https://omegon.styrene.io/docs/quickstart>
+- <https://omegon.styrene.io/docs/providers>
+- <https://omegon.styrene.io/docs/tui>
+- <https://omegon.styrene.io/docs/tutorial>
+
+Preview / staging docs:
+- <https://omegon.styrene.dev/docs/install>
+- <https://omegon.styrene.dev/docs/get-started>
 
 ---
 

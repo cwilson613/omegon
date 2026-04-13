@@ -49,6 +49,11 @@ const currentVersion = versionMatch ? `v${versionMatch[1]}` : "latest";
         It installs two entrypoints from the same binary: <code>om</code> for the slim, copy-friendly terminal mode,
         and <code>omegon</code> for the full harness.
       </p>
+      <p class="hero-surface-note">
+        {isPreviewSite
+          ? <>Preview surface: RC and nightly guidance live here. Public stable guidance stays on <a href={canonicalSiteUrl}>{canonicalSiteUrl}</a>.</>
+          : <>Public stable surface: conservative install and docs guidance lives here. Preview and RC guidance lives on <a href={previewSiteUrl}>{previewSiteUrl}</a>.</>}
+      </p>
 
       <div class="hero-install-wrap">
         <pre class="hero-install" id="hero-install-pre"><code id="hero-install-cmd">curl -fsSL {installScriptUrl} | sh</code></pre>
@@ -221,8 +226,17 @@ const currentVersion = versionMatch ? `v${versionMatch[1]}` : "latest";
   .hero-copy {
     font-size: 15px;
     color: var(--dim);
-    margin-bottom: 30px;
+    margin-bottom: 16px;
     line-height: 1.7;
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .hero-surface-note {
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 22px;
     max-width: 720px;
     margin-left: auto;
     margin-right: auto;
