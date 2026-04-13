@@ -292,6 +292,25 @@ pub fn infer_provider_id(model_spec: &str) -> String {
     "anthropic".to_string()
 }
 
+pub fn infer_provider_id_strict(model_spec: &str) -> Option<String> {
+    let trimmed = model_spec.trim();
+    if trimmed.is_empty() {
+        return Some("anthropic".to_string());
+    }
+
+    if let Some((head, _tail)) = trimmed.split_once(':') {
+        if head == "local" {
+            return Some("ollama".to_string());
+        }
+        if is_known_provider_id(head) {
+            return Some(head.to_string());
+        }
+        return None;
+    }
+
+    Some(infer_provider_id(trimmed))
+}
+
 fn model_id_from_spec(model_spec: &str) -> &str {
     let trimmed = model_spec.trim();
     if let Some((head, tail)) = trimmed.split_once(':')
@@ -2883,6 +2902,19 @@ mod tests {
         assert_eq!(infer_provider_id("claude-opus-4-6"), "anthropic");
         assert_eq!(infer_provider_id("gpt-5.4"), "openai");
         assert_eq!(infer_provider_id("gpt-5.4-mini"), "openai");
+    }
+
+    #[test]
+    fn infer_provider_id_strict_rejects_unknown_explicit_provider_prefix() {
+        assert_eq!(
+            infer_provider_id_strict("openai:gpt-5.4"),
+            Some("openai".to_string())
+        );
+        assert_eq!(
+            infer_provider_id_strict("local:qwen3:30b"),
+            Some("ollama".to_string())
+        );
+        assert_eq!(infer_provider_id_strict("nonexistent-provider:test"), None);
     }
 
     #[test]

@@ -2843,7 +2843,7 @@ pub(crate) fn format_auth_status(status: &auth::AuthStatus) -> String {
                     "✓ authenticated".to_string()
                 }
             }
-            auth::ProviderAuthStatus::Expired => "⚠ expired".to_string(),
+            auth::ProviderAuthStatus::Expired => "⚠ expired — re-login required".to_string(),
             auth::ProviderAuthStatus::Missing => "✗ not authenticated".to_string(),
             auth::ProviderAuthStatus::Error => provider
                 .details

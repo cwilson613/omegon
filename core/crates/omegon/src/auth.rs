@@ -1352,22 +1352,25 @@ pub fn auth_status_to_provider_statuses(status: &AuthStatus) -> Vec<ProviderStat
     status
         .providers
         .iter()
-        .map(|p| ProviderStatus {
-            name: p.name.clone(),
-            authenticated: p.status == ProviderAuthStatus::Authenticated,
-            auth_method: if matches!(
-                p.status,
-                ProviderAuthStatus::Authenticated | ProviderAuthStatus::Expired
-            ) {
-                Some(if p.is_oauth { "oauth" } else { "api-key" }.to_string())
-            } else {
-                None
-            },
-            model: None,
-            runtime_status: None,
-            recent_failure_count: None,
-            last_failure_kind: None,
-            last_failure_at: None,
+        .map(|p| {
+            let runtime_status = None;
+            ProviderStatus {
+                name: p.name.clone(),
+                authenticated: p.status == ProviderAuthStatus::Authenticated,
+                auth_method: if matches!(
+                    p.status,
+                    ProviderAuthStatus::Authenticated | ProviderAuthStatus::Expired
+                ) {
+                    Some(if p.is_oauth { "oauth" } else { "api-key" }.to_string())
+                } else {
+                    None
+                },
+                model: None,
+                runtime_status,
+                recent_failure_count: None,
+                last_failure_kind: None,
+                last_failure_at: None,
+            }
         })
         .collect()
 }
