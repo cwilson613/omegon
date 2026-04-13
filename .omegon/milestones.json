@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 88,
+    "rc_count": 89,
     "notes": [
       "docs(benchmark): seed design node for deferred bwrap sandbox work",
       "feat(aggregate-mode): Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.",
@@ -428,6 +428,7 @@
       "feat(api-key-friction): Author a markdown engineering note describing the biggest friction points when running omegon in autonomous mode with an upstream API key, grounded in current code and specs. Include ranked friction points, concrete evidence references, and mitigation directions.",
       "feat(auspex): add mode-aware local handoff probe",
       "feat(auspex): launch desktop handoff from cached startup payload",
+      "feat(auth): expose typed provider auth state",
       "feat(auth-core-audit): Audit and fix auth core consistency in core/crates/omegon/src/auth.rs and closely related provider resolution code: provider map usage, auth.json read/write/refresh/logout semantics, persistence verification, and tests for canonical credential behavior.",
       "feat(auth-hardening): Harden OpenAI/Codex OAuth login persistence in core/crates/omegon/src/auth.rs by adding post-write verification similar to Anthropic, and add focused tests covering persisted readback/accountId behavior.",
       "feat(benchmark): add archive and reset workflow",
@@ -572,6 +573,7 @@
       "fix(auspex): gate prompt resume on authoritative turn completion",
       "fix(auspex): report chosen local handoff mode",
       "fix(auth): align auth surfaces with canonical credential state",
+      "fix(auth): clear session state on logout",
       "fix(auth): expose ollama-cloud in login surfaces",
       "fix(auth): fail closed on codex oauth refresh errors",
       "fix(auth): make remote logout and daemon startup robust",
@@ -580,7 +582,10 @@
       "fix(auth): preserve upstream anthropic auth rejection details",
       "fix(auth): remove recursive canonical provider lookup",
       "fix(auth): route ollama-cloud login through hidden key entry",
+      "fix(auth): sharpen auth status and provider inference",
       "fix(auth): stop mislabeling codex oauth 401s",
+      "fix(auth): tighten operator-facing auth state",
+      "fix(auth): tighten runtime auth UX",
       "fix(auth): warn when anthropic api key overrides oauth login",
       "fix(benchmark): accumulate usage across bench turns",
       "fix(benchmark): add omegon turn count and per-turn usage telemetry",
@@ -627,6 +632,7 @@
       "fix(conversation): strip orphaned assistant tool_use blocks before retry",
       "fix(core): clear release-blocking compiler warnings",
       "fix(delegate): choose worker model from full executable provider matrix",
+      "fix(delegate): harden worker prompt termination",
       "fix(delegate): surface child provider and runtime context in failure output",
       "fix(dev): extract workspace.json writer to script, fix cut-rc parse error",
       "fix(errors): broaden upstream outage classification",
@@ -753,6 +759,7 @@
       "fix(tui): support queued prompts with attachment lists",
       "fix(tui): surface mode commands and harden anthropic repair",
       "fix(tui): take instrument seam width from the tools panel",
+      "fix(tui): trim gratuitous trailing assistant blanks",
       "fix(tui): truncate footer engine rows by display width",
       "fix(tui): truncate tools panel labels by display width",
       "fix(tui): unify tool result block backgrounds",
@@ -772,6 +779,7 @@
       "fix(workspace): stop tracking nested runtime lease state",
       "perf(loop): parallelize safe read-only tool dispatch",
       "refactor(auth): route slash auth through typed runtime handlers",
+      "refactor(auth): unify operator-facing auth messaging",
       "refactor(child): share headless child-agent launcher between cleave and delegate",
       "refactor(context): route request packs through shadow selector",
       "refactor(control): add canonical control dispatcher",
@@ -812,7 +820,7 @@
       "refactor(workspace): add backend and vcs identity boundaries",
       "refactor(workspace): separate labels from substrate identity"
     ],
-    "rc_version": "0.15.10-rc.95",
-    "last_rc": "2026-04-13T17:18:57Z"
+    "rc_version": "0.15.10-rc.96",
+    "last_rc": "2026-04-13T17:01:09Z"
   }
 }
