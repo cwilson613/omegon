@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 82,
+    "rc_count": 83,
     "notes": [
       "docs(benchmark): seed design node for deferred bwrap sandbox work",
       "feat(aggregate-mode): Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.",
@@ -619,7 +619,10 @@
       "fix(context): reduce code pack selector false positives",
       "fix(context): sync compact status with authoritative snapshot",
       "fix(context): wait for authoritative slash completion",
+      "fix(conversation): strip orphaned assistant tool_use blocks before retry",
       "fix(core): clear release-blocking compiler warnings",
+      "fix(delegate): choose worker model from full executable provider matrix",
+      "fix(delegate): surface child provider and runtime context in failure output",
       "fix(dev): extract workspace.json writer to script, fix cut-rc parse error",
       "fix(errors): broaden upstream outage classification",
       "fix(errors): collapse provider-side upstream failures",
@@ -664,6 +667,7 @@
       "fix(session): give interactive omegon runs stable live session ids",
       "fix(session): start fresh by default and use live stats status",
       "fix(settings): prefer specific route matrix matches",
+      "fix(site): correct five content bugs across docs",
       "fix(telemetry): format provider usage by active backend",
       "fix(tui): accept json context request slash payloads",
       "fix(tui): add a dedicated seam gutter between instrument panels",
@@ -792,7 +796,7 @@
       "refactor(workspace): add backend and vcs identity boundaries",
       "refactor(workspace): separate labels from substrate identity"
     ],
-    "rc_version": "0.15.10-rc.88",
-    "last_rc": "2026-04-13T00:07:44Z"
+    "rc_version": "0.15.10-rc.89",
+    "last_rc": "2026-04-13T00:55:54Z"
   }
 }
