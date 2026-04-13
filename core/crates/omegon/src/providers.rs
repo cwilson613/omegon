@@ -787,75 +787,95 @@ impl AnthropicClient {
     }
 
     fn build_messages(messages: &[LlmMessage]) -> Vec<Value> {
-        messages.iter().map(|m| match m {
-            LlmMessage::User { content, images } => {
-                if images.is_empty() {
-                    json!({"role": "user", "content": content})
-                } else {
-                    // Build content blocks array: images first, then text
-                    let mut blocks = Vec::new();
-                    for img in images {
-                        blocks.push(json!({
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": img.media_type,
-                                "data": img.data,
-                            }
-                        }));
+        let mut wire = Vec::new();
+        let mut idx = 0usize;
+
+        while idx < messages.len() {
+            match &messages[idx] {
+                LlmMessage::User { content, images } => {
+                    if images.is_empty() {
+                        wire.push(json!({"role": "user", "content": content}));
+                    } else {
+                        let mut blocks = Vec::new();
+                        for img in images {
+                            blocks.push(json!({
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": img.media_type,
+                                    "data": img.data,
+                                }
+                            }));
+                        }
+                        blocks.push(json!({"type": "text", "text": content}));
+                        wire.push(json!({"role": "user", "content": blocks}));
                     }
-                    blocks.push(json!({"type": "text", "text": content}));
-                    json!({"role": "user", "content": blocks})
+                    idx += 1;
                 }
-            }
-            LlmMessage::Assistant { text, thinking: _, tool_calls, raw } => {
-                // Prefer raw content blocks if available — they preserve provider-specific
-                // fields like thinking signatures that are required for round-tripping.
-                if let Some(raw_val) = raw {
-                    if let Some(raw_content) = raw_val.get("content").and_then(|c| c.as_array()) {
-                        if !raw_content.is_empty() {
-                            return json!({"role": "assistant", "content": raw_content});
+                LlmMessage::Assistant {
+                    text,
+                    thinking: _,
+                    tool_calls,
+                    raw,
+                } => {
+                    if let Some(raw_val) = raw {
+                        if let Some(raw_content) = raw_val.get("content").and_then(|c| c.as_array()) {
+                            if !raw_content.is_empty() {
+                                wire.push(json!({"role": "assistant", "content": raw_content}));
+                                idx += 1;
+                                continue;
+                            }
                         }
                     }
+                    let mut content = Vec::new();
+                    for t in text {
+                        content.push(json!({"type": "text", "text": t}));
+                    }
+                    for tc in tool_calls {
+                        let input = if tc.arguments.is_object() {
+                            tc.arguments.clone()
+                        } else {
+                            json!({})
+                        };
+                        let sanitized_id = sanitize_tool_id(&tc.id);
+                        content.push(json!({
+                            "type": "tool_use",
+                            "id": sanitized_id,
+                            "name": tc.name,
+                            "input": input,
+                        }));
+                    }
+                    wire.push(json!({"role": "assistant", "content": content}));
+                    idx += 1;
                 }
-                // Fallback: reconstruct from parsed fields. Thinking blocks are
-                // OMITTED because Anthropic requires a valid `signature` for
-                // round-tripping and we don't have one without the raw content.
-                // This happens after compaction or when switching from another provider.
-                let mut content = Vec::new();
-                // thinking blocks intentionally skipped — no signature available
-                for t in text {
-                    content.push(json!({"type": "text", "text": t}));
+                LlmMessage::ToolResult { .. } => {
+                    let mut blocks = Vec::new();
+                    while idx < messages.len() {
+                        match &messages[idx] {
+                            LlmMessage::ToolResult {
+                                call_id,
+                                content,
+                                is_error,
+                                ..
+                            } => {
+                                let sanitized_id = sanitize_tool_id(call_id);
+                                blocks.push(json!({
+                                    "type": "tool_result",
+                                    "tool_use_id": sanitized_id,
+                                    "content": content,
+                                    "is_error": is_error,
+                                }));
+                                idx += 1;
+                            }
+                            _ => break,
+                        }
+                    }
+                    wire.push(json!({"role": "user", "content": blocks}));
                 }
-                for tc in tool_calls {
-                    // Anthropic requires `input` to be a JSON object, never null/string.
-                    let input = if tc.arguments.is_object() {
-                        tc.arguments.clone()
-                    } else {
-                        json!({})
-                    };
-                    // Sanitize tool call IDs — Anthropic requires ^[a-zA-Z0-9_-]+$
-                    // Codex compound IDs use `call_abc|fc_1` format; strip the pipe
-                    // and suffix so cross-provider history doesn't cause 400 errors.
-                    let sanitized_id = sanitize_tool_id(&tc.id);
-                    content.push(json!({
-                        "type": "tool_use",
-                        "id": sanitized_id,
-                        "name": tc.name,
-                        "input": input,
-                    }));
-                }
-                json!({"role": "assistant", "content": content})
             }
-            LlmMessage::ToolResult { call_id, content, is_error, .. } => {
-                // Sanitize tool call IDs for cross-provider compatibility
-                let sanitized_id = sanitize_tool_id(call_id);
-                json!({
-                    "role": "user",
-                    "content": [{"type": "tool_result", "tool_use_id": sanitized_id, "content": content, "is_error": is_error}]
-                })
-            }
-        }).collect()
+        }
+
+        wire
     }
 
     fn build_tools(tools: &[ToolDefinition], is_oauth: bool) -> Vec<Value> {
@@ -2885,6 +2905,33 @@ mod tests {
         assert_eq!(wire[0]["role"], "user");
         assert_eq!(wire[0]["content"][0]["type"], "tool_result");
         assert_eq!(wire[0]["content"][0]["tool_use_id"], "tc1");
+    }
+
+    #[test]
+    fn anthropic_batches_adjacent_tool_results_into_single_user_message() {
+        let messages = vec![
+            LlmMessage::ToolResult {
+                call_id: "toolu_a".into(),
+                tool_name: "read".into(),
+                content: "a".into(),
+                is_error: false,
+                args_summary: None,
+            },
+            LlmMessage::ToolResult {
+                call_id: "toolu_b".into(),
+                tool_name: "bash".into(),
+                content: "b".into(),
+                is_error: false,
+                args_summary: None,
+            },
+        ];
+        let wire = AnthropicClient::build_messages(&messages);
+        assert_eq!(wire.len(), 1, "adjacent tool results must batch into one user message");
+        assert_eq!(wire[0]["role"], "user");
+        let blocks = wire[0]["content"].as_array().expect("tool_result blocks");
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0]["tool_use_id"], "toolu_a");
+        assert_eq!(blocks[1]["tool_use_id"], "toolu_b");
     }
 
     #[test]
