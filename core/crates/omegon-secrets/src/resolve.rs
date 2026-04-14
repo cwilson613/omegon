@@ -41,8 +41,24 @@ pub const WELL_KNOWN_SECRET_ENVS: &[&str] = &[
 /// used for ALL keychain entries so macOS only prompts for authorization once.
 const KEYRING_SERVICE: &str = "sh.styrene.omegon";
 
+/// Returns true when keyring access should be suppressed at runtime.
+/// Set `OMEGON_NO_KEYRING=1` to avoid macOS Keychain prompts in CI,
+/// smoke tests, and headless child agents.
+#[cfg(not(test))]
+fn keyring_suppressed() -> bool {
+    static SUPPRESSED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SUPPRESSED.get_or_init(|| {
+        std::env::var("OMEGON_NO_KEYRING")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    })
+}
+
 #[cfg(not(test))]
 pub(crate) fn keyring_get(service: &str, name: &str) -> Result<Option<String>, keyring::Error> {
+    if keyring_suppressed() {
+        return Ok(None);
+    }
     let entry = keyring::Entry::new(service, name)?;
     match entry.get_password() {
         Ok(val) if !val.is_empty() => Ok(Some(val)),
@@ -63,6 +79,9 @@ pub(crate) fn keyring_get(service: &str, name: &str) -> Result<Option<String>, k
 
 #[cfg(not(test))]
 pub(crate) fn keyring_set(service: &str, name: &str, value: &str) -> Result<(), keyring::Error> {
+    if keyring_suppressed() {
+        return Ok(());
+    }
     let entry = keyring::Entry::new(service, name)?;
     entry.set_password(value)
 }
@@ -78,6 +97,9 @@ pub(crate) fn keyring_set(service: &str, name: &str, value: &str) -> Result<(), 
 
 #[cfg(not(test))]
 pub(crate) fn keyring_delete(service: &str, name: &str) -> Result<(), keyring::Error> {
+    if keyring_suppressed() {
+        return Ok(());
+    }
     let entry = keyring::Entry::new(service, name)?;
     entry.delete_credential()
 }

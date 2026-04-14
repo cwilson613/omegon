@@ -75,6 +75,7 @@ pub fn spawn_headless_child_agent(
         .args(&args)
         .current_dir(cwd)
         .env("OMEGON_CHILD", "1")
+        .env("OMEGON_NO_KEYRING", "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
