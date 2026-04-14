@@ -425,10 +425,15 @@ fn assert_runtime_profile_report(report: &serde_json::Value) -> anyhow::Result<(
 }
 
 fn scenario_env(scenario: &SmokeScenario) -> Vec<(String, String)> {
-    let mut vars = vec![(
-        "OMEGON_CLEAVE_SMOKE_CHILD_MODE".to_string(),
-        scenario.child_mode.to_string(),
-    )];
+    let mut vars = vec![
+        (
+            "OMEGON_CLEAVE_SMOKE_CHILD_MODE".to_string(),
+            scenario.child_mode.to_string(),
+        ),
+        // Suppress keychain access in smoke children — avoids macOS
+        // password prompts and hangs in headless/CI contexts.
+        ("OMEGON_NO_KEYRING".to_string(), "1".to_string()),
+    ];
     if let Some(path) = scenario.write_file {
         vars.push((
             "OMEGON_CLEAVE_SMOKE_WRITE_FILE".to_string(),
