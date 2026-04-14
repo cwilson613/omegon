@@ -72,6 +72,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **Settings/profile persistence scope** — root profile persistence is anchored at the repo level instead of drifting by invocation path.
 - **CI/Homebrew detached-HEAD publishing** — formula update automation was fixed to push correctly even when running from detached release contexts.
 - **Release validation hygiene** — tracked Python bytecode artifacts were removed and `__pycache__/` / `*.pyc` are now ignored so Python-based release validation no longer dirties the tree.
+- **OAuth login port held after browser cancel** — if the user closed the browser or switched accounts without completing the OAuth redirect, `listener.accept()` blocked indefinitely and held the callback port open. A second `/login` attempt failed with an OS address-in-use error and required killing Omegon. The accept is now wrapped in a 5-minute timeout; on expiry the listener drops, the port is freed, and a clear retry message is shown.
 
 ## [0.15.7] - 2026-04-03
 
