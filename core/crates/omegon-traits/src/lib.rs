@@ -1222,6 +1222,10 @@ pub enum BusEvent {
         turns: u32,
         tool_calls: u32,
         duration_secs: f64,
+        /// First user prompt — captured for journal enrichment.
+        initial_prompt: Option<String>,
+        /// Last assistant text — captured for journal outcome summary.
+        outcome_summary: Option<String>,
     },
 
     // ── Turn lifecycle ──────────────────────────────────────────────

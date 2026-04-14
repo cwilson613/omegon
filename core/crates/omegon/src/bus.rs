@@ -435,6 +435,8 @@ mod tests {
             turns: 1,
             tool_calls: 0,
             duration_secs: 10.0,
+            initial_prompt: None,
+            outcome_summary: None,
         });
         let requests = bus.drain_requests();
         assert_eq!(requests.len(), 1);
@@ -566,6 +568,8 @@ mod tests {
             turns: 1,
             tool_calls: 0,
             duration_secs: 1.0,
+            initial_prompt: None,
+            outcome_summary: None,
         });
         assert_eq!(bus.drain_requests().len(), 1);
         // Second drain should be empty

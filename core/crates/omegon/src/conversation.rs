@@ -579,6 +579,13 @@ impl ConversationState {
         ))
     }
 
+    pub fn first_user_text(&self) -> Option<&str> {
+        self.canonical.iter().find_map(|m| match m {
+            AgentMessage::User { text, .. } if !text.is_empty() => Some(text.as_str()),
+            _ => None,
+        })
+    }
+
     pub fn last_assistant_text(&self) -> Option<&str> {
         self.canonical.iter().rev().find_map(|m| match m {
             AgentMessage::Assistant(a, _) if !a.text.is_empty() => Some(a.text.as_str()),

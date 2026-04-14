@@ -1713,10 +1713,19 @@ pub async fn run(
     // Emit SessionEnd so session_log and memory features can finalise.
     // This must come after AgentEnd so TUI is no longer in "working" state
     // before any slow post-session I/O runs.
+    // Capture initial prompt (truncated) and outcome for journal enrichment.
+    let initial_prompt = conversation
+        .first_user_text()
+        .map(|t| t.chars().take(200).collect::<String>());
+    let outcome_summary = conversation
+        .last_assistant_text()
+        .map(|t| t.chars().take(300).collect::<String>());
     bus.emit(&omegon_traits::BusEvent::SessionEnd {
         turns: turn,
         tool_calls: conversation.intent.stats.tool_calls,
         duration_secs: elapsed.as_secs_f64(),
+        initial_prompt,
+        outcome_summary,
     });
 
     // Process any pending bus requests (e.g. auto-compact notifications,

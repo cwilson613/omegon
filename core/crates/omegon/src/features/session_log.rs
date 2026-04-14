@@ -233,7 +233,14 @@ impl SessionLog {
     }
 
     /// Append a structured entry to `.omegon/agent-journal.md`.
-    fn append_entry(&self, turns: u32, tool_calls: u32, duration_secs: f64) {
+    fn append_entry(
+        &self,
+        turns: u32,
+        tool_calls: u32,
+        duration_secs: f64,
+        initial_prompt: Option<&str>,
+        outcome_summary: Option<&str>,
+    ) {
         let date = Self::today();
         let branch = self
             .git(&["branch", "--show-current"])
@@ -263,11 +270,29 @@ impl SessionLog {
             String::new(),
         ];
 
+        if let Some(prompt) = initial_prompt {
+            lines.push(format!("**Task:** {prompt}"));
+            lines.push(String::new());
+        }
+
+        if let Some(outcome) = outcome_summary {
+            lines.push(format!("**Outcome:** {outcome}"));
+            lines.push(String::new());
+        }
+
         if !self.turn_summaries.is_empty() {
-            lines.push("**Turns:**".to_string());
-            for summary in &self.turn_summaries {
-                lines.push(format!("- {}", format_turn_summary(summary)));
-            }
+            // Compact summary: just model and total tokens, not full per-turn telemetry.
+            let model = self
+                .turn_summaries
+                .last()
+                .and_then(|s| s.model.as_deref())
+                .unwrap_or("unknown");
+            let total_in: u64 = self.turn_summaries.iter().map(|s| s.actual_input_tokens).sum();
+            let total_out: u64 = self.turn_summaries.iter().map(|s| s.actual_output_tokens).sum();
+            lines.push(format!(
+                "**Model:** {model} — {total_in} in / {total_out} out tokens across {} turns",
+                self.turn_summaries.len()
+            ));
             lines.push(String::new());
         }
 
@@ -869,10 +894,18 @@ impl Feature for SessionLog {
                 turns,
                 tool_calls,
                 duration_secs,
+                initial_prompt,
+                outcome_summary,
             } => {
                 // Only write an entry if the session did meaningful work
                 if *turns > 0 {
-                    self.append_entry(*turns, *tool_calls, *duration_secs);
+                    self.append_entry(
+                        *turns,
+                        *tool_calls,
+                        *duration_secs,
+                        initial_prompt.as_deref(),
+                        outcome_summary.as_deref(),
+                    );
                     tracing::info!("Session log entry appended to {}", self.log_path.display());
                 }
             }
@@ -969,12 +1002,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let feature = SessionLog::new(dir.path());
 
-        feature.append_entry(5, 20, 300.0);
+        feature.append_entry(5, 20, 300.0, Some("build the widget"), Some("widget built"));
 
         assert!(feature.log_path.exists(), "log file should be created");
         let content = fs::read_to_string(&feature.log_path).unwrap();
         assert!(content.contains("# Agent Journal"), "should have header");
         assert!(content.contains("(5t 20tc 5m0s)"), "should have stats");
+        assert!(content.contains("**Task:** build the widget"), "should have task");
+        assert!(content.contains("**Outcome:** widget built"), "should have outcome");
     }
 
     #[test]
@@ -992,7 +1027,7 @@ mod tests {
         .unwrap();
 
         let feature = SessionLog::new(dir.path());
-        feature.append_entry(3, 10, 60.0);
+        feature.append_entry(3, 10, 60.0, None, None);
 
         let content = fs::read_to_string(&log_path).unwrap();
         assert!(
@@ -1040,6 +1075,8 @@ mod tests {
             turns: 7,
             tool_calls: 30,
             duration_secs: 450.0,
+            initial_prompt: Some("test prompt".into()),
+            outcome_summary: Some("test outcome".into()),
         });
 
         assert!(
@@ -1049,17 +1086,20 @@ mod tests {
         let content = fs::read_to_string(&feature.log_path).unwrap();
         assert!(content.contains("7t"), "should record turns");
         assert!(
-            content.contains("anthropic / anthropic:claude-sonnet-4-6"),
-            "should record provider/model"
-        );
-        assert!(content.contains("5h 42%"), "should record telemetry");
-        assert!(
-            content.contains("ctx est:"),
-            "should record context composition"
+            content.contains("**Task:** test prompt"),
+            "should record task"
         );
         assert!(
-            content.contains("sys:"),
-            "should record composition components"
+            content.contains("**Outcome:** test outcome"),
+            "should record outcome"
+        );
+        assert!(
+            content.contains("anthropic:claude-sonnet-4-6"),
+            "should record model in compact summary"
+        );
+        assert!(
+            content.contains("tokens across"),
+            "should record token summary"
         );
     }
 
@@ -1187,6 +1227,8 @@ mod tests {
             turns: 0,
             tool_calls: 0,
             duration_secs: 1.0,
+            initial_prompt: None,
+            outcome_summary: None,
         });
 
         assert!(

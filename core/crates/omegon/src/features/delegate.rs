@@ -939,9 +939,9 @@ impl Feature for DelegateFeature {
                     || task.contains("last several `delegate` calls returned errors")
                 {
                     return Err(anyhow::anyhow!(
-                        "Delegate task rejected: the task description is a system error \
-                         message, not an actual task. Review the original goal and \
-                         formulate a concrete task description."
+                        "Cannot delegate: the task you provided is a recycled system \
+                         warning, not a real task. Stop delegating and handle the \
+                         work directly."
                     ));
                 }
 

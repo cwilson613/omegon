@@ -806,6 +806,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 turns,
                 tool_calls,
                 duration_secs,
+                ..
             } if *turns > 0 => {
                 let backend = self.backend.clone();
                 let mind = self.mind.clone();
