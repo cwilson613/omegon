@@ -30,6 +30,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **Linux Homebrew install honesty** — install and distribution docs now explicitly warn that Homebrew on Linux does not solve host glibc ABI mismatches for Omegon release binaries. Users hitting `GLIBC_2.38` / `GLIBC_2.39` runtime errors are directed toward compatible distro/container baselines.
 - **Release-line correction** — `v0.15.11-rc.2` was published from a mistaken version-line advance after `0.15.10` had not actually closed cleanly. The active candidate line remains the `0.15.10` RC series. See `docs/release-line-correction-0-15-10.md`.
 
+## [0.15.11] - 2026-04-14
+
+### Fixed
+
+- **Full-mode tool surfaces disabled after `/unshackle`** — `apply_operator_tool_profile` placed delegate, auth-status, harness-settings, persona, and memory tools in the always-disabled base block instead of the slim-only block. `/unshackle` and `/warp` switched the UI to full mode but those tools remained suppressed. Delegate, persona, auth, harness settings, and memory lifecycle/connect/archive surfaces are now only disabled in slim mode and fully available after `/unshackle`.
+
 ## [0.15.10] - 2026-04-05
 
 ### Added

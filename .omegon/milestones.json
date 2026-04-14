@@ -839,5 +839,14 @@
     ],
     "rc_version": "0.15.10-rc.104",
     "last_rc": "2026-04-13T23:54:33Z"
+  },
+  "0.15.11": {
+    "status": "released",
+    "channel": "stable",
+    "nodes": [],
+    "frozen": true,
+    "opened": "2026-04-14T12:42:39Z",
+    "released": "2026-04-14T12:42:39Z",
+    "notes": []
   }
 }

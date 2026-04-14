@@ -59,27 +59,29 @@ impl EventBus {
         let mut disabled = handle.lock().unwrap();
         disabled.clear();
 
-        // Base defaults for both om and omegon: specialist or low-frequency surfaces.
+        // Base defaults for both om and omegon: genuinely niche/experimental surfaces
+        // that neither mode exposes by default.
         disabled.insert(reg::core::SPECULATE_START.into());
         disabled.insert(reg::core::SPECULATE_CHECK.into());
         disabled.insert(reg::core::SPECULATE_COMMIT.into());
         disabled.insert(reg::core::SPECULATE_ROLLBACK.into());
         disabled.insert(reg::render::RENDER_DIAGRAM.into());
         disabled.insert(reg::render::GENERATE_IMAGE_LOCAL.into());
-        disabled.insert(reg::persona::SWITCH_PERSONA.into());
-        disabled.insert(reg::persona::SWITCH_TONE.into());
-        disabled.insert(reg::persona::LIST_PERSONAS.into());
-        disabled.insert(reg::delegate::DELEGATE.into());
-        disabled.insert(reg::delegate::DELEGATE_RESULT.into());
-        disabled.insert(reg::delegate::DELEGATE_STATUS.into());
-        disabled.insert(reg::auth::AUTH_STATUS.into());
-        disabled.insert(reg::harness_settings::HARNESS_SETTINGS.into());
-        disabled.insert(reg::memory::MEMORY_INGEST_LIFECYCLE.into());
-        disabled.insert(reg::memory::MEMORY_CONNECT.into());
-        disabled.insert(reg::memory::MEMORY_SEARCH_ARCHIVE.into());
 
         if slim_mode {
-            // om/slim stays familiar and orientation-friendly: keep memory/search/shell/files on.
+            // om/slim: familiar coding loop. Suppress harness-level, delegation,
+            // orchestration, and observability surfaces.
+            disabled.insert(reg::persona::SWITCH_PERSONA.into());
+            disabled.insert(reg::persona::SWITCH_TONE.into());
+            disabled.insert(reg::persona::LIST_PERSONAS.into());
+            disabled.insert(reg::delegate::DELEGATE.into());
+            disabled.insert(reg::delegate::DELEGATE_RESULT.into());
+            disabled.insert(reg::delegate::DELEGATE_STATUS.into());
+            disabled.insert(reg::auth::AUTH_STATUS.into());
+            disabled.insert(reg::harness_settings::HARNESS_SETTINGS.into());
+            disabled.insert(reg::memory::MEMORY_INGEST_LIFECYCLE.into());
+            disabled.insert(reg::memory::MEMORY_CONNECT.into());
+            disabled.insert(reg::memory::MEMORY_SEARCH_ARCHIVE.into());
             disabled.insert(reg::local_inference::LIST_LOCAL_MODELS.into());
             disabled.insert(reg::local_inference::MANAGE_OLLAMA.into());
             disabled.insert(reg::lifecycle::DESIGN_TREE.into());
