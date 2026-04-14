@@ -848,5 +848,15 @@
     "opened": "2026-04-14T12:42:39Z",
     "released": "2026-04-14T12:42:39Z",
     "notes": []
+  },
+  "0.15.12": {
+    "status": "open",
+    "channel": "stable",
+    "nodes": [],
+    "frozen": false,
+    "opened": "2026-04-14T12:44:16Z",
+    "released": null,
+    "rc_count": 0,
+    "notes": []
   }
 }
