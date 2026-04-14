@@ -51,7 +51,9 @@ mod conversation;
 mod lifecycle;
 mod r#loop;
 mod ollama;
+mod extension_cli;
 mod plugin_cli;
+mod secret_cli;
 mod plugins;
 mod prompt;
 mod providers;
@@ -299,6 +301,18 @@ enum Commands {
         action: PluginAction,
     },
 
+    /// Manage extensions — install, list, remove, update, enable, disable.
+    Extension {
+        #[command(subcommand)]
+        action: ExtensionAction,
+    },
+
+    /// Manage secrets — set, list, delete.
+    Secret {
+        #[command(subcommand)]
+        action: SecretAction,
+    },
+
     /// Run a cleave orchestration — dispatch multiple agent children in parallel.
     Cleave {
         /// Path to the plan JSON file
@@ -413,6 +427,58 @@ enum PluginAction {
     Update {
         /// Plugin name to update. Omit to update all.
         name: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ExtensionAction {
+    /// Install an extension from a git URL or local path.
+    Install {
+        /// Git URL or local directory path containing manifest.toml.
+        uri: String,
+    },
+    /// List installed extensions.
+    List,
+    /// Remove an installed extension.
+    Remove {
+        /// Extension directory name.
+        name: String,
+    },
+    /// Update installed extensions (git pull).
+    Update {
+        /// Extension name to update. Omit to update all.
+        name: Option<String>,
+    },
+    /// Enable a disabled extension.
+    Enable {
+        /// Extension name.
+        name: String,
+    },
+    /// Disable an extension (prevents spawning on next startup).
+    Disable {
+        /// Extension name.
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum SecretAction {
+    /// Store a secret value or recipe.
+    Set {
+        /// Secret name (e.g. GITHUB_TOKEN, VOX_DISCORD_BOT_TOKEN).
+        name: String,
+        /// Raw secret value. Stored in system keyring.
+        value: Option<String>,
+        /// Recipe form instead of raw value (env:VAR, cmd:..., vault:path#key, file:/path).
+        #[arg(long)]
+        recipe: Option<String>,
+    },
+    /// List configured secrets (values are never shown).
+    List,
+    /// Delete a secret and its recipe.
+    Delete {
+        /// Secret name to delete.
+        name: String,
     },
 }
 
@@ -564,6 +630,27 @@ async fn main() -> anyhow::Result<()> {
                 PluginAction::List => plugin_cli::list()?,
                 PluginAction::Remove { name } => plugin_cli::remove(name)?,
                 PluginAction::Update { name } => plugin_cli::update(name.as_deref())?,
+            }
+            Ok(())
+        }
+        Some(Commands::Extension { ref action }) => {
+            match action {
+                ExtensionAction::Install { uri } => extension_cli::install(uri)?,
+                ExtensionAction::List => extension_cli::list()?,
+                ExtensionAction::Remove { name } => extension_cli::remove(name)?,
+                ExtensionAction::Update { name } => extension_cli::update(name.as_deref())?,
+                ExtensionAction::Enable { name } => extension_cli::enable(name)?,
+                ExtensionAction::Disable { name } => extension_cli::disable(name)?,
+            }
+            Ok(())
+        }
+        Some(Commands::Secret { ref action }) => {
+            match action {
+                SecretAction::Set { name, value, recipe } => {
+                    secret_cli::set(name, value.as_deref(), recipe.as_deref())?
+                }
+                SecretAction::List => secret_cli::list()?,
+                SecretAction::Delete { name } => secret_cli::delete(name)?,
             }
             Ok(())
         }
@@ -759,6 +846,7 @@ async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::R
 
     // ─── Web control plane ──────────────────────────────────────────────
     let state = web::WebState::new(agent.dashboard_handles.clone(), events_tx.clone());
+    let vox_daemon_events = state.daemon_events.clone();
     let (startup, mut cmd_rx) =
         web::start_server_with_options(state, control_port, strict_port).await?;
 
@@ -783,6 +871,18 @@ async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::R
         tokio::signal::ctrl_c().await.ok();
         cancel_clone.cancel();
     });
+
+    // ─── Vox event bridge (extension-driven comms) ──────────────────────
+    if !agent.vox_polling_handles.is_empty() {
+        for handle in agent.vox_polling_handles {
+            crate::extensions::vox_bridge::start_vox_bridge(
+                handle,
+                vox_daemon_events.clone(),
+                crate::extensions::vox_bridge::VoxBridgeConfig::default(),
+                global_cancel.clone(),
+            );
+        }
+    }
 
     // ─── Checkpoint subscriber (turn-boundary crash recovery) ────────────
     let _daemon_checkpoint_task = checkpoint::spawn_checkpoint_subscriber(
