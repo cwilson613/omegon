@@ -60,9 +60,9 @@ mod prompt;
 mod providers;
 pub mod routing;
 mod session;
-mod session_factory;
 mod session_router;
 pub mod settings;
+mod triggers;
 mod setup;
 mod startup;
 pub mod status;
@@ -932,14 +932,17 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
         conversation: agent.conversation,
     }));
 
-    // Shared dependencies for per-user session factory.
-    let session_deps = Arc::new(session_factory::SessionDeps {
-        cwd: agent_cwd.clone(),
-        project_root: setup::find_project_root(&agent_cwd),
-        secrets: agent_secrets.clone(),
-        shared_settings: shared_settings.clone(),
-        context_metrics: agent.context_metrics.clone(),
-    });
+    // ─── Load trigger configs ─────────────────────────────────────────
+    let trigger_configs = triggers::load_trigger_configs(&cwd);
+    let mut trigger_schedule = triggers::ScheduleState::from_configs(&trigger_configs);
+    let trigger_events = triggers::EventTriggers::from_configs(&trigger_configs);
+    if trigger_schedule.len() > 0 || trigger_events.len() > 0 {
+        tracing::info!(
+            scheduled = trigger_schedule.len(),
+            event = trigger_events.len(),
+            "loaded trigger configs"
+        );
+    }
 
     // ─── Dispatch loop — consume commands + autonomous idle tick ─────
     let idle_poll_interval = tokio::time::Duration::from_secs(30);
@@ -981,117 +984,105 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
                         caller = %key,
                         "daemon: processing vox event"
                     );
-                    let text = envelope
-                        .payload
-                        .get("text")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
+                    // Check if an event trigger template matches this envelope.
+                    // If so, use the rendered template prompt; otherwise fall
+                    // back to the raw payload text.
+                    let text = if let Some(matched) = trigger_events.match_envelope(
+                        &envelope.source,
+                        &envelope.trigger_kind,
+                        &envelope.payload,
+                    ) {
+                        tracing::info!(
+                            trigger = %matched.name,
+                            source = %envelope.source,
+                            "daemon: event trigger matched"
+                        );
+                        matched.prompt
+                    } else {
+                        envelope
+                            .payload
+                            .get("text")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string()
+                    };
 
                     if text.is_empty() {
                         continue;
                     }
 
-                    if key.is_default() {
-                        // No identity metadata — route to default session
-                        // (backward compat with web API and anonymous sources).
-                        let session = default_session.clone();
-                        let bridge = bridge.clone();
-                        let events_tx = events_tx.clone();
-                        let shared_settings = shared_settings.clone();
-                        let model = model.clone();
-                        let cwd = agent_cwd.clone();
-                        let secrets = agent_secrets.clone();
-                        let semaphore = router.semaphore().clone();
-                        let daemon_workflow = daemon_workflow.clone();
+                    // Route all vox events through the default session.
+                    // TODO: per-caller session creation via router.get_or_create()
+                    // once session factory is wired up.
+                    let session = default_session.clone();
+                    let bridge = bridge.clone();
+                    let events_tx = events_tx.clone();
+                    let shared_settings = shared_settings.clone();
+                    let model = model.clone();
+                    let cwd = agent_cwd.clone();
+                    let secrets = agent_secrets.clone();
+                    let semaphore = router.semaphore().clone();
+                    let daemon_workflow = daemon_workflow.clone();
 
-                        task_spawn::spawn_best_effort_result(
-                            "daemon-turn-vox-default",
-                            async move {
-                                let _permit = semaphore.acquire().await
-                                    .map_err(|_| anyhow::anyhow!("session semaphore closed"))?;
+                    task_spawn::spawn_best_effort_result(
+                        "daemon-turn-vox",
+                        async move {
+                            let _permit = semaphore.acquire().await
+                                .map_err(|_| anyhow::anyhow!("session semaphore closed"))?;
 
-                                let mut sess = session.lock().await;
-                                sess.conversation.push_user(text);
+                            let mut sess = session.lock().await;
+                            sess.conversation.push_user(text);
 
-                                let mut loop_config = r#loop::LoopConfig {
-                                    max_turns: shared_settings
-                                        .lock()
-                                        .map(|s| s.max_turns)
-                                        .unwrap_or(50),
-                                    soft_limit_turns: 35,
-                                    max_retries: 0,
-                                    retry_delay_ms: 750,
-                                    model: shared_settings
-                                        .lock()
-                                        .map(|s| s.model.clone())
-                                        .unwrap_or_else(|_| model.clone()),
-                                    cwd: cwd.clone(),
-                                    extended_context: false,
-                                    settings: Some(shared_settings.clone()),
-                                    secrets: Some(secrets),
-                                    force_compact: None,
-                                    allow_commit_nudge: false,
-                                    enforce_first_turn_execution_bias: false,
-                                };
+                            let mut loop_config = r#loop::LoopConfig {
+                                max_turns: shared_settings
+                                    .lock()
+                                    .map(|s| s.max_turns)
+                                    .unwrap_or(50),
+                                soft_limit_turns: 35,
+                                max_retries: 0,
+                                retry_delay_ms: 750,
+                                model: shared_settings
+                                    .lock()
+                                    .map(|s| s.model.clone())
+                                    .unwrap_or_else(|_| model.clone()),
+                                cwd: cwd.clone(),
+                                extended_context: false,
+                                settings: Some(shared_settings.clone()),
+                                secrets: Some(secrets),
+                                force_compact: None,
+                                allow_commit_nudge: false,
+                                enforce_first_turn_execution_bias: false,
+                            };
 
-                                if let Some(ref wf) = daemon_workflow {
-                                    let phase = sess.context_manager.phase();
-                                    if let Some(pc) = wf.phase_config(phase) {
-                                        workflow::apply_phase_config(
-                                            &mut loop_config,
-                                            pc,
-                                            &shared_settings,
-                                        );
-                                    }
+                            if let Some(ref wf) = daemon_workflow {
+                                let phase = sess.context_manager.phase();
+                                if let Some(pc) = wf.phase_config(phase) {
+                                    workflow::apply_phase_config(
+                                        &mut loop_config,
+                                        pc,
+                                        &shared_settings,
+                                    );
                                 }
+                            }
 
-                                let turn_cancel = CancellationToken::new();
-                                let s = &mut *sess;
-                                if let Err(e) = r#loop::run(
-                                    bridge.as_ref(),
-                                    &mut s.bus,
-                                    &mut s.context_manager,
-                                    &mut s.conversation,
-                                    &events_tx,
-                                    turn_cancel,
-                                    &loop_config,
-                                )
-                                .await
-                                {
-                                    tracing::error!(error = %e, "daemon vox event loop error");
-                                }
-                                Ok(())
-                            },
-                        );
-                    } else {
-                        // Per-user session — route via actor.
-                        let msg = session_router::SessionMessage::Inbound {
-                            text,
-                            trust_level,
-                        };
-                        let deps = session_deps.clone();
-                        let bridge = bridge.clone();
-                        let events_tx = events_tx.clone();
-                        let shared_settings = shared_settings.clone();
-                        let semaphore = router.semaphore().clone();
-                        let cwd = agent_cwd.clone();
-                        let secrets = agent_secrets.clone();
-
-                        if let Err(e) = router.route(&key, msg, |rx, last_active| {
-                            let (bus, ctx, conv) = session_factory::create_session(&deps);
-                            let key = key.clone();
-                            tokio::spawn(session_router::session_actor_loop(
-                                key, rx, last_active,
-                                bus, ctx, conv,
-                                bridge.clone(), events_tx.clone(),
-                                shared_settings.clone(), semaphore.clone(),
-                                cwd.clone(), secrets.clone(),
-                            ))
-                        }).await {
-                            tracing::error!(caller = %key, error = %e, "failed to route vox event");
-                        }
-                    }
+                            let turn_cancel = CancellationToken::new();
+                            let s = &mut *sess;
+                            if let Err(e) = r#loop::run(
+                                bridge.as_ref(),
+                                &mut s.bus,
+                                &mut s.context_manager,
+                                &mut s.conversation,
+                                &events_tx,
+                                turn_cancel,
+                                &loop_config,
+                            )
+                            .await
+                            {
+                                tracing::error!(error = %e, "daemon vox event loop error");
+                            }
+                            Ok(())
+                        },
+                    );
                 }
             }
             cmd = cmd_rx.recv() => {
@@ -1171,16 +1162,94 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
                             },
                         );
                     }
-                    Some(web::WebCommand::SlashCommand { name, args: _, respond_to }) => {
-                        tracing::info!(command = %name, "daemon: slash command");
+                    Some(web::WebCommand::ExecuteControl { request, respond_to }) => {
+                        tracing::info!(request = ?request, "daemon: control request");
+                        let response = control_runtime::execute_daemon_control(
+                            request,
+                            &shared_settings,
+                            &agent_secrets,
+                            &agent_cwd,
+                        )
+                        .await;
                         if let Some(tx) = respond_to {
-                            let _ = tx.send(omegon_traits::SlashCommandResponse {
-                                accepted: false,
-                                output: Some(format!(
-                                    "Slash command /{name} not yet supported in daemon mode"
-                                )),
-                            });
+                            let _ = tx.send(response);
                         }
+                    }
+                    Some(web::WebCommand::SlashCommand { name, args, respond_to }) => {
+                        // Non-canonical slash commands that didn't map to a
+                        // ControlRequest. Route as a user prompt so the agent
+                        // can interpret them.
+                        tracing::info!(command = %name, "daemon: slash command → prompt");
+                        let prompt = if args.is_empty() {
+                            format!("/{name}")
+                        } else {
+                            format!("/{name} {args}")
+                        };
+                        let session = default_session.clone();
+                        let bridge = bridge.clone();
+                        let events_tx = events_tx.clone();
+                        let shared_settings = shared_settings.clone();
+                        let model = model.clone();
+                        let cwd = agent_cwd.clone();
+                        let secrets = agent_secrets.clone();
+                        let semaphore = router.semaphore().clone();
+
+                        task_spawn::spawn_best_effort_result(
+                            "daemon-turn-slash",
+                            async move {
+                                let _permit = semaphore.acquire().await
+                                    .map_err(|_| anyhow::anyhow!("session semaphore closed"))?;
+
+                                let mut sess = session.lock().await;
+                                sess.conversation.push_user(prompt);
+
+                                let loop_config = r#loop::LoopConfig {
+                                    max_turns: shared_settings
+                                        .lock()
+                                        .map(|s| s.max_turns)
+                                        .unwrap_or(50),
+                                    soft_limit_turns: 35,
+                                    max_retries: 0,
+                                    retry_delay_ms: 750,
+                                    model: shared_settings
+                                        .lock()
+                                        .map(|s| s.model.clone())
+                                        .unwrap_or_else(|_| model.clone()),
+                                    cwd: cwd.clone(),
+                                    extended_context: false,
+                                    settings: Some(shared_settings.clone()),
+                                    secrets: Some(secrets),
+                                    force_compact: None,
+                                    allow_commit_nudge: false,
+                                    enforce_first_turn_execution_bias: false,
+                                };
+
+                                let turn_cancel = CancellationToken::new();
+                                let s = &mut *sess;
+                                if let Err(e) = r#loop::run(
+                                    bridge.as_ref(),
+                                    &mut s.bus,
+                                    &mut s.context_manager,
+                                    &mut s.conversation,
+                                    &events_tx,
+                                    turn_cancel,
+                                    &loop_config,
+                                )
+                                .await
+                                {
+                                    tracing::error!(error = %e, "daemon slash command loop error");
+                                }
+
+                                // If there's a respond_to channel, acknowledge.
+                                if let Some(tx) = respond_to {
+                                    let _ = tx.send(omegon_traits::SlashCommandResponse {
+                                        accepted: true,
+                                        output: None,
+                                    });
+                                }
+                                Ok(())
+                            },
+                        );
                     }
                     Some(web::WebCommand::Cancel) => {
                         tracing::info!("daemon: cancel requested (no active loop)");
@@ -1200,9 +1269,81 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
             }
             _ = idle_tick.tick() => {
                 // ─── Evict idle per-user sessions ────────────────────────
-                let evicted = router.evict_idle().await;
-                for key in &evicted {
-                    tracing::info!(caller = %key, "daemon: evicted idle session");
+                let parked = router.park_idle_sessions().await;
+                for key in &parked {
+                    tracing::info!(caller = %key, "daemon: parked idle session");
+                }
+
+                // ─── Poll scheduled triggers ──────────────────────────────
+                for trigger_config in trigger_schedule.poll_due() {
+                    let prompt = trigger_config.prompt.template.clone();
+                    let trigger_name = trigger_config.trigger.name.clone();
+                    tracing::info!(
+                        trigger = %trigger_name,
+                        "daemon: firing scheduled trigger"
+                    );
+
+                    let session = default_session.clone();
+                    let bridge = bridge.clone();
+                    let events_tx = events_tx.clone();
+                    let shared_settings = shared_settings.clone();
+                    let model = model.clone();
+                    let cwd = agent_cwd.clone();
+                    let secrets = agent_secrets.clone();
+                    let semaphore = router.semaphore().clone();
+
+                    task_spawn::spawn_best_effort_result(
+                        "daemon-turn-trigger",
+                        async move {
+                            let _permit = semaphore.acquire().await
+                                .map_err(|_| anyhow::anyhow!("session semaphore closed"))?;
+
+                            let mut sess = session.lock().await;
+                            sess.conversation.push_user(prompt);
+
+                            let loop_config = r#loop::LoopConfig {
+                                max_turns: shared_settings
+                                    .lock()
+                                    .map(|s| s.max_turns)
+                                    .unwrap_or(50),
+                                soft_limit_turns: 35,
+                                max_retries: 0,
+                                retry_delay_ms: 750,
+                                model: shared_settings
+                                    .lock()
+                                    .map(|s| s.model.clone())
+                                    .unwrap_or_else(|_| model.clone()),
+                                cwd: cwd.clone(),
+                                extended_context: false,
+                                settings: Some(shared_settings.clone()),
+                                secrets: Some(secrets),
+                                force_compact: None,
+                                allow_commit_nudge: false,
+                                enforce_first_turn_execution_bias: false,
+                            };
+
+                            let turn_cancel = CancellationToken::new();
+                            let s = &mut *sess;
+                            if let Err(e) = r#loop::run(
+                                bridge.as_ref(),
+                                &mut s.bus,
+                                &mut s.context_manager,
+                                &mut s.conversation,
+                                &events_tx,
+                                turn_cancel,
+                                &loop_config,
+                            )
+                            .await
+                            {
+                                tracing::error!(
+                                    trigger = %trigger_name,
+                                    error = %e,
+                                    "daemon: scheduled trigger loop error"
+                                );
+                            }
+                            Ok(())
+                        },
+                    );
                 }
 
                 // ─── Autonomous idle tick: poll design tree for ready nodes ──
@@ -1309,9 +1450,6 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
     }
 
     // ─── Cleanup ────────────────────────────────────────────────────────
-    // Shut down per-user session actors first.
-    router.shutdown_all().await;
-
     // Save the default session.
     {
         let sess = default_session.lock().await;
