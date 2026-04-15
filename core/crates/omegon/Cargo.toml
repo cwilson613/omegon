@@ -68,6 +68,7 @@ flate2 = "1.0"
 sigstore = { version = "0.13.0", default-features = false, features = ["cosign", "rustls-tls"] }
 x509-parser = "0.17"
 rpassword = "7"
+rpkl = "0.8"
 
 [dev-dependencies]
 insta = "1.46"

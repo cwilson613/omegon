@@ -1,0 +1,34 @@
+/// Omegon model routing matrix schema.
+///
+/// Defines provider routes, model patterns, context ceilings,
+/// tier classifications, and rate-limit breakpoint zones.
+module RouteMatrix
+
+/// A provider route definition.
+class ProviderRoute {
+  /// Provider identifier (e.g., "anthropic", "openai").
+  provider: String(length > 0)
+
+  /// Model ID patterns this route handles (glob-style).
+  patterns: Listing<String(length > 0)>
+
+  /// Maximum context window in tokens.
+  context_ceiling: Int(this > 0)
+
+  /// Capability tier name.
+  tier: String
+}
+
+/// Rate-limit breakpoint zone.
+class BreakpointZone {
+  /// Zone name (e.g., "green", "yellow", "red").
+  name: String
+
+  /// Threshold percentage (0-100) at which this zone activates.
+  threshold: Int(this >= 0 && this <= 100)
+}
+
+/// Top-level route matrix.
+routes: Listing<ProviderRoute>
+
+breakpoint_zones: Listing<BreakpointZone>?

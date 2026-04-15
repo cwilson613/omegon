@@ -1,0 +1,105 @@
+/// Omegon plugin manifest schema.
+///
+/// Plugin manifests define activation rules, context injection,
+/// tool declarations, and event forwarding for Omegon extensions.
+///
+/// Example:
+/// ```
+/// amends "PluginManifest.pkl"
+///
+/// plugin {
+///   name = "scribe"
+///   version = "0.1.0"
+///   description = "Engagement tracking and partnership data"
+/// }
+/// activation {
+///   marker_files { ".scribe" }
+/// }
+/// ```
+module PluginManifest
+
+/// Plugin identity.
+class PluginMeta {
+  name: String(length > 0)
+  version: String(matches(Regex(#"\d+\.\d+\.\d+.*"#)))
+  description: String
+}
+
+/// Activation rules — when the plugin should be loaded.
+class Activation {
+  /// Files whose presence activates the plugin.
+  marker_files: Listing<String>?
+
+  /// Environment variables whose presence activates the plugin.
+  env_vars: Listing<String>?
+
+  /// Always activate regardless of context.
+  always: Boolean = false
+}
+
+/// Context injection from an external source.
+class ContextConfig {
+  /// HTTP endpoint returning context text.
+  endpoint: String?
+
+  /// Local file path for context injection.
+  local_file: String?
+
+  /// Number of turns before refreshing context.
+  ttl_turns: Int(this > 0)?
+
+  /// Injection priority (lower = earlier in prompt).
+  priority: Int?
+}
+
+/// Tool declaration for the plugin.
+class ToolConfig {
+  /// Tool name (must be unique across plugins).
+  name: String(length > 0)
+
+  /// Human-readable description shown to the model.
+  description: String
+
+  /// HTTP endpoint for tool execution. Supports `{param}` templates.
+  endpoint: String
+
+  /// HTTP method.
+  method: ("GET"|"POST"|"PUT"|"DELETE") = "POST"
+
+  /// JSON Schema for tool parameters.
+  parameters: Mapping<String, Any>?
+
+  /// Execution timeout in seconds.
+  timeout_secs: Int(this > 0) = 30
+}
+
+/// Webhook endpoint for a lifecycle event.
+class EventEndpoint {
+  /// HTTP endpoint to POST event data to.
+  url: String
+
+  /// HTTP method.
+  method: ("POST"|"PUT") = "POST"
+}
+
+/// Event forwarding configuration.
+class EventConfig {
+  /// Webhook fired at the end of each agent turn.
+  turn_end: EventEndpoint?
+
+  /// Webhook fired when a session starts.
+  session_start: EventEndpoint?
+
+  /// Webhook fired when the agent process exits.
+  agent_end: EventEndpoint?
+}
+
+plugin: PluginMeta
+
+activation: Activation
+
+context: ContextConfig?
+
+tools: Listing<ToolConfig>?
+
+events: EventConfig?

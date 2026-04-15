@@ -320,25 +320,30 @@ pub fn load_trigger_configs(cwd: &Path) -> Vec<TriggerConfig> {
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|e| e == "toml") {
-            match load_single(&path) {
-                Ok(config) => {
-                    tracing::info!(
-                        name = %config.trigger.name,
-                        schedule = ?config.trigger.schedule,
-                        interval = ?config.trigger.interval,
-                        has_filter = config.filter.is_some(),
-                        "loaded trigger config"
-                    );
-                    configs.push(config);
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        path = %path.display(),
-                        error = %e,
-                        "failed to parse trigger config"
-                    );
-                }
+        let is_config = path
+            .extension()
+            .is_some_and(|e| e == "toml" || e == "pkl");
+        if !is_config {
+            continue;
+        }
+        match load_single(&path) {
+            Ok(config) => {
+                tracing::info!(
+                    name = %config.trigger.name,
+                    schedule = ?config.trigger.schedule,
+                    interval = ?config.trigger.interval,
+                    has_filter = config.filter.is_some(),
+                    format = ?path.extension().unwrap_or_default(),
+                    "loaded trigger config"
+                );
+                configs.push(config);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "failed to parse trigger config"
+                );
             }
         }
     }
@@ -347,9 +352,19 @@ pub fn load_trigger_configs(cwd: &Path) -> Vec<TriggerConfig> {
 }
 
 fn load_single(path: &Path) -> anyhow::Result<TriggerConfig> {
-    let content = std::fs::read_to_string(path)?;
-    let config: TriggerConfig = toml::from_str(&content)?;
-    Ok(config)
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    match ext {
+        "pkl" => {
+            let config: TriggerConfig = rpkl::from_config(path)
+                .map_err(|e| anyhow::anyhow!("pkl: {e}"))?;
+            Ok(config)
+        }
+        _ => {
+            let content = std::fs::read_to_string(path)?;
+            let config: TriggerConfig = toml::from_str(&content)?;
+            Ok(config)
+        }
+    }
 }
 
 // ── Duration parsing ─────────────────────────────────────────────────────
@@ -582,5 +597,69 @@ caller_key = "trigger:daily-review"
 
         let triggers = EventTriggers::from_configs(&[config]);
         assert_eq!(triggers.len(), 0);
+    }
+
+    #[test]
+    fn load_pkl_trigger_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let pkl_path = dir.path().join("review.pkl");
+        std::fs::write(
+            &pkl_path,
+            r#"
+trigger {
+  name = "pkl-review"
+  schedule = "daily"
+}
+
+prompt {
+  template = "Review open PRs via Pkl."
+}
+"#,
+        )
+        .unwrap();
+        let config: TriggerConfig = load_single(&pkl_path).unwrap();
+        assert_eq!(config.trigger.name, "pkl-review");
+        assert_eq!(config.trigger.schedule.as_deref(), Some("daily"));
+        assert!(config.trigger.enabled);
+        assert_eq!(config.prompt.template, "Review open PRs via Pkl.");
+    }
+
+    #[test]
+    fn load_pkl_trigger_with_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        let pkl_path = dir.path().join("github.pkl");
+        std::fs::write(
+            &pkl_path,
+            r#"
+trigger {
+  name = "gh-webhook"
+  interval = "5m"
+}
+
+filter {
+  source = "github"
+  trigger_kind = "prompt"
+}
+
+prompt {
+  template = "Handle GitHub event: {{payload.action}}"
+}
+
+session {
+  caller_key = "trigger:gh-webhook"
+}
+"#,
+        )
+        .unwrap();
+        let config: TriggerConfig = load_single(&pkl_path).unwrap();
+        assert_eq!(config.trigger.name, "gh-webhook");
+        assert_eq!(config.trigger.interval.as_deref(), Some("5m"));
+        let filter = config.filter.unwrap();
+        assert_eq!(filter.source.as_deref(), Some("github"));
+        assert_eq!(filter.trigger_kind.as_deref(), Some("prompt"));
+        assert_eq!(
+            config.session.unwrap().caller_key.as_deref(),
+            Some("trigger:gh-webhook")
+        );
     }
 }

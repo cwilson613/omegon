@@ -1,0 +1,65 @@
+/// Omegon trigger configuration schema.
+///
+/// Trigger configs live in `.omegon/triggers/` and define scheduled or
+/// event-driven prompt dispatch for daemon mode.
+///
+/// Example:
+/// ```
+/// amends "TriggerConfig.pkl"
+///
+/// trigger {
+///   name = "daily-review"
+///   schedule = "daily"
+/// }
+/// prompt {
+///   template = "Review open PRs and summarize status."
+/// }
+/// ```
+module TriggerConfig
+
+/// Core trigger metadata.
+class TriggerMeta {
+  /// Unique name for this trigger.
+  name: String
+
+  /// Whether this trigger is active. Defaults to true.
+  enabled: Boolean = true
+
+  /// Preset schedule: "hourly", "daily", "weekdays", "weekly".
+  /// Mutually exclusive with `interval`.
+  schedule: ("hourly"|"daily"|"weekdays"|"weekly")?
+
+  /// Interval duration: "30s", "5m", "1h", "6h", "1d".
+  /// Mutually exclusive with `schedule`.
+  interval: String(matches(Regex(#"\d+[smhd]"#)))?
+}
+
+/// Filter for matching inbound DaemonEventEnvelopes.
+class TriggerFilter {
+  /// Match envelope source (e.g., "github", "vox:discord").
+  source: String?
+
+  /// Match envelope trigger_kind (e.g., "prompt", "webhook").
+  trigger_kind: String?
+}
+
+/// Prompt template with optional payload field interpolation.
+class PromptTemplate {
+  /// Template string. Use `{{payload.field}}` for interpolation.
+  template: String(length > 0)
+}
+
+/// Session routing configuration.
+class SessionConfig {
+  /// Caller key for session routing (e.g., "trigger:daily-review").
+  /// Defaults to "trigger:<trigger.name>" if omitted.
+  caller_key: String?
+}
+
+trigger: TriggerMeta
+
+filter: TriggerFilter?
+
+prompt: PromptTemplate
+
+session: SessionConfig?
