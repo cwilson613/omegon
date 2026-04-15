@@ -176,7 +176,7 @@ impl ScoreCard {
         if !self.aggregate.by_dimension.is_empty() {
             out.push_str("\nDimensions:\n");
             let mut dims: Vec<_> = self.aggregate.by_dimension.iter().collect();
-            dims.sort_by_key(|(k, _)| k.clone());
+            dims.sort_by_key(|(k, _)| (*k).clone());
             for (dim, score) in dims {
                 out.push_str(&format!("  {dim}: {:.0}%\n", score * 100.0));
             }

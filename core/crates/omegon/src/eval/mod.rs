@@ -14,7 +14,6 @@ pub mod store;
 use std::path::Path;
 
 use scenario::{EvalSuite, Scenario};
-use scorer::ScorerResult;
 use report::{ComponentMatrix, ComponentVersion, ScenarioResult, ScoreCard};
 
 /// Run an eval suite against an agent bundle.
