@@ -1132,6 +1132,10 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str,
         );
     }
 
+    // Track in-flight triggers to prevent re-entrant execution.
+    let triggers_in_flight: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>> =
+        Default::default();
+
     // ─── Dispatch loop — consume commands + autonomous idle tick ─────
     let idle_poll_interval = tokio::time::Duration::from_secs(30);
     let mut idle_tick = tokio::time::interval(idle_poll_interval);
@@ -1151,9 +1155,15 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str,
                 break;
             }
             _ = vox_poll.tick() => {
+                // Drain up to 32 events per tick to bound memory pressure.
+                // Events beyond the cap stay in the queue for the next tick.
+                const MAX_EVENTS_PER_TICK: usize = 32;
                 let events: Vec<omegon_traits::DaemonEventEnvelope> = {
                     match vox_daemon_events.lock() {
-                        Ok(mut queue) => queue.drain(..).collect(),
+                        Ok(mut queue) => {
+                            let n = queue.len().min(MAX_EVENTS_PER_TICK);
+                            queue.drain(..n).collect()
+                        }
                         Err(_) => continue,
                     }
                 };
@@ -1464,8 +1474,22 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str,
 
                 // ─── Poll scheduled triggers ──────────────────────────────
                 for trigger_config in trigger_schedule.poll_due() {
-                    let prompt = trigger_config.prompt.template.clone();
                     let trigger_name = trigger_config.trigger.name.clone();
+
+                    // Skip if this trigger is already executing.
+                    {
+                        let in_flight = triggers_in_flight.lock().unwrap_or_else(|e| e.into_inner());
+                        if in_flight.contains(&trigger_name) {
+                            tracing::debug!(trigger = %trigger_name, "trigger still in-flight, skipping");
+                            continue;
+                        }
+                    }
+                    {
+                        let mut in_flight = triggers_in_flight.lock().unwrap_or_else(|e| e.into_inner());
+                        in_flight.insert(trigger_name.clone());
+                    }
+
+                    let prompt = trigger_config.prompt.template.clone();
                     tracing::info!(
                         trigger = %trigger_name,
                         "daemon: firing scheduled trigger"
@@ -1479,6 +1503,8 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str,
                     let cwd = agent_cwd.clone();
                     let secrets = agent_secrets.clone();
                     let semaphore = router.semaphore().clone();
+                    let in_flight = triggers_in_flight.clone();
+                    let trigger_name_for_cleanup = trigger_name.clone();
 
                     task_spawn::spawn_best_effort_result(
                         "daemon-turn-trigger",
@@ -1528,6 +1554,10 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str,
                                     error = %e,
                                     "daemon: scheduled trigger loop error"
                                 );
+                            }
+                            // Clear in-flight flag so the trigger can fire again.
+                            if let Ok(mut set) = in_flight.lock() {
+                                set.remove(&trigger_name_for_cleanup);
                             }
                             Ok(())
                         },
@@ -1637,7 +1667,11 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str,
         }
     }
 
-    // ─── Cleanup ────────────────────────────────────────────────────────
+    // ─── Cleanup — graceful drain + save ───────────────────────────────
+    // Give in-flight turns a grace period to complete before saving state.
+    tracing::info!("daemon: draining in-flight turns (5s grace period)");
+    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
     // Save the default session.
     {
         let sess = default_session.lock().await;

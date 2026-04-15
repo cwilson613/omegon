@@ -45,8 +45,16 @@ where
     Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
 {
     tokio::spawn(async move {
-        if let Err(err) = fut.await {
-            debug!(task = name, error = %err, "best-effort background task failed");
+        let task = std::panic::AssertUnwindSafe(fut).catch_unwind().await;
+        match task {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                debug!(task = name, error = %err, "best-effort background task failed");
+            }
+            Err(panic_payload) => {
+                let panic_text = panic_payload_text(&panic_payload);
+                error!(task = name, %panic_text, "daemon turn panicked — session may be inconsistent");
+            }
         }
     })
 }
