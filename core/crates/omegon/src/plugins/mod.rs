@@ -89,7 +89,11 @@ pub async fn discover_plugins_filtered(
                 continue;
             }
 
-            let manifest_path = plugin_dir.join("plugin.toml");
+            let manifest_path = if plugin_dir.join("plugin.pkl").exists() {
+                plugin_dir.join("plugin.pkl")
+            } else {
+                plugin_dir.join("plugin.toml")
+            };
             if !manifest_path.exists() {
                 continue;
             }
@@ -216,9 +220,14 @@ fn load_legacy_plugin(
     manifest_path: &Path,
     cwd: &Path,
 ) -> anyhow::Result<Option<Box<dyn omegon_traits::Feature>>> {
-    let content = std::fs::read_to_string(manifest_path)?;
-    let manifest: PluginManifest = toml::from_str(&content)
-        .map_err(|e| anyhow::anyhow!("invalid plugin manifest {}: {e}", manifest_path.display()))?;
+    let manifest: PluginManifest = if manifest_path.extension().is_some_and(|e| e == "pkl") {
+        rpkl::from_config(manifest_path)
+            .map_err(|e| anyhow::anyhow!("invalid plugin manifest {}: {e}", manifest_path.display()))?
+    } else {
+        let content = std::fs::read_to_string(manifest_path)?;
+        toml::from_str(&content)
+            .map_err(|e| anyhow::anyhow!("invalid plugin manifest {}: {e}", manifest_path.display()))?
+    };
 
     if !manifest.activation.is_active(cwd) {
         return Ok(None);
