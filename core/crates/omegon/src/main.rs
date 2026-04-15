@@ -662,11 +662,11 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Serve {
             control_port,
             strict_port,
-        }) => run_embedded_command(control_port, strict_port).await,
+        }) => run_embedded_command(control_port, strict_port, &cli.model).await,
         Some(Commands::Embedded {
             control_port,
             strict_port,
-        }) => run_embedded_command(control_port, strict_port).await,
+        }) => run_embedded_command(control_port, strict_port, &cli.model).await,
         Some(Commands::Migrate { ref source }) => {
             let cwd = std::fs::canonicalize(&cli.cwd)?;
             let report = migrate::run(source, &cwd);
@@ -794,11 +794,11 @@ struct EmbeddedStartupEvent {
     auth_source: String,
 }
 
-async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::Result<()> {
+async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str) -> anyhow::Result<()> {
     let cwd = std::fs::canonicalize(".")?;
 
     // ─── Shared setup ───────────────────────────────────────────────────
-    let shared_settings = settings::shared("anthropic:claude-sonnet-4-6");
+    let shared_settings = settings::shared(model);
     let profile = settings::Profile::load(&cwd);
     if let Ok(mut s) = shared_settings.lock() {
         profile.apply_to(&mut s);
