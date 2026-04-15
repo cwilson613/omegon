@@ -5,6 +5,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.15.25] - 2026-04-15
+
+### Changed
+
+- **Agent loop churn reduction** — six heuristic fixes to the controller and stuck detector that reduce unnecessary system message injection and improve convergence speed:
+  - Collapsed dead slim/non-slim branch in continuation pressure tier thresholds.
+  - Targeted-only reads now get one grace turn before execution pressure fires (turn 3, not 2), reducing false-positive nudges during legitimate focused exploration.
+  - Eliminated duplicate `compute_context_composition` calls in the commit-nudge path (was rebuilding system prompt and LLM view twice per nudge turn).
+  - StuckDetector clears file access history on mutation, preventing false cross-tool churn warnings after the agent edits a file it previously inspected.
+  - Evidence sufficiency returns Actionable for post-mutation turns, keeping the evidence-sufficient streak alive across mixed mutation+read turns instead of resetting it.
+  - Constraint discovery, targeted evidence, and evidence sufficient streaks now use halving-decay instead of hard reset, matching drift streaks and preventing gaming by interleaving one off-pattern turn.
+
 ## [0.15.24] - 2026-04-15
 
 ### Added
