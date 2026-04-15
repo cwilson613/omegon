@@ -885,5 +885,15 @@
       "fix: tool execution timeout + session mutex contention",
       "refactor(container): domain-based agent images"
     ]
+  },
+  "0.15.26": {
+    "status": "open",
+    "channel": "stable",
+    "nodes": [],
+    "frozen": false,
+    "opened": "2026-04-15T23:02:00Z",
+    "released": null,
+    "rc_count": 0,
+    "notes": []
   }
 }
