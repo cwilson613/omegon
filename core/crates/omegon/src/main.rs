@@ -60,6 +60,10 @@ mod prompt;
 mod providers;
 pub mod routing;
 mod session;
+mod agent_manifest;
+mod bundle_verify;
+mod catalog;
+mod eval;
 mod session_router;
 pub mod settings;
 mod triggers;
@@ -259,6 +263,10 @@ enum Commands {
         /// Require the exact control port instead of auto-falling back.
         #[arg(long)]
         strict_port: bool,
+
+        /// Agent manifest to load from catalog (id or path to bundle dir).
+        #[arg(long)]
+        agent: Option<String>,
     },
 
     /// Run an embedded localhost control-plane for external supervisors.
@@ -296,6 +304,22 @@ enum Commands {
         /// Source to migrate from. "auto" detects all available tools.
         #[arg(default_value = "auto")]
         source: String,
+    },
+
+    /// Evaluate an agent bundle against a test suite. Produces a score card.
+    Eval {
+        /// Agent manifest to evaluate (id or path to bundle dir).
+        #[arg(long)]
+        agent: String,
+
+        /// Path to eval suite TOML file.
+        #[arg(long)]
+        suite: String,
+
+        /// Override the model for this eval run. Run the same suite with
+        /// different models to avoid overfitting to a single provider.
+        #[arg(long)]
+        model_override: Option<String>,
     },
 
     /// Manage plugins — install, list, remove, update.
@@ -664,11 +688,23 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Serve {
             control_port,
             strict_port,
-        }) => run_embedded_command(control_port, strict_port, &cli.model).await,
+            ref agent,
+        }) => run_embedded_command(control_port, strict_port, &cli.model, agent.as_deref()).await,
         Some(Commands::Embedded {
             control_port,
             strict_port,
-        }) => run_embedded_command(control_port, strict_port, &cli.model).await,
+        }) => run_embedded_command(control_port, strict_port, &cli.model, None).await,
+        Some(Commands::Eval { agent, suite, model_override }) => {
+            if let Some(model) = &model_override {
+                tracing::info!(model = %model, "eval: model override active — testing model portability");
+            }
+            let suite_path = std::path::PathBuf::from(suite);
+            let card = eval::run_suite(&agent, &suite_path, model_override.as_deref()).await?;
+            println!("{}", card.summary());
+            let stored_path = eval::store::store(&card)?;
+            println!("Score card stored at {}", stored_path.display());
+            Ok(())
+        }
         Some(Commands::Migrate { ref source }) => {
             let cwd = std::fs::canonicalize(&cli.cwd)?;
             let report = migrate::run(source, &cwd);
@@ -797,16 +833,212 @@ struct EmbeddedStartupEvent {
 }
 
 /// Mutable state for the default (full-featured) daemon session.
-/// This is the pre-existing agent state from `AgentSetup` — it has memory,
-/// lifecycle, delegate, and all other features. Web API prompts and
-/// anonymous vox events route here.
+/// Pre-existing agent state from `AgentSetup` — has memory, lifecycle,
+/// delegate, and all features. Web API prompts and vox events route here.
+///
+/// Wrapped in `Option` so spawned turns can `.take()` ownership for the
+/// duration of `r#loop::run()`, releasing the Mutex while the turn executes.
 struct DefaultSession {
     bus: bus::EventBus,
     context_manager: context::ContextManager,
     conversation: conversation::ConversationState,
 }
 
-async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str) -> anyhow::Result<()> {
+/// Type alias for the shared session state. `None` means a turn is in progress.
+type SharedSession = Arc<tokio::sync::Mutex<Option<DefaultSession>>>;
+
+/// Run a daemon turn with the take/replace pattern. Acquires the session
+/// briefly to extract state, runs the turn without holding the lock, then
+/// puts state back. Returns `Err` if the session is busy (turn in progress).
+async fn run_daemon_turn(
+    session: &SharedSession,
+    bridge: &Arc<dyn LlmBridge>,
+    events_tx: &tokio::sync::broadcast::Sender<omegon_traits::AgentEvent>,
+    config: r#loop::LoopConfig,
+    setup_fn: impl FnOnce(&mut DefaultSession),
+) -> anyhow::Result<()> {
+    // Take ownership — Mutex held only for the .take() call.
+    let mut state = {
+        let mut guard = session.lock().await;
+        guard
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("session busy — turn already in progress"))?
+    };
+
+    setup_fn(&mut state);
+
+    let turn_cancel = CancellationToken::new();
+    let result = r#loop::run(
+        bridge.as_ref(),
+        &mut state.bus,
+        &mut state.context_manager,
+        &mut state.conversation,
+        events_tx,
+        turn_cancel,
+        &config,
+    )
+    .await;
+
+    // Always return state, even on error.
+    {
+        let mut guard = session.lock().await;
+        *guard = Some(state);
+    }
+
+    result
+}
+
+/// Pre-setup agent manifest resolution. Runs BEFORE AgentSetup::new() so
+/// that persona, settings, triggers, and workflows are materialized into
+/// the filesystem and environment where setup will discover them.
+fn apply_agent_manifest_pre_setup(
+    agent_id: &str,
+    cwd: &std::path::Path,
+    shared_settings: &settings::SharedSettings,
+) -> anyhow::Result<agent_manifest::ResolvedManifest> {
+    let omegon_home = paths::omegon_home().unwrap_or_else(|_| cwd.join(".omegon"));
+    let resolved = catalog::resolve(&omegon_home, agent_id)?;
+
+    tracing::info!(
+        agent = %resolved.manifest.agent.id,
+        domain = %resolved.manifest.agent.domain,
+        "loaded agent manifest"
+    );
+
+    // ── Verify bundle safety ─────────────────────────────────────────
+    let verification = bundle_verify::verify_bundle(&resolved);
+    for w in verification.warnings() {
+        tracing::warn!(category = w.category, location = %w.location, "bundle warning: {}", w.message);
+    }
+    if !verification.passed() {
+        for e in verification.errors() {
+            tracing::error!(category = e.category, location = %e.location, "bundle verification failed: {}", e.message);
+        }
+        anyhow::bail!(
+            "agent bundle '{}' failed verification with {} error(s)",
+            resolved.manifest.agent.id, verification.errors().len()
+        );
+    }
+    tracing::info!("agent bundle verified");
+
+    // ── Apply settings ───────────────────────────────────────────────
+    if let Some(ref s) = resolved.manifest.settings {
+        if let Ok(mut settings) = shared_settings.lock() {
+            if let Some(ref m) = s.model { settings.model = m.clone(); }
+            if let Some(ref tl) = s.thinking_level {
+                if let Some(level) = settings::ThinkingLevel::parse(tl) {
+                    settings.thinking = level;
+                }
+            }
+            if let Some(mt) = s.max_turns { settings.max_turns = mt; }
+        }
+    }
+
+    // ── Materialize persona as plugin for setup discovery ────────────
+    if resolved.persona_directive.is_some() {
+        let persona_slug = resolved.manifest.agent.id.replace('.', "-");
+        let plugin_dir = cwd.join(".omegon").join("plugins").join(&persona_slug);
+        std::fs::create_dir_all(&plugin_dir).ok();
+
+        if let Some(ref directive) = resolved.persona_directive {
+            std::fs::write(plugin_dir.join("PERSONA.md"), directive).ok();
+        }
+        if let Some(ref facts) = resolved.mind_facts_content {
+            let mind_dir = plugin_dir.join("mind");
+            std::fs::create_dir_all(&mind_dir).ok();
+            std::fs::write(mind_dir.join("facts.jsonl"), facts).ok();
+        }
+
+        let persona_cfg = resolved.manifest.persona.as_ref();
+        let badge = persona_cfg.and_then(|p| p.badge.as_deref())
+            .map(|b| format!("\n[persona.style]\nbadge = \"{b}\""))
+            .unwrap_or_default();
+        let skills = persona_cfg.and_then(|p| p.activated_skills.as_ref())
+            .filter(|s| !s.is_empty())
+            .map(|s| format!("\n[persona.skills]\nactivate = [{}]", s.iter().map(|sk| format!("\"{sk}\"")).collect::<Vec<_>>().join(", ")))
+            .unwrap_or_default();
+        let tools = persona_cfg.and_then(|p| p.disabled_tools.as_ref())
+            .filter(|t| !t.is_empty())
+            .map(|t| format!("\n[persona.tools]\ndisable = [{}]", t.iter().map(|tk| format!("\"{tk}\"")).collect::<Vec<_>>().join(", ")))
+            .unwrap_or_default();
+        let mind = if resolved.mind_facts_content.is_some() {
+            "\n[persona.mind]\nseed_facts = \"mind/facts.jsonl\""
+        } else { "" };
+
+        let plugin_toml = format!(
+            "[plugin]\ntype = \"persona\"\nid = \"agent.{persona_slug}\"\n\
+             name = \"{name}\"\nversion = \"{ver}\"\n\
+             description = \"Bundle-materialized persona\"\n\n\
+             [persona.identity]\ndirective = \"PERSONA.md\"\n{mind}{badge}{skills}{tools}\n",
+            name = resolved.manifest.agent.name,
+            ver = resolved.manifest.agent.version,
+        );
+        std::fs::write(plugin_dir.join("plugin.toml"), plugin_toml).ok();
+        // SAFETY: single-threaded init phase, before any tokio tasks spawn.
+        unsafe { std::env::set_var("OMEGON_CHILD_PERSONA", &resolved.manifest.agent.name) };
+        tracing::info!(persona = %resolved.manifest.agent.name, "materialized bundle persona");
+    }
+
+    // ── Install trigger configs ──────────────────────────────────────
+    if let Some(ref trigs) = resolved.manifest.triggers {
+        let trigger_dir = cwd.join(".omegon").join("triggers");
+        std::fs::create_dir_all(&trigger_dir).ok();
+        for t in trigs {
+            let config = triggers::TriggerConfig {
+                trigger: triggers::TriggerMeta {
+                    name: t.name.clone(), enabled: true,
+                    schedule: t.schedule.clone(), interval: t.interval.clone(),
+                },
+                filter: None,
+                prompt: triggers::PromptTemplate { template: t.template.clone() },
+                session: None,
+            };
+            let toml_str = toml::to_string_pretty(&config).unwrap_or_default();
+            std::fs::write(trigger_dir.join(format!("{}.toml", t.name)), &toml_str).ok();
+        }
+    }
+
+    // ── Install workflow template ────────────────────────────────────
+    if let Some(ref wf) = resolved.manifest.workflow {
+        let wf_dir = cwd.join(".omegon").join("workflows");
+        std::fs::create_dir_all(&wf_dir).ok();
+        let map_phase = |p: &std::collections::HashMap<String, agent_manifest::PhaseConfig>, name: &str| -> Option<workflow::PhaseConfig> {
+            p.get(name).map(|pc| workflow::PhaseConfig {
+                persona: pc.persona.clone(), model: pc.model.clone(),
+                max_turns: pc.max_turns, context_class: pc.context_class.clone(),
+                thinking_level: pc.thinking_level.clone(),
+            })
+        };
+        let phases = wf.phases.as_ref();
+        let template = workflow::WorkflowTemplate {
+            workflow: workflow::WorkflowMeta { name: wf.name.clone(), description: String::new() },
+            phases: workflow::WorkflowPhases {
+                exploring: phases.and_then(|p| map_phase(p, "exploring")),
+                specifying: phases.and_then(|p| map_phase(p, "specifying")),
+                decomposing: phases.and_then(|p| map_phase(p, "decomposing")),
+                implementing: phases.and_then(|p| map_phase(p, "implementing")),
+                verifying: phases.and_then(|p| map_phase(p, "verifying")),
+            },
+        };
+        let toml_str = toml::to_string_pretty(&template).unwrap_or_default();
+        std::fs::write(wf_dir.join(format!("{}.toml", wf.name)), &toml_str).ok();
+    }
+
+    // ── Secret pre-flight ────────────────────────────────────────────
+    if let Some(ref secrets) = resolved.manifest.secrets {
+        if let Some(ref required) = secrets.required {
+            for s in required {
+                if std::env::var(s).is_err() {
+                    tracing::warn!(secret = %s, "required secret not found in environment");
+                }
+            }
+        }
+    }
+
+    Ok(resolved)
+}
+
+async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str, agent_id: Option<&str>) -> anyhow::Result<()> {
     let cwd = std::fs::canonicalize(".")?;
 
     // ─── Shared setup ───────────────────────────────────────────────────
@@ -815,6 +1047,15 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
     if let Ok(mut s) = shared_settings.lock() {
         profile.apply_to(&mut s);
     }
+
+    // ─── Agent manifest pre-resolution (before AgentSetup) ────────────
+    // Settings, persona, triggers, and workflows must be materialized
+    // before setup so persona registry and tool surface are correct.
+    let agent_manifest_resolved = if let Some(agent_id) = agent_id {
+        Some(apply_agent_manifest_pre_setup(agent_id, &cwd, &shared_settings)?)
+    } else {
+        None
+    };
 
     let mut agent = setup::AgentSetup::new(&cwd, None, Some(shared_settings.clone())).await?;
     agent.initial_harness_status.update_runtime_posture(
@@ -828,6 +1069,27 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
             omegon_traits::OmegonRuntimeProfile::LongRunningDaemon,
             omegon_traits::OmegonAutonomyMode::GuardedAutonomous,
         );
+    }
+
+    // ─── Extension/plugin pre-flight reconciliation ──────────────────────
+    if let Some(ref resolved) = agent_manifest_resolved {
+        if let Some(ref exts) = resolved.manifest.extensions {
+            let omegon_home = paths::omegon_home().unwrap_or_else(|_| cwd.join(".omegon"));
+            let ext_dir = omegon_home.join("extensions");
+            for ext in exts {
+                let installed = ext_dir.join(&ext.name).join("manifest.toml").exists();
+                if installed {
+                    tracing::info!(extension = %ext.name, version = %ext.version, "extension installed");
+                } else {
+                    tracing::error!(
+                        extension = %ext.name,
+                        version = %ext.version,
+                        expected_path = %ext_dir.join(&ext.name).display(),
+                        "required extension not installed. Run: omegon extension install <source>"
+                    );
+                }
+            }
+        }
     }
 
     // ─── LLM bridge (init once, reused across prompts) ──────────────────
@@ -926,11 +1188,11 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
     // Wrap the pre-existing agent state as the default session. This
     // preserves single-session backward compatibility — events without
     // identity metadata route here (web API, anonymous vox messages).
-    let default_session = Arc::new(tokio::sync::Mutex::new(DefaultSession {
+    let default_session: SharedSession = Arc::new(tokio::sync::Mutex::new(Some(DefaultSession {
         bus: agent.bus,
         context_manager: agent.context_manager,
         conversation: agent.conversation,
-    }));
+    })));
 
     // ─── Load trigger configs ─────────────────────────────────────────
     let trigger_configs = triggers::load_trigger_configs(&cwd);
@@ -943,6 +1205,10 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
             "loaded trigger configs"
         );
     }
+
+    // Track in-flight triggers to prevent re-entrant execution.
+    let triggers_in_flight: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>> =
+        Default::default();
 
     // ─── Dispatch loop — consume commands + autonomous idle tick ─────
     let idle_poll_interval = tokio::time::Duration::from_secs(30);
@@ -963,9 +1229,15 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
                 break;
             }
             _ = vox_poll.tick() => {
+                // Drain up to 32 events per tick to bound memory pressure.
+                // Events beyond the cap stay in the queue for the next tick.
+                const MAX_EVENTS_PER_TICK: usize = 32;
                 let events: Vec<omegon_traits::DaemonEventEnvelope> = {
                     match vox_daemon_events.lock() {
-                        Ok(mut queue) => queue.drain(..).collect(),
+                        Ok(mut queue) => {
+                            let n = queue.len().min(MAX_EVENTS_PER_TICK);
+                            queue.drain(..n).collect()
+                        }
                         Err(_) => continue,
                     }
                 };
@@ -1022,7 +1294,7 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
                     let cwd = agent_cwd.clone();
                     let secrets = agent_secrets.clone();
                     let semaphore = router.semaphore().clone();
-                    let daemon_workflow = daemon_workflow.clone();
+                    let _daemon_workflow = daemon_workflow.clone();
 
                     task_spawn::spawn_best_effort_result(
                         "daemon-turn-vox",
@@ -1030,10 +1302,7 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
                             let _permit = semaphore.acquire().await
                                 .map_err(|_| anyhow::anyhow!("session semaphore closed"))?;
 
-                            let mut sess = session.lock().await;
-                            sess.conversation.push_user(text);
-
-                            let mut loop_config = r#loop::LoopConfig {
+                            let loop_config = r#loop::LoopConfig {
                                 max_turns: shared_settings
                                     .lock()
                                     .map(|s| s.max_turns)
@@ -1054,30 +1323,10 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
                                 enforce_first_turn_execution_bias: false,
                             };
 
-                            if let Some(ref wf) = daemon_workflow {
-                                let phase = sess.context_manager.phase();
-                                if let Some(pc) = wf.phase_config(phase) {
-                                    workflow::apply_phase_config(
-                                        &mut loop_config,
-                                        pc,
-                                        &shared_settings,
-                                    );
-                                }
-                            }
-
-                            let turn_cancel = CancellationToken::new();
-                            let s = &mut *sess;
-                            if let Err(e) = r#loop::run(
-                                bridge.as_ref(),
-                                &mut s.bus,
-                                &mut s.context_manager,
-                                &mut s.conversation,
-                                &events_tx,
-                                turn_cancel,
-                                &loop_config,
-                            )
-                            .await
-                            {
+                            if let Err(e) = run_daemon_turn(
+                                &session, &bridge, &events_tx, loop_config,
+                                |state| { state.conversation.push_user(text); },
+                            ).await {
                                 tracing::error!(error = %e, "daemon vox event loop error");
                             }
                             Ok(())
@@ -1099,7 +1348,7 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
                         let cwd = agent_cwd.clone();
                         let secrets = agent_secrets.clone();
                         let semaphore = router.semaphore().clone();
-                        let daemon_workflow = daemon_workflow.clone();
+                        let _daemon_workflow = daemon_workflow.clone();
 
                         task_spawn::spawn_best_effort_result(
                             "daemon-turn-prompt",
@@ -1107,10 +1356,7 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
                                 let _permit = semaphore.acquire().await
                                     .map_err(|_| anyhow::anyhow!("session semaphore closed"))?;
 
-                                let mut sess = session.lock().await;
-                                sess.conversation.push_user(text);
-
-                                let mut loop_config = r#loop::LoopConfig {
+                                let loop_config = r#loop::LoopConfig {
                                     max_turns: shared_settings
                                         .lock()
                                         .map(|s| s.max_turns)
@@ -1131,31 +1377,10 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
                                     enforce_first_turn_execution_bias: false,
                                 };
 
-                                // Apply workflow phase config if available
-                                if let Some(ref wf) = daemon_workflow {
-                                    let phase = sess.context_manager.phase();
-                                    if let Some(pc) = wf.phase_config(phase) {
-                                        workflow::apply_phase_config(
-                                            &mut loop_config,
-                                            pc,
-                                            &shared_settings,
-                                        );
-                                    }
-                                }
-
-                                let turn_cancel = CancellationToken::new();
-                                let s = &mut *sess;
-                                if let Err(e) = r#loop::run(
-                                    bridge.as_ref(),
-                                    &mut s.bus,
-                                    &mut s.context_manager,
-                                    &mut s.conversation,
-                                    &events_tx,
-                                    turn_cancel,
-                                    &loop_config,
-                                )
-                                .await
-                                {
+                                if let Err(e) = run_daemon_turn(
+                                    &session, &bridge, &events_tx, loop_config,
+                                    |state| { state.conversation.push_user(text); },
+                                ).await {
                                     tracing::error!(error = %e, "daemon agent loop error");
                                 }
                                 Ok(())
@@ -1200,9 +1425,6 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
                                 let _permit = semaphore.acquire().await
                                     .map_err(|_| anyhow::anyhow!("session semaphore closed"))?;
 
-                                let mut sess = session.lock().await;
-                                sess.conversation.push_user(prompt);
-
                                 let loop_config = r#loop::LoopConfig {
                                     max_turns: shared_settings
                                         .lock()
@@ -1224,19 +1446,10 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
                                     enforce_first_turn_execution_bias: false,
                                 };
 
-                                let turn_cancel = CancellationToken::new();
-                                let s = &mut *sess;
-                                if let Err(e) = r#loop::run(
-                                    bridge.as_ref(),
-                                    &mut s.bus,
-                                    &mut s.context_manager,
-                                    &mut s.conversation,
-                                    &events_tx,
-                                    turn_cancel,
-                                    &loop_config,
-                                )
-                                .await
-                                {
+                                if let Err(e) = run_daemon_turn(
+                                    &session, &bridge, &events_tx, loop_config,
+                                    |state| { state.conversation.push_user(prompt); },
+                                ).await {
                                     tracing::error!(error = %e, "daemon slash command loop error");
                                 }
 
@@ -1276,8 +1489,22 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
 
                 // ─── Poll scheduled triggers ──────────────────────────────
                 for trigger_config in trigger_schedule.poll_due() {
-                    let prompt = trigger_config.prompt.template.clone();
                     let trigger_name = trigger_config.trigger.name.clone();
+
+                    // Skip if this trigger is already executing.
+                    {
+                        let in_flight = triggers_in_flight.lock().unwrap_or_else(|e| e.into_inner());
+                        if in_flight.contains(&trigger_name) {
+                            tracing::debug!(trigger = %trigger_name, "trigger still in-flight, skipping");
+                            continue;
+                        }
+                    }
+                    {
+                        let mut in_flight = triggers_in_flight.lock().unwrap_or_else(|e| e.into_inner());
+                        in_flight.insert(trigger_name.clone());
+                    }
+
+                    let prompt = trigger_config.prompt.template.clone();
                     tracing::info!(
                         trigger = %trigger_name,
                         "daemon: firing scheduled trigger"
@@ -1291,15 +1518,14 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
                     let cwd = agent_cwd.clone();
                     let secrets = agent_secrets.clone();
                     let semaphore = router.semaphore().clone();
+                    let in_flight = triggers_in_flight.clone();
+                    let trigger_name_for_cleanup = trigger_name.clone();
 
                     task_spawn::spawn_best_effort_result(
                         "daemon-turn-trigger",
                         async move {
                             let _permit = semaphore.acquire().await
                                 .map_err(|_| anyhow::anyhow!("session semaphore closed"))?;
-
-                            let mut sess = session.lock().await;
-                            sess.conversation.push_user(prompt);
 
                             let loop_config = r#loop::LoopConfig {
                                 max_turns: shared_settings
@@ -1322,24 +1548,19 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
                                 enforce_first_turn_execution_bias: false,
                             };
 
-                            let turn_cancel = CancellationToken::new();
-                            let s = &mut *sess;
-                            if let Err(e) = r#loop::run(
-                                bridge.as_ref(),
-                                &mut s.bus,
-                                &mut s.context_manager,
-                                &mut s.conversation,
-                                &events_tx,
-                                turn_cancel,
-                                &loop_config,
-                            )
-                            .await
-                            {
+                            if let Err(e) = run_daemon_turn(
+                                &session, &bridge, &events_tx, loop_config,
+                                |state| { state.conversation.push_user(prompt); },
+                            ).await {
                                 tracing::error!(
                                     trigger = %trigger_name,
                                     error = %e,
                                     "daemon: scheduled trigger loop error"
                                 );
+                            }
+                            // Clear in-flight flag so the trigger can fire again.
+                            if let Ok(mut set) = in_flight.lock() {
+                                set.remove(&trigger_name_for_cleanup);
                             }
                             Ok(())
                         },
@@ -1377,7 +1598,7 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
                 let cwd = agent_cwd.clone();
                 let secrets = agent_secrets.clone();
                 let semaphore = router.semaphore().clone();
-                let daemon_workflow = daemon_workflow.clone();
+                let _daemon_workflow = daemon_workflow.clone();
 
                 task_spawn::spawn_best_effort_result(
                     "daemon-turn-auto-dispatch",
@@ -1385,10 +1606,7 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
                         let _permit = semaphore.acquire().await
                             .map_err(|_| anyhow::anyhow!("session semaphore closed"))?;
 
-                        let mut sess = session.lock().await;
-                        sess.conversation.push_user(prompt);
-
-                        let mut loop_config = r#loop::LoopConfig {
+                        let loop_config = r#loop::LoopConfig {
                             max_turns: shared_settings
                                 .lock()
                                 .map(|s| s.max_turns)
@@ -1409,33 +1627,10 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
                             enforce_first_turn_execution_bias: true,
                         };
 
-                        // Apply implementing phase config from workflow template
-                        if let Some(ref wf) = daemon_workflow {
-                            let implementing_phase = omegon_traits::LifecyclePhase::Implementing {
-                                change_id: Some(node_id.clone()),
-                            };
-                            if let Some(pc) = wf.phase_config(&implementing_phase) {
-                                workflow::apply_phase_config(
-                                    &mut loop_config,
-                                    pc,
-                                    &shared_settings,
-                                );
-                            }
-                        }
-
-                        let turn_cancel = CancellationToken::new();
-                        let s = &mut *sess;
-                        if let Err(e) = r#loop::run(
-                            bridge.as_ref(),
-                            &mut s.bus,
-                            &mut s.context_manager,
-                            &mut s.conversation,
-                            &events_tx,
-                            turn_cancel,
-                            &loop_config,
-                        )
-                        .await
-                        {
+                        if let Err(e) = run_daemon_turn(
+                            &session, &bridge, &events_tx, loop_config,
+                            |state| { state.conversation.push_user(prompt); },
+                        ).await {
                             tracing::error!(
                                 node_id = %node_id,
                                 error = %e,
@@ -1449,13 +1644,21 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
         }
     }
 
-    // ─── Cleanup ────────────────────────────────────────────────────────
-    // Save the default session.
+    // ─── Cleanup — graceful drain + save ───────────────────────────────
+    // Give in-flight turns a grace period to complete before saving state.
+    tracing::info!("daemon: draining in-flight turns (5s grace period)");
+    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+    // Save the default session (if not currently in a turn).
     {
-        let sess = default_session.lock().await;
-        if let Err(e) = session::save_session(&sess.conversation, &agent_cwd, Some(&agent_session_id))
-        {
-            tracing::debug!("Daemon session save failed (non-fatal): {e}");
+        let guard = default_session.lock().await;
+        if let Some(ref sess) = *guard {
+            if let Err(e) = session::save_session(&sess.conversation, &agent_cwd, Some(&agent_session_id))
+            {
+                tracing::debug!("Daemon session save failed (non-fatal): {e}");
+            }
+        } else {
+            tracing::warn!("session still in-flight at shutdown — state will be saved by completing turn");
         }
     }
     bridge.shutdown().await;
@@ -5193,6 +5396,7 @@ mod tests {
             Commands::Serve {
                 control_port,
                 strict_port,
+                agent: _,
             } => {
                 assert_eq!(control_port, 7842);
                 assert!(strict_port);

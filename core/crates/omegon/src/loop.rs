@@ -1794,7 +1794,9 @@ pub(crate) async fn compact_via_llm(
             truncated = MAX_COMPACTION_CHARS,
             "compaction payload truncated to fit provider limits"
         );
-        &payload[..MAX_COMPACTION_CHARS]
+        // Find a valid UTF-8 char boundary at or before the limit.
+        let end = payload.floor_char_boundary(MAX_COMPACTION_CHARS);
+        &payload[..end]
     } else {
         payload
     };
@@ -2014,7 +2016,7 @@ async fn stream_with_retry(
         );
         let _ = events.send(AgentEvent::SystemNotification { message: msg });
         tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
-        delay = (delay * 2).min(15_000); // exponential backoff, cap at 15s
+        delay = delay.saturating_mul(2).min(15_000); // exponential backoff, cap at 15s
     }
 }
 
@@ -3296,7 +3298,7 @@ mod tests {
         for attempt in [0_u32, 1, 2, 10, 100] {
             let mut delay = base_ms;
             for _ in 0..attempt {
-                delay = (delay * 2).min(cap_ms);
+                delay = delay.saturating_mul(2).min(cap_ms);
             }
             assert!(delay <= cap_ms, "attempt {attempt} exceeded cap: {delay}");
         }

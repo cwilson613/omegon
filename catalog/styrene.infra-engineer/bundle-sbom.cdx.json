@@ -1,0 +1,57 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.4",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-04-15T17:16:22.466505+00:00",
+    "tools": [
+      {
+        "name": "omegon-bundle-sign",
+        "version": "1.0.0"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "name": "styrene.infra-engineer",
+      "version": "1.0.0"
+    }
+  },
+  "components": [
+    {
+      "type": "application",
+      "name": "styrene.infra-engineer",
+      "version": "1.0.0",
+      "description": "Kubernetes cluster management, deployment automation, Helm chart authoring, incident response, and infrastructure observability.",
+      "properties": [
+        {
+          "name": "omegon:domain",
+          "value": "infra"
+        },
+        {
+          "name": "omegon:persona-sha256",
+          "value": "98e055b90d538ae62d0f2008db70108dbc654ed12fc83e524fd8db8cbb4be7c3"
+        },
+        {
+          "name": "omegon:mind-fact-count",
+          "value": "8"
+        },
+        {
+          "name": "omegon:trigger-count",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "vox",
+      "version": ">=0.3.0",
+      "description": "Extension dependency: vox"
+    },
+    {
+      "type": "library",
+      "name": "scribe",
+      "version": ">=0.1.0",
+      "description": "Extension dependency: scribe"
+    }
+  ]
+}

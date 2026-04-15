@@ -1002,35 +1002,30 @@ fn collect_extension_secret_requirements() -> Vec<String> {
 }
 
 fn hydrate_provider_auth_env_from_auth_json(
-    settings: Option<&crate::settings::SharedSettings>,
+    _settings: Option<&crate::settings::SharedSettings>,
     session_secret_env: &mut Vec<(String, String)>,
 ) {
-    let provider = settings.and_then(|s| {
-        s.lock()
-            .ok()
-            .map(|g| crate::providers::infer_provider_id(&g.model))
-    });
-    let Some(provider) = provider else {
-        return;
-    };
-    let env_vars = crate::auth::provider_env_vars(&provider);
-    let Some(primary_env) = env_vars.first().copied() else {
-        return;
-    };
-    if session_secret_env
-        .iter()
-        .any(|(name, _)| name == primary_env)
-    {
-        return;
-    }
-    let auth_key = crate::auth::auth_json_key(&provider);
-    if let Some(creds) = crate::auth::read_credentials(auth_key) {
-        session_secret_env.push((primary_env.to_string(), creds.access));
-        tracing::info!(
-            provider,
-            env = primary_env,
-            "hydrated provider auth env from auth.json"
-        );
+    // Hydrate credentials for ALL providers that have stored auth, not just the
+    // parent session's model. Children (cleave, delegate) may use any provider
+    // and need the corresponding API keys in their inherited environment.
+    for provider in crate::auth::PROVIDERS {
+        let Some(primary_env) = provider.env_vars.first().copied() else {
+            continue;
+        };
+        if session_secret_env
+            .iter()
+            .any(|(name, _)| name == primary_env)
+        {
+            continue;
+        }
+        if let Some(creds) = crate::auth::read_credentials(provider.auth_key) {
+            session_secret_env.push((primary_env.to_string(), creds.access));
+            tracing::info!(
+                provider = provider.id,
+                env = primary_env,
+                "hydrated provider auth env from auth.json"
+            );
+        }
     }
 }
 

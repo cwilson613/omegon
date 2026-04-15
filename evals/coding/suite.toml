@@ -1,0 +1,13 @@
+[suite]
+name = "coding"
+description = "Baseline coding agent evaluation — fix, read, edit, reason"
+domain = "coding"
+
+[[scenarios]]
+path = "scenarios/fix-typo.toml"
+
+[[scenarios]]
+path = "scenarios/read-and-summarize.toml"
+
+[[scenarios]]
+path = "scenarios/write-function.toml"
