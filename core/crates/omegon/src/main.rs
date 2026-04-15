@@ -61,6 +61,7 @@ mod providers;
 pub mod routing;
 mod session;
 mod agent_manifest;
+mod bundle_verify;
 mod catalog;
 mod session_router;
 pub mod settings;
@@ -847,6 +848,31 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str,
                     domain = %resolved.manifest.agent.domain,
                     "loaded agent manifest"
                 );
+
+                // ── Verify bundle safety ─────────────────────────────────
+                let verification = bundle_verify::verify_bundle(&resolved);
+                for w in verification.warnings() {
+                    tracing::warn!(
+                        category = w.category,
+                        location = %w.location,
+                        "bundle warning: {}", w.message
+                    );
+                }
+                if !verification.passed() {
+                    for e in verification.errors() {
+                        tracing::error!(
+                            category = e.category,
+                            location = %e.location,
+                            "bundle verification failed: {}", e.message
+                        );
+                    }
+                    anyhow::bail!(
+                        "agent bundle '{}' failed verification with {} error(s). Fix or remove the bundle.",
+                        resolved.manifest.agent.id,
+                        verification.errors().len()
+                    );
+                }
+                tracing::info!("agent bundle verified");
 
                 // Apply settings
                 if let Some(ref s) = resolved.manifest.settings {

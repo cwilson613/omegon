@@ -1,0 +1,81 @@
+name: Verify agent bundle
+
+on:
+  pull_request:
+    paths:
+      - 'catalog/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  verify:
+    name: Screen bundle content
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect changed bundles
+        id: changed
+        run: |
+          BUNDLES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- catalog/ \
+            | cut -d/ -f1-2 | sort -u | tr '\n' ' ')
+          echo "bundles=${BUNDLES}" >> "$GITHUB_OUTPUT"
+          echo "Changed bundles: ${BUNDLES}"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Screen all changed bundles
+        run: |
+          set -euo pipefail
+          FAILED=0
+          for BUNDLE in ${{ steps.changed.outputs.bundles }}; do
+            echo "::group::Verifying ${BUNDLE}"
+            if ! python3 scripts/bundle_sign.py verify "${BUNDLE}"; then
+              FAILED=1
+            fi
+            echo "::endgroup::"
+          done
+          if [ "$FAILED" -eq 1 ]; then
+            echo "::error::One or more bundles failed verification"
+            exit 1
+          fi
+
+      - name: Generate SBOMs for verified bundles
+        if: success()
+        run: |
+          for BUNDLE in ${{ steps.changed.outputs.bundles }}; do
+            echo "::group::SBOM for ${BUNDLE}"
+            python3 scripts/bundle_sign.py sbom "${BUNDLE}"
+            echo "::endgroup::"
+          done
+
+      - name: Upload verification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-verification
+          path: |
+            catalog/*/verified.json
+            catalog/*/bundle-sbom.cdx.json
+
+      - name: Post verification summary
+        if: always()
+        run: |
+          {
+            echo "## Agent Bundle Verification"
+            echo
+            for BUNDLE in ${{ steps.changed.outputs.bundles }}; do
+              STAMP="${BUNDLE}/verified.json"
+              if [ -f "$STAMP" ]; then
+                DIGEST=$(python3 -c "import json; print(json.load(open('$STAMP'))['digest'])")
+                echo "- **${BUNDLE}**: passed (digest: \`${DIGEST:0:20}...\`)"
+              else
+                echo "- **${BUNDLE}**: FAILED"
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
