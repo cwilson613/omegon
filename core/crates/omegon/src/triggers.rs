@@ -599,8 +599,19 @@ caller_key = "trigger:daily-review"
         assert_eq!(triggers.len(), 0);
     }
 
+    fn has_pkl() -> bool {
+        std::process::Command::new("pkl")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+    }
+
     #[test]
     fn load_pkl_trigger_config() {
+        if !has_pkl() {
+            eprintln!("skipping: pkl binary not found");
+            return;
+        }
         let dir = tempfile::tempdir().unwrap();
         let pkl_path = dir.path().join("review.pkl");
         std::fs::write(
@@ -626,6 +637,10 @@ prompt {
 
     #[test]
     fn load_pkl_trigger_with_filter() {
+        if !has_pkl() {
+            eprintln!("skipping: pkl binary not found");
+            return;
+        }
         let dir = tempfile::tempdir().unwrap();
         let pkl_path = dir.path().join("github.pkl");
         std::fs::write(

@@ -300,8 +300,19 @@ mind_facts = "mind/facts.jsonl"
         assert!(resolved.mind_facts_content.is_some());
     }
 
+    fn has_pkl() -> bool {
+        std::process::Command::new("pkl")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+    }
+
     #[test]
     fn load_pkl_manifest() {
+        if !has_pkl() {
+            eprintln!("skipping: pkl binary not found");
+            return;
+        }
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("agent.pkl"),
