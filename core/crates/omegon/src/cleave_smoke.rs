@@ -270,6 +270,9 @@ async fn run_scenario(cli: &Cli, scenario: &SmokeScenario) -> anyhow::Result<()>
             endpoint = "http://localhost:9999/beta"
         "#,
         )?;
+        // Commit so worktrees see these files.
+        run_git(&repo, ["add", "-A"])?;
+        run_git(&repo, ["commit", "-qm", "add runtime profile fixtures"])?;
     }
 
     // temp_dir is PID-namespaced; best-effort cleanup on success
