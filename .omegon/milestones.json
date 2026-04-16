@@ -887,20 +887,24 @@
     ]
   },
   "0.15.26": {
-    "status": "released",
+    "status": "rc",
     "channel": "stable",
     "nodes": [],
     "frozen": true,
     "opened": "2026-04-15T23:02:00Z",
     "released": "2026-04-16T19:52:44Z",
-    "rc_count": 1,
+    "rc_count": 2,
     "notes": [
       "feat(control): auspex fleet control surface + integration gap fixes",
       "fix(ci): skip pkl tests when pkl binary is not available",
+      "fix(cleave): child runtime profile model/thinking/context enforcement",
+      "fix(cleave): commit runtime profile fixtures so worktrees see them",
       "fix(release): platform-agnostic sed for macOS and Linux",
-      "fix: reduce agent loop churn — tighten heuristics, eliminate redundant work"
+      "fix(release): use perl for platform-agnostic in-place edit",
+      "fix: reduce agent loop churn — tighten heuristics, eliminate redundant work",
+      "fix: safe u32 conversion for max_turns, rename persona handlers"
     ],
-    "rc_version": "0.15.26-rc.2",
-    "last_rc": "2026-04-16T19:49:21Z"
+    "rc_version": "0.15.26-rc.3",
+    "last_rc": "2026-04-16T21:05:33Z"
   }
 }
