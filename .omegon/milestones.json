@@ -895,5 +895,12 @@
     "released": null,
     "rc_count": 0,
     "notes": []
+  },
+  "nightly": {
+    "status": "nightly",
+    "channel": "nightly",
+    "version": "0.15.26-nightly.20260416",
+    "last_build": "2026-04-16T08:57:58Z",
+    "build_count": 1
   }
 }
